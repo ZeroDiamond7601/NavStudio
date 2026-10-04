@@ -1,6 +1,6 @@
 # NavMesh Core - AMX Mod X Navigation System
 
-[![CI & Build](https://github.com/USERNAME/REPO/actions/workflows/build.yml/badge.svg)](https://github.com/USERNAME/REPO/actions)
+[![CI & Build](https://github.com/ZeroDiamond7601/amxmodx-navmesh/actions/workflows/build.yml/badge.svg)](https://github.com/ZeroDiamond7601/amxmodx-navmesh/actions)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20(x86)-brightgreen.svg)]()
 [![Compatibility](https://img.shields.io/badge/AMXX-1.8.x%20--%201.10.x%20%7C%20ReHLDS-orange.svg)]()
@@ -11,21 +11,21 @@
 
 ## Features
 
-### 🗺️ GoldSrc BSP Engine (`.bsp`)
+### GoldSrc BSP Engine (`.bsp`)
 * **Direct Lump Parsing:** Reads and caches GoldSrc BSP lumps (Planes, Nodes, Clipnodes, Leaves, Models, Visibility, Entities) directly in memory with bounds safety.
 * **Exact Ray & Hull Tracing:** Supports exact Hull 0 (Point / Bullets) and Hulls 1–3 (Player standing, crouch, large hull) raycasting against world geometry and brush models (`*1`, `*2`, doors, breakables).
 * **Ground Height Snapping:** Native downward ground trace for accurately snapping origins to floor geometry.
 * **Visibility Engine:** Uncompressed PVS and PAS bitmask checks to determine if two BSP leaves can see or hear each other.
 * **Entity Extraction:** Direct parsing of the raw entity lump without requiring engine entity dictionary lookups.
 
-### 🧭 Navigation Mesh System (`.nav`)
+### Navigation Mesh System (`.nav`)
 * **Format Compatibility:** Fully parses Counter-Strike 1.6 / Condition Zero `.nav` files (Magic `0xFEEDFACE`, Versions 4 and 5).
 * **Bilinear Quad Elevation:** Calculates exact ground elevation at any `(x, y)` coordinate inside an area quad using 4-corner bilinear interpolation.
 * **Spatial Grid:** Uniform 2D hash grid (cell size 300 units) providing $O(1)$ spatial queries for nearest area lookups.
 * **Tactical Data:** Access to hiding spots (cover, sniper spots), approach areas, encounter paths, and named map places (e.g., `"BombsiteA"`, `"TSpawn"`).
 * **Ladder Support:** Automatically extracts and links `func_ladder` entities from the BSP into the navigation graph.
 
-### 🚀 A* Pathfinding Engine
+### A* Pathfinding Engine
 * **Portal Waypoints:** Uses portal boundaries between adjacent areas so calculated paths route cleanly through doorways instead of blindly aiming for area centers.
 * **Custom Traversal Costs:** Supports options to avoid crouching, avoid jumping, or prefer paths with cover.
 * **Line-of-Sight Smoothing:** Optional string-pulling optimization that checks line-of-sight against BSP geometry to remove redundant waypoints.
