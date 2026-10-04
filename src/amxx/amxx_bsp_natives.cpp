@@ -966,69 +966,475 @@ static cell AMX_NATIVE_CALL bsp_get_entities(AMX *amx, cell *params) {
     return static_cast<cell>(count);
 }
 
+// native bsp_get_point_light(const Float:start[3], const Float:end[3], &Float:brightness, Float:color[3] = Float:{0.0,0.0,0.0});
+static cell AMX_NATIVE_CALL bsp_get_point_light(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 3) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_get_point_light: Expected at least 3 parameters, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+
+    cell *c_s = MF_GetAmxAddr(amx, params[1]);
+    cell *c_e = MF_GetAmxAddr(amx, params[2]);
+    cell *c_bright = MF_GetAmxAddr(amx, params[3]);
+    if (!c_s || !c_e || !c_bright) return 0;
+
+    Vector3 start(amx_ctof(c_s[0]), amx_ctof(c_s[1]), amx_ctof(c_s[2]));
+    Vector3 end(amx_ctof(c_e[0]), amx_ctof(c_e[1]), amx_ctof(c_e[2]));
+
+    float brightness = 0.0f;
+    Vector3 color(0.0f, 0.0f, 0.0f);
+    bool ok = g_bsp.GetPointLight(start, end, brightness, &color);
+
+    *c_bright = amx_ftoc(brightness);
+
+    if (numParams >= 4 && params[4] != 0) {
+        cell *c_col = MF_GetAmxAddr(amx, params[4]);
+        if (c_col) {
+            c_col[0] = amx_ftoc(color.x);
+            c_col[1] = amx_ftoc(color.y);
+            c_col[2] = amx_ftoc(color.z);
+        }
+    }
+
+    return ok ? 1 : 0;
+}
+
+// native bsp_get_face_light(face_index, const Float:point[3], &Float:brightness, Float:color[3] = Float:{0.0,0.0,0.0});
+static cell AMX_NATIVE_CALL bsp_get_face_light(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 3) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_get_face_light: Expected at least 3 parameters, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+
+    int faceIdx = params[1];
+    cell *c_pt = MF_GetAmxAddr(amx, params[2]);
+    cell *c_bright = MF_GetAmxAddr(amx, params[3]);
+    if (!c_pt || !c_bright) return 0;
+
+    Vector3 point(amx_ctof(c_pt[0]), amx_ctof(c_pt[1]), amx_ctof(c_pt[2]));
+
+    float brightness = 0.0f;
+    Vector3 color(0.0f, 0.0f, 0.0f);
+    bool ok = g_bsp.GetFaceLight(faceIdx, point, brightness, &color);
+
+    *c_bright = amx_ftoc(brightness);
+
+    if (numParams >= 4 && params[4] != 0) {
+        cell *c_col = MF_GetAmxAddr(amx, params[4]);
+        if (c_col) {
+            c_col[0] = amx_ftoc(color.x);
+            c_col[1] = amx_ftoc(color.y);
+            c_col[2] = amx_ftoc(color.z);
+        }
+    }
+
+    return ok ? 1 : 0;
+}
+
+// native BSPMaterialType:bsp_get_surface_material(const texture_name[]);
+static cell AMX_NATIVE_CALL bsp_get_surface_material(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 1) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_get_surface_material: Expected 1 parameter, got %d", MODULE_LOGTAG, numParams);
+        return static_cast<cell>(BSPMaterialType::MAT_CONCRETE);
+    }
+
+    int len = 0;
+    char *texName = MF_GetAmxString(amx, params[1], 0, &len);
+    if (!texName || len <= 0) return static_cast<cell>(BSPMaterialType::MAT_CONCRETE);
+
+    return static_cast<cell>(BSPFile::ClassifyMaterial(texName));
+}
+
+// native BSPMaterialType:bsp_trace_material(const Float:start[3], const Float:end[3], texture[] = "", maxlen = 0);
+static cell AMX_NATIVE_CALL bsp_trace_material(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 2) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_trace_material: Expected at least 2 parameters, got %d", MODULE_LOGTAG, numParams);
+        return static_cast<cell>(BSPMaterialType::MAT_CONCRETE);
+    }
+
+    if (!g_bsp.IsLoaded()) return static_cast<cell>(BSPMaterialType::MAT_CONCRETE);
+
+    cell *c_s = MF_GetAmxAddr(amx, params[1]);
+    cell *c_e = MF_GetAmxAddr(amx, params[2]);
+    if (!c_s || !c_e) return static_cast<cell>(BSPMaterialType::MAT_CONCRETE);
+
+    Vector3 start(amx_ctof(c_s[0]), amx_ctof(c_s[1]), amx_ctof(c_s[2]));
+    Vector3 end(amx_ctof(c_e[0]), amx_ctof(c_e[1]), amx_ctof(c_e[2]));
+
+    char texBuffer[64] = {0};
+    BSPMaterialType mat = g_bsp.TraceMaterial(start, end, texBuffer, sizeof(texBuffer));
+
+    if (numParams >= 4 && params[3] != 0 && params[4] > 0) {
+        MF_SetAmxString(amx, params[3], texBuffer, params[4]);
+    }
+
+    return static_cast<cell>(mat);
+}
+
+// native bsp_get_texture_flags(texture_index, &flags = 0, &is_transparent = 0, &is_fluid = 0, &is_sky = 0, &is_animated = 0);
+static cell AMX_NATIVE_CALL bsp_get_texture_flags(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 1) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_get_texture_flags: Expected at least 1 parameter, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+
+    int texIdx = params[1];
+    bool isTrans = false, isFluid = false, isSky = false, isAnim = false;
+    int flags = g_bsp.GetTextureFlags(texIdx, &isTrans, &isFluid, &isSky, &isAnim);
+
+    if (numParams >= 2 && params[2] != 0) {
+        cell *c_f = MF_GetAmxAddr(amx, params[2]);
+        if (c_f) *c_f = static_cast<cell>(flags);
+    }
+    if (numParams >= 3 && params[3] != 0) {
+        cell *c_t = MF_GetAmxAddr(amx, params[3]);
+        if (c_t) *c_t = isTrans ? 1 : 0;
+    }
+    if (numParams >= 4 && params[4] != 0) {
+        cell *c_fl = MF_GetAmxAddr(amx, params[4]);
+        if (c_fl) *c_fl = isFluid ? 1 : 0;
+    }
+    if (numParams >= 5 && params[5] != 0) {
+        cell *c_sk = MF_GetAmxAddr(amx, params[5]);
+        if (c_sk) *c_sk = isSky ? 1 : 0;
+    }
+    if (numParams >= 6 && params[6] != 0) {
+        cell *c_an = MF_GetAmxAddr(amx, params[6]);
+        if (c_an) *c_an = isAnim ? 1 : 0;
+    }
+
+    return static_cast<cell>(flags);
+}
+
+// native bsp_get_face_vertex_count(face_index);
+static cell AMX_NATIVE_CALL bsp_get_face_vertex_count(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 1) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_get_face_vertex_count: Expected 1 parameter, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+    return static_cast<cell>(g_bsp.GetFaceVertexCount(params[1]));
+}
+
+// native bsp_get_face_polygon(face_index, Float:output[][3], max_vertices);
+static cell AMX_NATIVE_CALL bsp_get_face_polygon(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 3) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_get_face_polygon: Expected 3 parameters, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+
+    int faceIdx = params[1];
+    cell *output = MF_GetAmxAddr(amx, params[2]);
+    int maxVerts = params[3];
+    if (!output || maxVerts <= 0) return 0;
+
+    std::vector<Vector3> verts(maxVerts);
+    int written = g_bsp.GetFacePolygon(faceIdx, verts.data(), maxVerts);
+
+    for (int i = 0; i < written; ++i) {
+        output[i * 3 + 0] = amx_ftoc(verts[i].x);
+        output[i * 3 + 1] = amx_ftoc(verts[i].y);
+        output[i * 3 + 2] = amx_ftoc(verts[i].z);
+    }
+
+    return static_cast<cell>(written);
+}
+
+// native bsp_get_skyname(output[], maxlen);
+static cell AMX_NATIVE_CALL bsp_get_skyname(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 2) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_get_skyname: Expected 2 parameters, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+
+    int maxlen = params[2];
+    if (maxlen <= 0) return 0;
+
+    std::string skyname;
+    if (!g_bsp.GetSkyname(skyname) || skyname.empty()) {
+        MF_SetAmxString(amx, params[1], "", maxlen);
+        return 0;
+    }
+
+    MF_SetAmxString(amx, params[1], skyname.c_str(), maxlen);
+    return 1;
+}
+
+// native bsp_get_map_title(output[], maxlen);
+static cell AMX_NATIVE_CALL bsp_get_map_title(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 2) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_get_map_title: Expected 2 parameters, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+
+    int maxlen = params[2];
+    if (maxlen <= 0) return 0;
+
+    std::string title;
+    if (!g_bsp.GetMapTitle(title) || title.empty()) {
+        MF_SetAmxString(amx, params[1], "", maxlen);
+        return 0;
+    }
+
+    MF_SetAmxString(amx, params[1], title.c_str(), maxlen);
+    return 1;
+}
+
+// native bsp_get_wad_list(output[], maxlen);
+static cell AMX_NATIVE_CALL bsp_get_wad_list(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 2) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_get_wad_list: Expected 2 parameters, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+
+    int maxlen = params[2];
+    if (maxlen <= 0) return 0;
+
+    std::string wads;
+    if (!g_bsp.GetWadList(wads) || wads.empty()) {
+        MF_SetAmxString(amx, params[1], "", maxlen);
+        return 0;
+    }
+
+    return static_cast<cell>(MF_SetAmxString(amx, params[1], wads.c_str(), maxlen));
+}
+
+// native bsp_get_leaf_face_count(leaf_index);
+static cell AMX_NATIVE_CALL bsp_get_leaf_face_count(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 1) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_get_leaf_face_count: Expected 1 parameter, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+    return static_cast<cell>(g_bsp.GetLeafFaceCount(params[1]));
+}
+
+// native bsp_get_leaf_faces(leaf_index, faces[], max_faces);
+static cell AMX_NATIVE_CALL bsp_get_leaf_faces(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 3) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_get_leaf_faces: Expected 3 parameters, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+
+    int leafIdx = params[1];
+    cell *faces = MF_GetAmxAddr(amx, params[2]);
+    int maxFaces = params[3];
+    if (!faces || maxFaces <= 0) return 0;
+
+    std::vector<int> outFaces(maxFaces);
+    int written = g_bsp.GetLeafFaces(leafIdx, outFaces.data(), maxFaces);
+    for (int i = 0; i < written; ++i) {
+        faces[i] = static_cast<cell>(outFaces[i]);
+    }
+
+    return static_cast<cell>(written);
+}
+
+// native bsp_find_entities_by_target(const target[], output[], max_found);
+static cell AMX_NATIVE_CALL bsp_find_entities_by_target(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 3) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_find_entities_by_target: Expected 3 parameters, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+
+    int len = 0;
+    char *target = MF_GetAmxString(amx, params[1], 0, &len);
+    cell *output = MF_GetAmxAddr(amx, params[2]);
+    int maxFound = params[3];
+    if (!target || len <= 0 || !output || maxFound <= 0) return 0;
+
+    auto matches = g_bsp.FindEntitiesByTarget(target);
+    int count = std::min(maxFound, static_cast<int>(matches.size()));
+    for (int i = 0; i < count; ++i) {
+        output[i] = static_cast<cell>(matches[i]);
+    }
+
+    return static_cast<cell>(count);
+}
+
+// native bsp_find_entities_by_targetname(const targetname[], output[], max_found);
+static cell AMX_NATIVE_CALL bsp_find_entities_by_targetname(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 3) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_find_entities_by_targetname: Expected 3 parameters, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+
+    int len = 0;
+    char *tname = MF_GetAmxString(amx, params[1], 0, &len);
+    cell *output = MF_GetAmxAddr(amx, params[2]);
+    int maxFound = params[3];
+    if (!tname || len <= 0 || !output || maxFound <= 0) return 0;
+
+    auto matches = g_bsp.FindEntitiesByTargetname(tname);
+    int count = std::min(maxFound, static_cast<int>(matches.size()));
+    for (int i = 0; i < count; ++i) {
+        output[i] = static_cast<cell>(matches[i]);
+    }
+
+    return static_cast<cell>(count);
+}
+
+// native bsp_get_entity_target(entity_index, output[], maxlen);
+static cell AMX_NATIVE_CALL bsp_get_entity_target(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 3) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_get_entity_target: Expected 3 parameters, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+
+    int entIdx = params[1];
+    int maxlen = params[3];
+    if (maxlen <= 0) return 0;
+
+    const BSPEntity* ent = g_bsp.GetEntity(entIdx);
+    if (!ent) return 0;
+
+    std::string val = ent->GetString("target");
+    return static_cast<cell>(MF_SetAmxString(amx, params[2], val.c_str(), maxlen));
+}
+
+// native bsp_get_entity_targetname(entity_index, output[], maxlen);
+static cell AMX_NATIVE_CALL bsp_get_entity_targetname(AMX *amx, cell *params) {
+    const int numParams = static_cast<int>(params[0] / sizeof(cell));
+    if (numParams < 3) {
+        MF_LogError(amx, AMX_ERR_PARAMS, "[%s] bsp_get_entity_targetname: Expected 3 parameters, got %d", MODULE_LOGTAG, numParams);
+        return 0;
+    }
+
+    if (!g_bsp.IsLoaded()) return 0;
+
+    int entIdx = params[1];
+    int maxlen = params[3];
+    if (maxlen <= 0) return 0;
+
+    const BSPEntity* ent = g_bsp.GetEntity(entIdx);
+    if (!ent) return 0;
+
+    std::string val = ent->GetString("targetname");
+    return static_cast<cell>(MF_SetAmxString(amx, params[2], val.c_str(), maxlen));
+}
+
 static AMX_NATIVE_INFO g_bspNatives[] = {
     // Map loading & status
-    {"bsp_load_map",              bsp_load_map},
-    {"bsp_is_loaded",             bsp_is_loaded},
+    {"bsp_load_map",                  bsp_load_map},
+    {"bsp_is_loaded",                 bsp_is_loaded},
 
     // Visibility & Audibility (PVS & PAS)
-    {"bsp_get_leaf",              bsp_get_leaf},
-    {"bsp_check_vis",             bsp_check_vis},
-    {"bsp_check_pas",             bsp_check_pas},
-    {"bsp_is_point_visible",      bsp_is_point_visible},
-    {"bsp_is_point_audible",      bsp_is_point_audible},
-    {"bsp_get_pvs_size",          bsp_get_pvs_size},
-    {"bsp_get_leaf_pvs",          bsp_get_leaf_pvs},
-    {"bsp_get_leaf_pas",          bsp_get_leaf_pas},
-    {"bsp_get_visible_leaf_count",bsp_get_visible_leaf_count},
+    {"bsp_get_leaf",                  bsp_get_leaf},
+    {"bsp_check_vis",                 bsp_check_vis},
+    {"bsp_check_pas",                 bsp_check_pas},
+    {"bsp_is_point_visible",          bsp_is_point_visible},
+    {"bsp_is_point_audible",          bsp_is_point_audible},
+    {"bsp_get_pvs_size",              bsp_get_pvs_size},
+    {"bsp_get_leaf_pvs",              bsp_get_leaf_pvs},
+    {"bsp_get_leaf_pas",              bsp_get_leaf_pas},
+    {"bsp_get_visible_leaf_count",    bsp_get_visible_leaf_count},
 
     // Collision & Tracing
-    {"bsp_trace_line",            bsp_trace_line},
-    {"bsp_trace_line_ex",         bsp_trace_line_ex},
-    {"bsp_trace_hull",            bsp_trace_hull},
-    {"bsp_trace_hull_ex",         bsp_trace_hull_ex},
-    {"bsp_trace_texture",         bsp_trace_texture},
-    {"bsp_trace_wall",            bsp_trace_wall},
-    {"bsp_trace_model",           bsp_trace_model},
-    {"bsp_get_ground",            bsp_get_ground},
-    {"bsp_get_contents",          bsp_get_contents},
+    {"bsp_trace_line",                bsp_trace_line},
+    {"bsp_trace_line_ex",             bsp_trace_line_ex},
+    {"bsp_trace_hull",                bsp_trace_hull},
+    {"bsp_trace_hull_ex",             bsp_trace_hull_ex},
+    {"bsp_trace_texture",             bsp_trace_texture},
+    {"bsp_trace_wall",                bsp_trace_wall},
+    {"bsp_trace_model",               bsp_trace_model},
+    {"bsp_get_ground",                bsp_get_ground},
+    {"bsp_get_contents",              bsp_get_contents},
 
     // World & Leaves & Geometry
-    {"bsp_get_world_bounds",      bsp_get_world_bounds},
-    {"bsp_get_leaf_bounds",       bsp_get_leaf_bounds},
-    {"bsp_get_leaf_contents",     bsp_get_leaf_contents},
-    {"bsp_get_leaf_ambient",      bsp_get_leaf_ambient},
-    {"bsp_get_leaf_count",        bsp_get_leaf_count},
-    {"bsp_get_node_count",        bsp_get_node_count},
-    {"bsp_get_plane_count",       bsp_get_plane_count},
-    {"bsp_get_face_count",        bsp_get_face_count},
-    {"bsp_get_plane",             bsp_get_plane},
+    {"bsp_get_world_bounds",          bsp_get_world_bounds},
+    {"bsp_get_leaf_bounds",           bsp_get_leaf_bounds},
+    {"bsp_get_leaf_contents",         bsp_get_leaf_contents},
+    {"bsp_get_leaf_ambient",          bsp_get_leaf_ambient},
+    {"bsp_get_leaf_count",            bsp_get_leaf_count},
+    {"bsp_get_node_count",            bsp_get_node_count},
+    {"bsp_get_plane_count",           bsp_get_plane_count},
+    {"bsp_get_face_count",            bsp_get_face_count},
+    {"bsp_get_plane",                 bsp_get_plane},
+    {"bsp_get_leaf_face_count",       bsp_get_leaf_face_count},
+    {"bsp_get_leaf_faces",            bsp_get_leaf_faces},
+    {"bsp_get_face_vertex_count",     bsp_get_face_vertex_count},
+    {"bsp_get_face_polygon",          bsp_get_face_polygon},
 
-    // Textures & Surfaces
-    {"bsp_get_texture_count",     bsp_get_texture_count},
-    {"bsp_get_texture_name",      bsp_get_texture_name},
-    {"bsp_get_texture_size",      bsp_get_texture_size},
-    {"bsp_find_texture",          bsp_find_texture},
+    // Lighting & Illumination
+    {"bsp_get_point_light",           bsp_get_point_light},
+    {"bsp_get_face_light",            bsp_get_face_light},
 
-    // Entities
-    {"bsp_get_entity_count",      bsp_get_entity_count},
-    {"bsp_get_entity_origin",     bsp_get_entity_origin},
-    {"bsp_get_entity_key",        bsp_get_entity_key},
-    {"bsp_find_entity_by_key",    bsp_find_entity_by_key},
-    {"bsp_get_brush_model",       bsp_get_brush_model},
-    {"bsp_get_entities",          bsp_get_entities},
+    // Textures & Materials
+    {"bsp_get_texture_count",         bsp_get_texture_count},
+    {"bsp_get_texture_name",          bsp_get_texture_name},
+    {"bsp_get_texture_size",          bsp_get_texture_size},
+    {"bsp_find_texture",              bsp_find_texture},
+    {"bsp_get_surface_material",      bsp_get_surface_material},
+    {"bsp_trace_material",            bsp_trace_material},
+    {"bsp_get_texture_flags",         bsp_get_texture_flags},
+
+    // Entities & Relationships
+    {"bsp_get_entity_count",          bsp_get_entity_count},
+    {"bsp_get_entity_origin",         bsp_get_entity_origin},
+    {"bsp_get_entity_key",            bsp_get_entity_key},
+    {"bsp_find_entity_by_key",        bsp_find_entity_by_key},
+    {"bsp_get_brush_model",           bsp_get_brush_model},
+    {"bsp_get_entities",              bsp_get_entities},
+    {"bsp_find_entities_by_target",   bsp_find_entities_by_target},
+    {"bsp_find_entities_by_targetname", bsp_find_entities_by_targetname},
+    {"bsp_get_entity_target",         bsp_get_entity_target},
+    {"bsp_get_entity_targetname",     bsp_get_entity_targetname},
+
+    // Map Metadata
+    {"bsp_get_skyname",               bsp_get_skyname},
+    {"bsp_get_map_title",             bsp_get_map_title},
+    {"bsp_get_wad_list",              bsp_get_wad_list},
 
     // Submodels
-    {"bsp_get_model_count",       bsp_get_model_count},
-    {"bsp_get_model_bounds",      bsp_get_model_bounds},
-    {"bsp_get_model_origin",      bsp_get_model_origin},
+    {"bsp_get_model_count",           bsp_get_model_count},
+    {"bsp_get_model_bounds",          bsp_get_model_bounds},
+    {"bsp_get_model_origin",          bsp_get_model_origin},
 
     // Backward compatibility aliases
-    {"nav_get_entities",          bsp_get_entities},
-    {"nav_get_ground",            bsp_get_ground},
-    {"nav_trace_wall",            bsp_trace_wall},
-    {"nav_trace_model",           bsp_trace_model},
-    {"nav_get_contents",          bsp_get_contents},
+    {"nav_get_entities",              bsp_get_entities},
+    {"nav_get_ground",                bsp_get_ground},
+    {"nav_trace_wall",                bsp_trace_wall},
+    {"nav_trace_model",               bsp_trace_model},
+    {"nav_get_contents",              bsp_get_contents},
 
     {nullptr, nullptr}
 };

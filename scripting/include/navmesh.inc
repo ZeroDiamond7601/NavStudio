@@ -29,6 +29,35 @@
 #define CONTENTS_CLIP          -8
 
 /**
+ * BSP Material Classification Types
+ */
+enum BSPMaterialType
+{
+    MAT_CONCRETE = 0,
+    MAT_METAL,
+    MAT_DIRT,
+    MAT_VENT,
+    MAT_GRATE,
+    MAT_TILE,
+    MAT_SLOSH,
+    MAT_WOOD,
+    MAT_COMPUTER,
+    MAT_GLASS,
+    MAT_FLESH,
+    MAT_FOLIAGE
+};
+
+/**
+ * BSP Texture Surface Flags
+ */
+#define TEX_FLAG_NONE           0x00
+#define TEX_FLAG_TRANSPARENT    0x01
+#define TEX_FLAG_FLUID          0x02
+#define TEX_FLAG_SKY            0x04
+#define TEX_FLAG_ANIMATED       0x08
+#define TEX_FLAG_LIGHT          0x10
+
+/**
  * Navigation Area Attribute Flags
  */
 #define NAV_ATTR_NONE           0x00
@@ -474,6 +503,163 @@ native nav_get_ground(const Float:start[3], Float:out[3], Float:max_drop = 2000.
 native nav_trace_wall(const Float:start[3], const Float:end[3], hull_type) = bsp_trace_wall;
 native nav_trace_model(model_idx, const Float:start[3], const Float:end[3], hull_type) = bsp_trace_model;
 native nav_get_contents(const Float:origin[3]) = bsp_get_contents;
+
+/**
+ * Samples illumination (lightmap luxels) along a ray intersecting the world.
+ *
+ * @param start         Ray origin [x, y, z]
+ * @param end           Ray terminus [x, y, z]
+ * @param brightness    Output scalar brightness (0.0 to 255.0)
+ * @param color         Optional output RGB vector (0.0 to 255.0 per channel)
+ * @return              1 if hit a valid lightmapped surface, 0 otherwise
+ */
+native bsp_get_point_light(const Float:start[3], const Float:end[3], &Float:brightness, Float:color[3] = Float:{0.0, 0.0, 0.0});
+
+/**
+ * Samples lightmap illumination on a specific face at a 3D surface point.
+ *
+ * @param face_index    Face index (0 to bsp_get_face_count() - 1)
+ * @param point         3D coordinate on or near face surface [x, y, z]
+ * @param brightness    Output scalar brightness (0.0 to 255.0)
+ * @param color         Optional output RGB vector (0.0 to 255.0 per channel)
+ * @return              1 on success, 0 on failure
+ */
+native bsp_get_face_light(face_index, const Float:point[3], &Float:brightness, Float:color[3] = Float:{0.0, 0.0, 0.0});
+
+/**
+ * Classifies a texture name into an engine material type.
+ *
+ * @param texture_name  Texture name string (e.g. "c1a0_flr1", "{fence", "!water")
+ * @return              BSPMaterialType enum value
+ */
+native BSPMaterialType:bsp_get_surface_material(const texture_name[]);
+
+/**
+ * Traces a line against world geometry and returns the surface material type.
+ *
+ * @param start         Start vector [x, y, z]
+ * @param end           End vector [x, y, z]
+ * @param texture       Optional output string buffer to receive texture name
+ * @param maxlen        Maximum length of texture buffer
+ * @return              BSPMaterialType enum value
+ */
+native BSPMaterialType:bsp_trace_material(const Float:start[3], const Float:end[3], texture[] = "", maxlen = 0);
+
+/**
+ * Retrieves special texture properties and classification flags.
+ *
+ * @param texture_index  Texture index (0 to bsp_get_texture_count() - 1)
+ * @param flags          Optional output bitmask of TEX_FLAG_* flags
+ * @param is_transparent Optional output 1 if texture starts with '{' (grate/fence)
+ * @param is_fluid       Optional output 1 if texture starts with '!' (water/liquid)
+ * @param is_sky         Optional output 1 if texture starts with 'sky'
+ * @param is_animated    Optional output 1 if texture starts with '+' (animated frame)
+ * @return               Bitmask of TEX_FLAG_* flags
+ */
+native bsp_get_texture_flags(texture_index, &flags = 0, &is_transparent = 0, &is_fluid = 0, &is_sky = 0, &is_animated = 0);
+
+/**
+ * Gets the number of vertices composing a face polygon.
+ *
+ * @param face_index    Face index (0 to bsp_get_face_count() - 1)
+ * @return              Vertex count, or 0 on error
+ */
+native bsp_get_face_vertex_count(face_index);
+
+/**
+ * Extracts 3D world coordinates for all vertices of a face polygon.
+ *
+ * @param face_index    Face index (0 to bsp_get_face_count() - 1)
+ * @param output        2D array to receive vertex points [max_vertices][3]
+ * @param max_vertices  Maximum number of vertices to write
+ * @return              Number of vertices written
+ */
+native bsp_get_face_polygon(face_index, Float:output[][3], max_vertices);
+
+/**
+ * Retrieves the skybox texture prefix defined in the map's worldspawn entity.
+ *
+ * @param output        Output string buffer
+ * @param maxlen        Maximum string buffer length
+ * @return              1 if skyname found, 0 otherwise
+ */
+native bsp_get_skyname(output[], maxlen);
+
+/**
+ * Retrieves the map title defined in the map's worldspawn entity (message key).
+ *
+ * @param output        Output string buffer
+ * @param maxlen        Maximum string buffer length
+ * @return              1 if title found, 0 otherwise
+ */
+native bsp_get_map_title(output[], maxlen);
+
+/**
+ * Retrieves the semicolon-separated list of WAD texture files referenced in worldspawn.
+ *
+ * @param output        Output string buffer
+ * @param maxlen        Maximum string buffer length
+ * @return              Number of characters written, or 0 if not found
+ */
+native bsp_get_wad_list(output[], maxlen);
+
+/**
+ * Gets the number of surface faces referencing a specific BSP leaf (marksurfaces).
+ *
+ * @param leaf_index    Leaf index (0 to bsp_get_leaf_count() - 1)
+ * @return              Number of faces touching this leaf
+ */
+native bsp_get_leaf_face_count(leaf_index);
+
+/**
+ * Retrieves the face indices associated with a BSP leaf (marksurfaces).
+ *
+ * @param leaf_index    Leaf index (0 to bsp_get_leaf_count() - 1)
+ * @param faces         Array to receive face indices
+ * @param max_faces     Maximum number of face indices to write
+ * @return              Number of face indices written
+ */
+native bsp_get_leaf_faces(leaf_index, faces[], max_faces);
+
+/**
+ * Finds all entity indices whose 'target' property matches the given target string.
+ *
+ * @param target        Target string to search for
+ * @param output        Integer array to receive entity indices
+ * @param max_found     Maximum elements to write
+ * @return              Number of matching entities found
+ */
+native bsp_find_entities_by_target(const target[], output[], max_found);
+
+/**
+ * Finds all entity indices whose 'targetname' property matches the given targetname string.
+ *
+ * @param targetname    Targetname string to search for
+ * @param output        Integer array to receive entity indices
+ * @param max_found     Maximum elements to write
+ * @return              Number of matching entities found
+ */
+native bsp_find_entities_by_targetname(const targetname[], output[], max_found);
+
+/**
+ * Reads the 'target' property string of an entity.
+ *
+ * @param entity_index  Entity index (0 to bsp_get_entity_count() - 1)
+ * @param output        Output string buffer
+ * @param maxlen        Maximum string buffer length
+ * @return              Number of characters written
+ */
+native bsp_get_entity_target(entity_index, output[], maxlen);
+
+/**
+ * Reads the 'targetname' property string of an entity.
+ *
+ * @param entity_index  Entity index (0 to bsp_get_entity_count() - 1)
+ * @param output        Output string buffer
+ * @param maxlen        Maximum string buffer length
+ * @return              Number of characters written
+ */
+native bsp_get_entity_targetname(entity_index, output[], maxlen);
 
 /* ========================================================================== */
 /*                              NAV MESH NATIVES                              */

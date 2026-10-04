@@ -61,6 +61,11 @@ int main(int argc, char* argv[]) {
                           << maxs.x << ", " << maxs.y << ", " << maxs.z << ")\n";
             }
 
+            std::string skyname, mapTitle, wadList;
+            if (bsp.GetSkyname(skyname)) std::cout << "  -> Skyname:   '" << skyname << "'\n";
+            if (bsp.GetMapTitle(mapTitle)) std::cout << "  -> Map Title: '" << mapTitle << "'\n";
+            if (bsp.GetWadList(wadList)) std::cout << "  -> WAD List:   " << wadList << "\n";
+
             auto ctSpawns = bsp.FindEntities("info_player_start");
             auto tSpawns = bsp.FindEntities("info_player_deathmatch");
             std::cout << "  -> CT Spawns: " << ctSpawns.size() << "\n";
@@ -79,13 +84,21 @@ int main(int argc, char* argv[]) {
                 std::cout << "  -> PAS Check (CT Leaf " << ctLeaf << " -> T Leaf " << tLeaf << "): "
                           << (pas ? "AUDIBLE" : "SILENT") << "\n";
 
-                // Test surface texture at ground below CT spawn
-                Vector3 ground;
-                char texName[64] = {0};
+                int leafFaces = bsp.GetLeafFaceCount(ctLeaf);
+                std::cout << "  -> CT Leaf Marksurfaces Count: " << leafFaces << "\n";
+
+                // Test surface texture & material & lighting at ground below CT spawn
                 Vector3 traceDown = ctPos;
                 traceDown.z -= 500.0f;
-                if (bsp.TraceTexture(ctPos, traceDown, texName, sizeof(texName))) {
-                    std::cout << "  -> Surface Texture below CT spawn: '" << texName << "'\n";
+                char texName[64] = {0};
+                BSPMaterialType mat = bsp.TraceMaterial(ctPos, traceDown, texName, sizeof(texName));
+                std::cout << "  -> Surface below CT spawn: Texture '" << texName << "', Material " << static_cast<int>(mat) << "\n";
+
+                float brightness = 0.0f;
+                Vector3 color(0.0f, 0.0f, 0.0f);
+                if (bsp.GetPointLight(ctPos, traceDown, brightness, &color)) {
+                    std::cout << "  -> Illumination below CT spawn: Brightness " << brightness
+                              << " RGB(" << color.x << ", " << color.y << ", " << color.z << ")\n";
                 }
             }
         } else {

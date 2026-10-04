@@ -4,7 +4,7 @@
 #include <navmesh>
 
 #define PLUGIN  "NavMesh Core Demo"
-#define VERSION "1.0.0"
+#define VERSION "1.0.3"
 #define AUTHOR  "Ziyad"
 
 #define MAX_ASYNC_TRACKING 256
@@ -25,6 +25,10 @@ public plugin_init()
     register_clcmd("say /navtexture", "Cmd_NavTexture", ADMIN_ALL, "Trace hit surface texture");
     register_clcmd("say /navbounds",  "Cmd_NavBounds",  ADMIN_ALL, "Display map world bounds and geometry counts");
     register_clcmd("say /navpvs",      "Cmd_NavPVS",      ADMIN_ALL, "Check PVS and PAS to crosshair target");
+    register_clcmd("say /navlight",    "Cmd_NavLight",    ADMIN_ALL, "Sample illumination at crosshair");
+    register_clcmd("say /navmat",      "Cmd_NavMat",      ADMIN_ALL, "Sample surface material & texture flags at crosshair");
+    register_clcmd("say /navsky",      "Cmd_NavSky",      ADMIN_ALL, "Display map skybox, title, and WADs");
+    register_clcmd("say /navfaces",    "Cmd_NavFaces",    ADMIN_ALL, "Display leaf faces count and vertices preview");
 
     // Clear task tracking table
     for (new i = 0; i < MAX_ASYNC_TRACKING; i++)
@@ -347,6 +351,122 @@ public Cmd_NavPVS(id)
 
     // Draw yellow beam to target
     DrawBeam(eyes, target, 30, 255, 255, 0);
+
+    return PLUGIN_HANDLED;
+}
+
+public Cmd_NavLight(id)
+{
+    if (!is_user_alive(id))
+        return PLUGIN_HANDLED;
+
+    new Float:start[3], Float:viewOfs[3], Float:angles[3], Float:forwardVec[3];
+    pev(id, pev_origin, start);
+    pev(id, pev_view_ofs, viewOfs);
+    pev(id, pev_v_angle, angles);
+
+    new Float:eyes[3];
+    eyes[0] = start[0] + viewOfs[0];
+    eyes[1] = start[1] + viewOfs[1];
+    eyes[2] = start[2] + viewOfs[2];
+
+    engfunc(EngFunc_AngleVectors, angles, forwardVec, Float:{0.0,0.0,0.0}, Float:{0.0,0.0,0.0});
+
+    new Float:traceEnd[3];
+    traceEnd[0] = eyes[0] + forwardVec[0] * 2000.0;
+    traceEnd[1] = eyes[1] + forwardVec[1] * 2000.0;
+    traceEnd[2] = eyes[2] + forwardVec[2] * 2000.0;
+
+    new Float:brightness = 0.0;
+    new Float:color[3];
+    if (bsp_get_point_light(eyes, traceEnd, brightness, color))
+    {
+        client_print(id, print_chat, "[NavMesh Light] Brightness: %.1f | RGB(%.1f, %.1f, %.1f)",
+                     brightness, color[0], color[1], color[2]);
+    }
+    else
+    {
+        client_print(id, print_chat, "[NavMesh Light] Hit surface is unlit (sky or unlit texture).");
+    }
+
+    return PLUGIN_HANDLED;
+}
+
+public Cmd_NavMat(id)
+{
+    if (!is_user_alive(id))
+        return PLUGIN_HANDLED;
+
+    new Float:start[3], Float:viewOfs[3], Float:angles[3], Float:forwardVec[3];
+    pev(id, pev_origin, start);
+    pev(id, pev_view_ofs, viewOfs);
+    pev(id, pev_v_angle, angles);
+
+    new Float:eyes[3];
+    eyes[0] = start[0] + viewOfs[0];
+    eyes[1] = start[1] + viewOfs[1];
+    eyes[2] = start[2] + viewOfs[2];
+
+    engfunc(EngFunc_AngleVectors, angles, forwardVec, Float:{0.0,0.0,0.0}, Float:{0.0,0.0,0.0});
+
+    new Float:traceEnd[3];
+    traceEnd[0] = eyes[0] + forwardVec[0] * 2000.0;
+    traceEnd[1] = eyes[1] + forwardVec[1] * 2000.0;
+    traceEnd[2] = eyes[2] + forwardVec[2] * 2000.0;
+
+    new texture[64];
+    new BSPMaterialType:mat = bsp_trace_material(eyes, traceEnd, texture, charsmax(texture));
+
+    new texIdx = bsp_find_texture(texture);
+    new flags = 0, isTrans = 0, isFluid = 0, isSky = 0, isAnim = 0;
+    if (texIdx != -1)
+    {
+        bsp_get_texture_flags(texIdx, flags, isTrans, isFluid, isSky, isAnim);
+    }
+
+    client_print(id, print_chat, "[NavMesh Material] Tex: '%s' | Mat ID: %d | Flags: 0x%02X (Trans:%d Fluid:%d Sky:%d)",
+                 texture, _:mat, flags, isTrans, isFluid, isSky);
+
+    return PLUGIN_HANDLED;
+}
+
+public Cmd_NavSky(id)
+{
+    new sky[64] = "None", title[128] = "None", wads[256] = "None";
+    bsp_get_skyname(sky, charsmax(sky));
+    bsp_get_map_title(title, charsmax(title));
+    bsp_get_wad_list(wads, charsmax(wads));
+
+    client_print(id, print_chat, "[NavMesh Metadata] Sky: %s | Title: %s", sky, title);
+    if (strlen(wads) > 0)
+    {
+        client_print(id, print_chat, "[NavMesh Metadata] WADs: %s", wads);
+    }
+    return PLUGIN_HANDLED;
+}
+
+public Cmd_NavFaces(id)
+{
+    if (!is_user_alive(id))
+        return PLUGIN_HANDLED;
+
+    new Float:origin[3];
+    pev(id, pev_origin, origin);
+
+    new leaf = bsp_get_leaf(origin);
+    new leafFaceCount = bsp_get_leaf_face_count(leaf);
+
+    new faces[16];
+    new count = bsp_get_leaf_faces(leaf, faces, 16);
+
+    client_print(id, print_chat, "[NavMesh Faces] Current Leaf %d has %d marksurfaces.", leaf, leafFaceCount);
+
+    if (count > 0)
+    {
+        new firstFace = faces[0];
+        new vertCount = bsp_get_face_vertex_count(firstFace);
+        client_print(id, print_chat, "[NavMesh Faces] First face #%d has %d vertices.", firstFace, vertCount);
+    }
 
     return PLUGIN_HANDLED;
 }

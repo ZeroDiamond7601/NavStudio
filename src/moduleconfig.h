@@ -22,7 +22,7 @@
 #endif
 
 #define MODULE_NAME "NavMesh Core"
-#define MODULE_VERSION "1.0.0"
+#define MODULE_VERSION "1.0.3"
 #define MODULE_AUTHOR "Ziyad"
 #define MODULE_LOGTAG "NAVMESH"
 #define MODULE_LIBRARY "navmesh"

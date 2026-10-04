@@ -33,18 +33,32 @@ public:
     int GetLeafContents(int leafIndex) const;
     int GetLeafAmbient(int leafIndex, int channel) const;
     int GetPVSByteSize() const { return (m_numLeaves + 7) / 8; }
+    int GetLeafFaceCount(int leafIndex) const;
+    int GetLeafFaces(int leafIndex, int* outFaces, int maxFaces) const;
 
     // Collision tracing
     bool TraceWorld(const Vector3& start, const Vector3& end, int hullType, BSPTraceResult* tr = nullptr) const;
     bool TraceModel(int modelIndex, const Vector3& start, const Vector3& end, int hullType, BSPTraceResult* tr = nullptr) const;
     bool TraceTexture(const Vector3& start, const Vector3& end, char* outTexture, size_t maxLen) const;
+    BSPMaterialType TraceMaterial(const Vector3& start, const Vector3& end, char* outTexture = nullptr, size_t maxLen = 0) const;
     bool GetGround(const Vector3& start, Vector3* outGround, float maxDrop = 2000.0f) const;
 
-    // Entities
+    // Lightmap and illumination sampling
+    bool GetPointLight(const Vector3& start, const Vector3& end, float& outBrightness, Vector3* outColor = nullptr) const;
+    bool GetFaceLight(int faceIndex, const Vector3& point, float& outBrightness, Vector3* outColor = nullptr) const;
+
+    // Entities & Target relationships
     const std::vector<BSPEntity>& GetEntities() const { return m_entities; }
     std::vector<const BSPEntity*> FindEntities(const std::string& classname) const;
     const BSPEntity* GetEntity(int index) const;
     int GetEntityCount() const { return static_cast<int>(m_entities.size()); }
+    std::vector<int> FindEntitiesByTarget(const std::string& target) const;
+    std::vector<int> FindEntitiesByTargetname(const std::string& targetname) const;
+
+    // Worldspawn metadata
+    bool GetSkyname(std::string& outSkyname) const;
+    bool GetMapTitle(std::string& outTitle) const;
+    bool GetWadList(std::string& outWadList) const;
 
     // Model and geometry data
     const dmodel_t* GetModel(int index) const;
@@ -55,14 +69,18 @@ public:
     int GetFaceCount() const { return m_numFaces; }
     const dplane_t* GetPlane(int index) const;
     const dface_t* GetFace(int index) const;
+    int GetFaceVertexCount(int faceIndex) const;
+    int GetFacePolygon(int faceIndex, Vector3* outVertices, int maxVertices) const;
     const std::string& GetMapName() const { return m_mapName; }
 
-    // Textures
+    // Textures & Materials
     int GetTextureCount() const { return static_cast<int>(m_textures.size()); }
     const char* GetTextureName(int index) const;
     bool GetTextureDimensions(int index, int& width, int& height) const;
     int FindTexture(const char* name) const;
     const char* GetFaceTextureName(int faceIndex) const;
+    static BSPMaterialType ClassifyMaterial(const char* textureName);
+    int GetTextureFlags(int textureIndex, bool* isTransparent = nullptr, bool* isFluid = nullptr, bool* isSky = nullptr, bool* isAnimated = nullptr) const;
 
 private:
     bool ParseLumps(const uint8_t* buffer, size_t size);
@@ -112,6 +130,9 @@ private:
 
     const uint8_t* m_visdata;
     int m_visdatalen;
+
+    const uint8_t* m_lightdata;
+    int m_lightdatalen;
 
     std::vector<BSPTextureInfo> m_textures;
     std::vector<BSPEntity> m_entities;

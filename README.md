@@ -12,10 +12,14 @@
 ## Features
 
 ### GoldSrc BSP Engine (`.bsp`)
-* **Direct Lump Parsing:** Reads and caches GoldSrc BSP lumps (Planes, Nodes, Clipnodes, Leaves, Models, Visibility, Textures, Texinfo, Faces, Vertices, Edges, Surfedges, Marksurfaces, Entities) directly in memory with strict bounds safety.
+* **Direct Lump Parsing:** Reads and caches GoldSrc BSP lumps (Planes, Nodes, Clipnodes, Leaves, Models, Visibility, Textures, Texinfo, Faces, Vertices, Edges, Surfedges, Marksurfaces, Entities, Lighting) directly in memory with strict bounds safety.
 * **Exact Ray & Hull Tracing:** Supports exact Hull 0 (Point / Bullets) and Hulls 1–3 (Player standing, crouch, large hull) raycasting against world geometry and brush models (`*1`, `*2`, doors, breakables).
-* **Surface Texture Detection:** Detects the exact surface texture name at ray or hull collision points (e.g., `wood`, `metal`, `dirt`, `sky`).
-* **Ground Height Snapping:** Native downward ground trace for accurately snapping origins to floor geometry.
+* **Surface Lightmap & Illumination Sampling:** Samples exact luxel lighting along arbitrary rays or at 3D face coordinates with bilinear interpolation across the 16-unit lightmap grid, returning both scalar brightness and full RGB channels.
+* **Material Classification & Texture Flags:** Automatically parses and classifies surfaces into physical engine material types (`MAT_CONCRETE`, `MAT_METAL`, `MAT_WOOD`, `MAT_VENT`, `MAT_GRATE`, `MAT_TILE`, `MAT_SLOSH`, `MAT_GLASS`, `MAT_FLESH`, etc.) and detects transparency, fluid, sky, and animated texture flags.
+* **Face Polygon Vertices Extraction:** Extracts ordered 3D world polygon vertices for any face in the map via surfedge/edge index chains.
+* **Worldspawn Metadata:** Direct extraction of environment skybox prefix (`skyname`), map title, and referenced WAD files.
+* **Leaf Marksurfaces & Spatial Partitions:** Queries the faces touching any leaf via marksurfaces indices.
+* **Entity Target Graphs:** High-speed lookup of entity linkages by `target` and `targetname` attributes.
 * **Visibility & Audibility Engine:** PVS (Potentially Visible Set) and PAS (Potentially Audible Set) decompressed bitmasks, direct point-to-point visibility and audibility checks, and visible leaf count queries.
 * **Map Geometry & Bounds:** Fast access to world bounds, leaf bounding boxes, contents codes, ambient audio levels, planes, and node/leaf counts.
 * **Entity & Texture Metadata:** Key-value property lookups on BSP entities and texture dimension queries.
@@ -215,6 +219,24 @@ native bsp_get_texture_count();
 native bsp_get_texture_name(texture_index, name[], maxlen);
 native bsp_get_texture_size(texture_index, &width, &height);
 native bsp_find_texture(const name[]);
+native BSPMaterialType:bsp_get_surface_material(const texture_name[]);
+native BSPMaterialType:bsp_trace_material(const Float:start[3], const Float:end[3], texture[] = "", maxlen = 0);
+native bsp_get_texture_flags(texture_index, &flags = 0, &is_transparent = 0, &is_fluid = 0, &is_sky = 0, &is_animated = 0);
+
+// Illumination & Lightmaps
+native bsp_get_point_light(const Float:start[3], const Float:end[3], &Float:brightness, Float:color[3] = Float:{0.0,0.0,0.0});
+native bsp_get_face_light(face_index, const Float:point[3], &Float:brightness, Float:color[3] = Float:{0.0,0.0,0.0});
+
+// Geometry & Polygons
+native bsp_get_face_vertex_count(face_index);
+native bsp_get_face_polygon(face_index, Float:output[][3], max_vertices);
+native bsp_get_leaf_face_count(leaf_index);
+native bsp_get_leaf_faces(leaf_index, faces[], max_faces);
+
+// Worldspawn Metadata
+native bsp_get_skyname(output[], maxlen);
+native bsp_get_map_title(output[], maxlen);
+native bsp_get_wad_list(output[], maxlen);
 
 // Entities & Submodels
 native bsp_get_entity_count(const classname[] = "");
@@ -222,6 +244,10 @@ native bsp_get_entity_origin(const classname[], target_index, Float:output[3]);
 native bsp_get_entity_key(entity_index, const key[], value[], maxlen);
 native bsp_find_entity_by_key(const key[], const value[], start_index = 0);
 native bsp_get_brush_model(const classname[], target_index, Float:out_mins[3], Float:out_maxs[3]);
+native bsp_find_entities_by_target(const target[], output[], max_found);
+native bsp_find_entities_by_targetname(const targetname[], output[], max_found);
+native bsp_get_entity_target(entity_index, output[], maxlen);
+native bsp_get_entity_targetname(entity_index, output[], maxlen);
 native bsp_get_model_count();
 native bsp_get_model_bounds(model_index, Float:mins[3], Float:maxs[3]);
 native bsp_get_model_origin(model_index, Float:origin[3]);

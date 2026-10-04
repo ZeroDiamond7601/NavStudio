@@ -179,3 +179,32 @@ struct BSPTextureInfo {
     int height;
 };
 
+enum BSPMaterialType {
+    MAT_UNKNOWN = 0,
+    MAT_CONCRETE,       // 'C' - Stone / rock / concrete
+    MAT_METAL,          // 'M' - Solid metal / iron / steel
+    MAT_DIRT,           // 'D' - Dirt / sand / gravel
+    MAT_VENT,           // 'V' - Ventilation duct
+    MAT_GRATE,          // 'G' - Metal grate / chainlink fence
+    MAT_TILE,           // 'T' - Tile / marble
+    MAT_SLOSH,          // 'S' - Water / fluid / slime
+    MAT_WOOD,           // 'W' - Wood / crate / plank
+    MAT_COMPUTER,       // 'P' - Computer terminal / electronics
+    MAT_GLASS,          // 'Y' - Glass / window
+    MAT_FLESH,          // 'X' - Organic / flesh
+    MAT_FOLIAGE,        // 'F' - Grass / leaves / foliage
+    NUM_MATERIALS
+};
+
+enum BSPTextureFlag {
+    TEX_FLAG_NONE     = 0,
+    TEX_FLAG_LIGHT    = 0x0001,
+    TEX_FLAG_SLICK    = 0x0002,
+    TEX_FLAG_SKY      = 0x0004,
+    TEX_FLAG_WARP     = 0x0008,
+    TEX_FLAG_TRANS33  = 0x0010,
+    TEX_FLAG_TRANS66  = 0x0020,
+    TEX_FLAG_FLOWING  = 0x0040,
+    TEX_FLAG_NODRAW   = 0x0080
+};
+
