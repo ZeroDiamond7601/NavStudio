@@ -32,8 +32,8 @@ void NavGrid::Initialize(float minX, float maxX, float minY, float maxY, float c
     m_gridSizeX = static_cast<int>(std::ceil((m_maxX - m_minX) / m_cellSize)) + 1;
     m_gridSizeY = static_cast<int>(std::ceil((m_maxY - m_minY) / m_cellSize)) + 1;
 
-    m_gridSizeX = std::max(1, m_gridSizeX);
-    m_gridSizeY = std::max(1, m_gridSizeY);
+    m_gridSizeX = std::max(1, std::min(1024, m_gridSizeX));
+    m_gridSizeY = std::max(1, std::min(1024, m_gridSizeY));
 
     m_cells.resize(m_gridSizeX * m_gridSizeY);
 }

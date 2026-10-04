@@ -163,7 +163,7 @@ struct BSPTraceResult {
     int32_t hitContents;
     int32_t hitPlane;
     int32_t hitFace;
-    char hitTexture[16];
+    char hitTexture[64];
 
     BSPTraceResult()
         : allsolid(false), startsolid(false), fraction(1.0f),

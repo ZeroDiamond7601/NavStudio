@@ -84,8 +84,8 @@ public:
 
 private:
     bool ParseLumps(const uint8_t* buffer, size_t size);
-    bool TraceNodeRecursive(int nodeNum, float p1f, float p2f, const Vector3& p1, const Vector3& p2, BSPTraceResult* tr) const;
-    bool TraceClipnodeRecursive(int clipnodeNum, float p1f, float p2f, const Vector3& p1, const Vector3& p2, BSPTraceResult* tr) const;
+    bool TraceNodeRecursive(int nodeNum, float p1f, float p2f, const Vector3& p1, const Vector3& p2, BSPTraceResult* tr, int depth = 0) const;
+    bool TraceClipnodeRecursive(int clipnodeNum, float p1f, float p2f, const Vector3& p1, const Vector3& p2, BSPTraceResult* tr, int depth = 0) const;
     int FindFaceOnNode(int nodeNum, const Vector3& point) const;
     bool IsPointInFace(int faceIndex, const Vector3& point) const;
     Vector3 GetFaceCentroid(int faceIndex) const;

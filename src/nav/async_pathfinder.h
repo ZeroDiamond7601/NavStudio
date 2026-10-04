@@ -30,6 +30,7 @@ public:
     void Initialize();
     void Shutdown();
     void ClearQueue();
+    void ClearAndDrain();
 
     int EnqueueRequest(const Vector3& start, const Vector3& goal, int flags = 0);
     void ProcessCompleted();
@@ -44,6 +45,7 @@ private:
     std::atomic<bool> m_running;
     std::thread m_workerThread;
     std::mutex m_requestMutex;
+    std::mutex m_workerJobMutex;
     std::condition_variable m_cv;
     std::queue<AsyncPathRequest> m_requests;
 
@@ -51,4 +53,5 @@ private:
     std::vector<AsyncPathResult> m_completed;
 
     std::atomic<int> m_nextTaskId;
+    std::atomic<uint32_t> m_generation;
 };

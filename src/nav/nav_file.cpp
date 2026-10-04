@@ -120,7 +120,7 @@ bool NavMesh::LoadFromMemory(const uint8_t* buffer, size_t size) {
     // Read Area count
     uint32_t areaCount = 0;
     READ_TYPE(areaCount, uint32_t);
-    if (areaCount == 0) {
+    if (areaCount == 0 || areaCount > (size / 40)) {
         Unload();
         return false;
     }
@@ -132,6 +132,7 @@ bool NavMesh::LoadFromMemory(const uint8_t* buffer, size_t size) {
 
     for (uint32_t i = 0; i < areaCount; i++) {
         NavArea* area = new NavArea();
+        m_areas.push_back(area);
 
         uint32_t id = 0;
         READ_TYPE(id, uint32_t);
@@ -244,8 +245,6 @@ bool NavMesh::LoadFromMemory(const uint8_t* buffer, size_t size) {
             area->SetPlace(placeId);
             area->SetPlaceName(GetPlaceName(placeId));
         }
-
-        m_areas.push_back(area);
     }
 
     #undef READ_RAW

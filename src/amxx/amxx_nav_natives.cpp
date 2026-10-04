@@ -52,7 +52,17 @@ static cell AMX_NATIVE_CALL nav_load(AMX *amx, cell *params) {
     }
 
     std::string navPath = FindMapNAV(mapname);
-    if (navPath.empty() || !g_nav.Load(navPath)) {
+    if (navPath.empty()) {
+        return 0;
+    }
+
+    AsyncPathManager::Get().ClearAndDrain();
+    {
+        std::lock_guard<std::mutex> lock(g_activePathsMutex);
+        g_activePaths.clear();
+    }
+
+    if (!g_nav.Load(navPath)) {
         MF_Log("[%s] Failed to load NAV file '%s'.", MODULE_LOGTAG, navPath.c_str());
         return 0;
     }
@@ -74,7 +84,7 @@ static cell AMX_NATIVE_CALL nav_load(AMX *amx, cell *params) {
 
 // native nav_unload();
 static cell AMX_NATIVE_CALL nav_unload(AMX *amx, cell *params) {
-    AsyncPathManager::Get().ClearQueue();
+    AsyncPathManager::Get().ClearAndDrain();
 
     {
         std::lock_guard<std::mutex> lock(g_activePathsMutex);
@@ -393,12 +403,19 @@ static cell AMX_NATIVE_CALL nav_get_place_name(AMX *amx, cell *params) {
         return 0;
     }
 
-    if (!g_nav.IsLoaded()) return 0;
-    NavArea* area = g_nav.GetArea(static_cast<size_t>(params[1]));
-    if (!area) return 0;
-
     int maxlen = params[3];
     if (maxlen <= 0) return 0;
+
+    if (!g_nav.IsLoaded()) {
+        MF_SetAmxString(amx, params[2], "", maxlen);
+        return 0;
+    }
+
+    NavArea* area = g_nav.GetArea(static_cast<size_t>(params[1]));
+    if (!area) {
+        MF_SetAmxString(amx, params[2], "", maxlen);
+        return 0;
+    }
 
     const std::string& name = area->GetPlaceName();
     return static_cast<cell>(MF_SetAmxString(amx, params[2], name.c_str(), maxlen));

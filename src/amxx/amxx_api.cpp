@@ -45,7 +45,7 @@ void OnPluginsLoaded() {
 }
 
 void OnPluginsUnloaded() {
-    AsyncPathManager::Get().ClearQueue();
+    AsyncPathManager::Get().ClearAndDrain();
 
     std::lock_guard<std::mutex> lock(g_activePathsMutex);
     g_activePaths.clear();
@@ -97,7 +97,7 @@ void ServerActivate_Post(edict_t *pEdictList, int edictCount, int clientMax) {
 }
 
 void ServerDeactivate() {
-    AsyncPathManager::Get().ClearQueue();
+    AsyncPathManager::Get().ClearAndDrain();
 
     {
         std::lock_guard<std::mutex> lock(g_activePathsMutex);

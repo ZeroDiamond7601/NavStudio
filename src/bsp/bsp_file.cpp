@@ -115,7 +115,7 @@ bool BSPFile::ParseLumps(const uint8_t* buffer, size_t size) {
         do { \
             int32_t ofs = header->lumps[index].fileofs; \
             int32_t len = header->lumps[index].filelen; \
-            if (ofs < 0 || len < 0 || static_cast<size_t>(ofs + len) > size) { \
+            if (ofs < 0 || len < 0 || static_cast<uint64_t>(ofs) + static_cast<uint64_t>(len) > size) { \
                 Unload(); \
                 return false; \
             } \
@@ -141,7 +141,7 @@ bool BSPFile::ParseLumps(const uint8_t* buffer, size_t size) {
     m_textures.clear();
     int32_t texOfs = header->lumps[LUMP_TEXTURES].fileofs;
     int32_t texLen = header->lumps[LUMP_TEXTURES].filelen;
-    if (texOfs >= 0 && texLen >= static_cast<int32_t>(sizeof(int32_t)) && static_cast<size_t>(texOfs + texLen) <= size) {
+    if (texOfs >= 0 && texLen >= static_cast<int32_t>(sizeof(int32_t)) && static_cast<uint64_t>(texOfs) + static_cast<uint64_t>(texLen) <= size) {
         const dmiptexlump_t* miptexLump = reinterpret_cast<const dmiptexlump_t*>(buffer + texOfs);
         int32_t numMiptex = miptexLump->nummiptex;
         if (numMiptex > 0 && numMiptex < 65536) {
@@ -167,7 +167,7 @@ bool BSPFile::ParseLumps(const uint8_t* buffer, size_t size) {
     // Visdata lump
     int32_t visOfs = header->lumps[LUMP_VISIBILITY].fileofs;
     int32_t visLen = header->lumps[LUMP_VISIBILITY].filelen;
-    if (visOfs >= 0 && visLen >= 0 && static_cast<size_t>(visOfs + visLen) <= size) {
+    if (visOfs >= 0 && visLen >= 0 && static_cast<uint64_t>(visOfs) + static_cast<uint64_t>(visLen) <= size) {
         m_visdata = buffer + visOfs;
         m_visdatalen = visLen;
     } else {
@@ -178,7 +178,7 @@ bool BSPFile::ParseLumps(const uint8_t* buffer, size_t size) {
     // Lighting lump
     int32_t lightOfs = header->lumps[LUMP_LIGHTING].fileofs;
     int32_t lightLen = header->lumps[LUMP_LIGHTING].filelen;
-    if (lightOfs >= 0 && lightLen >= 0 && static_cast<size_t>(lightOfs + lightLen) <= size) {
+    if (lightOfs >= 0 && lightLen >= 0 && static_cast<uint64_t>(lightOfs) + static_cast<uint64_t>(lightLen) <= size) {
         m_lightdata = buffer + lightOfs;
         m_lightdatalen = lightLen;
     } else {
@@ -189,7 +189,7 @@ bool BSPFile::ParseLumps(const uint8_t* buffer, size_t size) {
     // Entities lump
     int32_t entOfs = header->lumps[LUMP_ENTITIES].fileofs;
     int32_t entLen = header->lumps[LUMP_ENTITIES].filelen;
-    if (entOfs >= 0 && entLen > 0 && static_cast<size_t>(entOfs + entLen) <= size) {
+    if (entOfs >= 0 && entLen > 0 && static_cast<uint64_t>(entOfs) + static_cast<uint64_t>(entLen) <= size) {
         BSPEntityParser::Parse(reinterpret_cast<const char*>(buffer + entOfs), entLen, m_entities);
     }
 
@@ -453,7 +453,7 @@ int BSPFile::GetFacePolygon(int faceIndex, Vector3* outVertices, int maxVertices
         int32_t seIdx = face->firstedge + i;
         if (seIdx < 0 || seIdx >= m_numSurfEdges) return i;
         int32_t se = m_surfedges[seIdx];
-        uint32_t edgeIdx = static_cast<uint32_t>(std::abs(se));
+        uint32_t edgeIdx = (se < 0) ? static_cast<uint32_t>(-(int64_t)se) : static_cast<uint32_t>(se);
         if (edgeIdx >= static_cast<uint32_t>(m_numEdges)) return i;
 
         const dedge_t* edge = &m_edges[edgeIdx];
@@ -602,12 +602,13 @@ bool BSPFile::GetFaceLight(int faceIndex, const Vector3& point, float& outBright
 
     float mins = 1e30f, maxs = -1e30f;
     float mint = 1e30f, maxt = -1e30f;
+    int validVerts = 0;
 
     for (int16_t i = 0; i < face->numedges; ++i) {
         int32_t seIdx = face->firstedge + i;
         if (seIdx < 0 || seIdx >= m_numSurfEdges) break;
         int32_t se = m_surfedges[seIdx];
-        uint32_t edgeIdx = static_cast<uint32_t>(std::abs(se));
+        uint32_t edgeIdx = (se < 0) ? static_cast<uint32_t>(-(int64_t)se) : static_cast<uint32_t>(se);
         if (edgeIdx >= static_cast<uint32_t>(m_numEdges)) break;
 
         const dedge_t* edge = &m_edges[edgeIdx];
@@ -618,11 +619,16 @@ bool BSPFile::GetFaceLight(int faceIndex, const Vector3& point, float& outBright
         float s = v.x * ti->vecs[0][0] + v.y * ti->vecs[0][1] + v.z * ti->vecs[0][2] + ti->vecs[0][3];
         float t = v.x * ti->vecs[1][0] + v.y * ti->vecs[1][1] + v.z * ti->vecs[1][2] + ti->vecs[1][3];
 
+        if (std::isnan(s) || std::isnan(t) || std::isinf(s) || std::isinf(t)) continue;
+
         if (s < mins) mins = s;
         if (s > maxs) maxs = s;
         if (t < mint) mint = t;
         if (t > maxt) maxt = t;
+        validVerts++;
     }
+
+    if (validVerts < 3 || mins > maxs || mint > maxt) return false;
 
     float texMins = std::floor(mins / 16.0f) * 16.0f;
     float texMint = std::floor(mint / 16.0f) * 16.0f;
@@ -631,10 +637,15 @@ bool BSPFile::GetFaceLight(int faceIndex, const Vector3& point, float& outBright
 
     int width = static_cast<int>((texMaxs - texMins) / 16.0f) + 1;
     int height = static_cast<int>((texMaxt - texMint) / 16.0f) + 1;
-    if (width <= 0 || height <= 0) return false;
+    if (width <= 0 || height <= 0 || width > 2048 || height > 2048) return false;
+
+    int64_t totalBytes = static_cast<int64_t>(width) * height * 3;
+    if (static_cast<int64_t>(face->lightofs) + totalBytes > static_cast<int64_t>(m_lightdatalen)) return false;
 
     float pointS = point.x * ti->vecs[0][0] + point.y * ti->vecs[0][1] + point.z * ti->vecs[0][2] + ti->vecs[0][3];
     float pointT = point.x * ti->vecs[1][0] + point.y * ti->vecs[1][1] + point.z * ti->vecs[1][2] + ti->vecs[1][3];
+
+    if (std::isnan(pointS) || std::isnan(pointT) || std::isinf(pointS) || std::isinf(pointT)) return false;
 
     float u = (pointS - texMins) / 16.0f;
     float v = (pointT - texMint) / 16.0f;
@@ -642,8 +653,8 @@ bool BSPFile::GetFaceLight(int faceIndex, const Vector3& point, float& outBright
     u = std::max(0.0f, std::min(static_cast<float>(width - 1), u));
     v = std::max(0.0f, std::min(static_cast<float>(height - 1), v));
 
-    int x0 = static_cast<int>(std::floor(u));
-    int y0 = static_cast<int>(std::floor(v));
+    int x0 = std::max(0, std::min(width - 1, static_cast<int>(std::floor(u))));
+    int y0 = std::max(0, std::min(height - 1, static_cast<int>(std::floor(v))));
     int x1 = std::min(x0 + 1, width - 1);
     int y1 = std::min(y0 + 1, height - 1);
 
@@ -651,8 +662,6 @@ bool BSPFile::GetFaceLight(int faceIndex, const Vector3& point, float& outBright
     float fy = v - static_cast<float>(y0);
 
     const uint8_t* baseLight = m_lightdata + face->lightofs;
-    int totalBytes = width * height * 3;
-    if (face->lightofs + totalBytes > m_lightdatalen) return false;
 
     auto getLuxel = [&](int x, int y, float& r, float& g, float& b) {
         int idx = (y * width + x) * 3;
@@ -775,7 +784,7 @@ bool BSPFile::IsPointInFace(int faceIndex, const Vector3& point) const {
         if (seIdx < 0 || seIdx >= m_numSurfEdges) return false;
 
         int32_t se = m_surfedges[seIdx];
-        uint32_t edgeIdx = static_cast<uint32_t>(std::abs(se));
+        uint32_t edgeIdx = (se < 0) ? static_cast<uint32_t>(-(int64_t)se) : static_cast<uint32_t>(se);
         if (edgeIdx >= static_cast<uint32_t>(m_numEdges)) return false;
 
         const dedge_t* edge = &m_edges[edgeIdx];
@@ -813,7 +822,7 @@ Vector3 BSPFile::GetFaceCentroid(int faceIndex) const {
         if (seIdx < 0 || seIdx >= m_numSurfEdges) break;
 
         int32_t se = m_surfedges[seIdx];
-        uint32_t edgeIdx = static_cast<uint32_t>(std::abs(se));
+        uint32_t edgeIdx = (se < 0) ? static_cast<uint32_t>(-(int64_t)se) : static_cast<uint32_t>(se);
         if (edgeIdx >= static_cast<uint32_t>(m_numEdges)) break;
 
         const dedge_t* edge = &m_edges[edgeIdx];
@@ -858,7 +867,9 @@ int BSPFile::FindFaceOnNode(int nodeNum, const Vector3& point) const {
     return bestFace;
 }
 
-bool BSPFile::TraceNodeRecursive(int nodeNum, float p1f, float p2f, const Vector3& p1, const Vector3& p2, BSPTraceResult* tr) const {
+bool BSPFile::TraceNodeRecursive(int nodeNum, float p1f, float p2f, const Vector3& p1, const Vector3& p2, BSPTraceResult* tr, int depth) const {
+    if (depth > 128) return false;
+
     if (nodeNum < 0) {
         int leafIdx = -nodeNum - 1;
         if (leafIdx >= 0 && leafIdx < m_numLeaves && m_leaves[leafIdx].contents == CONTENTS_SOLID) {
@@ -883,10 +894,10 @@ bool BSPFile::TraceNodeRecursive(int nodeNum, float p1f, float p2f, const Vector
     float t2 = plane->normal.Dot(p2) - plane->dist;
 
     if (t1 >= 0.0f && t2 >= 0.0f) {
-        return TraceNodeRecursive(node->children[0], p1f, p2f, p1, p2, tr);
+        return TraceNodeRecursive(node->children[0], p1f, p2f, p1, p2, tr, depth + 1);
     }
     if (t1 < 0.0f && t2 < 0.0f) {
-        return TraceNodeRecursive(node->children[1], p1f, p2f, p1, p2, tr);
+        return TraceNodeRecursive(node->children[1], p1f, p2f, p1, p2, tr, depth + 1);
     }
 
     float frac = t1 / (t1 - t2);
@@ -895,11 +906,11 @@ bool BSPFile::TraceNodeRecursive(int nodeNum, float p1f, float p2f, const Vector
     float midf = p1f + (p2f - p1f) * frac;
 
     int side = (t1 < 0.0f) ? 1 : 0;
-    if (TraceNodeRecursive(node->children[side], p1f, midf, p1, mid, tr)) {
+    if (TraceNodeRecursive(node->children[side], p1f, midf, p1, mid, tr, depth + 1)) {
         return true;
     }
 
-    if (TraceNodeRecursive(node->children[1 - side], midf, p2f, mid, p2, tr)) {
+    if (TraceNodeRecursive(node->children[1 - side], midf, p2f, mid, p2, tr, depth + 1)) {
         if (tr && tr->planeNormal == Vector3(0, 0, 0)) {
             tr->planeNormal = (side == 0) ? plane->normal : (plane->normal * -1.0f);
             tr->planeDist = plane->dist;
@@ -921,7 +932,9 @@ bool BSPFile::TraceNodeRecursive(int nodeNum, float p1f, float p2f, const Vector
     return false;
 }
 
-bool BSPFile::TraceClipnodeRecursive(int clipnodeNum, float p1f, float p2f, const Vector3& p1, const Vector3& p2, BSPTraceResult* tr) const {
+bool BSPFile::TraceClipnodeRecursive(int clipnodeNum, float p1f, float p2f, const Vector3& p1, const Vector3& p2, BSPTraceResult* tr, int depth) const {
+    if (depth > 128) return false;
+
     if (clipnodeNum < 0) {
         if (clipnodeNum == CONTENTS_SOLID || clipnodeNum == CONTENTS_CLIP) {
             if (tr) {
@@ -945,10 +958,10 @@ bool BSPFile::TraceClipnodeRecursive(int clipnodeNum, float p1f, float p2f, cons
     float t2 = plane->normal.Dot(p2) - plane->dist;
 
     if (t1 >= 0.0f && t2 >= 0.0f) {
-        return TraceClipnodeRecursive(node->children[0], p1f, p2f, p1, p2, tr);
+        return TraceClipnodeRecursive(node->children[0], p1f, p2f, p1, p2, tr, depth + 1);
     }
     if (t1 < 0.0f && t2 < 0.0f) {
-        return TraceClipnodeRecursive(node->children[1], p1f, p2f, p1, p2, tr);
+        return TraceClipnodeRecursive(node->children[1], p1f, p2f, p1, p2, tr, depth + 1);
     }
 
     float frac = t1 / (t1 - t2);
@@ -957,7 +970,7 @@ bool BSPFile::TraceClipnodeRecursive(int clipnodeNum, float p1f, float p2f, cons
     float midf = p1f + (p2f - p1f) * frac;
 
     int side = (t1 < 0.0f) ? 1 : 0;
-    if (TraceClipnodeRecursive(node->children[side], p1f, midf, p1, mid, tr)) {
+    if (TraceClipnodeRecursive(node->children[side], p1f, midf, p1, mid, tr, depth + 1)) {
         if (tr && tr->planeNormal == Vector3(0, 0, 0)) {
             tr->planeNormal = (side == 0) ? plane->normal : (plane->normal * -1.0f);
             tr->planeDist = plane->dist;
@@ -966,7 +979,7 @@ bool BSPFile::TraceClipnodeRecursive(int clipnodeNum, float p1f, float p2f, cons
         return true;
     }
 
-    if (TraceClipnodeRecursive(node->children[1 - side], midf, p2f, mid, p2, tr)) {
+    if (TraceClipnodeRecursive(node->children[1 - side], midf, p2f, mid, p2, tr, depth + 1)) {
         if (tr && tr->planeNormal == Vector3(0, 0, 0)) {
             tr->planeNormal = (side == 0) ? plane->normal : (plane->normal * -1.0f);
             tr->planeDist = plane->dist;

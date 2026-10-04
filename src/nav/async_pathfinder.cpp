@@ -14,7 +14,7 @@ AsyncPathManager& AsyncPathManager::Get() {
 }
 
 AsyncPathManager::AsyncPathManager()
-    : m_running(false), m_nextTaskId(1) {
+    : m_running(false), m_nextTaskId(1), m_generation(0) {
 }
 
 AsyncPathManager::~AsyncPathManager() {
@@ -53,6 +53,22 @@ void AsyncPathManager::ClearQueue() {
     }
 }
 
+void AsyncPathManager::ClearAndDrain() {
+    m_generation.fetch_add(1);
+    {
+        std::lock_guard<std::mutex> lock(m_requestMutex);
+        std::queue<AsyncPathRequest> empty;
+        std::swap(m_requests, empty);
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_workerJobMutex);
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_resultMutex);
+        m_completed.clear();
+    }
+}
+
 int AsyncPathManager::EnqueueRequest(const Vector3& start, const Vector3& goal, int flags) {
     if (!m_running || !g_nav.IsLoaded()) return 0;
 
@@ -75,6 +91,7 @@ int AsyncPathManager::EnqueueRequest(const Vector3& start, const Vector3& goal, 
 void AsyncPathManager::WorkerLoop() {
     while (m_running) {
         AsyncPathRequest req;
+        uint32_t reqGen = 0;
         {
             std::unique_lock<std::mutex> lock(m_requestMutex);
             m_cv.wait(lock, [this] {
@@ -85,6 +102,7 @@ void AsyncPathManager::WorkerLoop() {
 
             req = m_requests.front();
             m_requests.pop();
+            reqGen = m_generation.load();
         }
 
         AsyncPathResult res;
@@ -93,35 +111,33 @@ void AsyncPathManager::WorkerLoop() {
         res.length = 0.0f;
         res.success = false;
 
-        if (g_nav.IsLoaded()) {
-            NavPath path;
-            bool ok = NavPathFinder::BuildPath(
-                g_nav.GetGrid(), req.start, req.goal, path, req.flags,
-                g_bsp.IsLoaded() ? &g_bsp : nullptr
-            );
+        {
+            std::lock_guard<std::mutex> jobLock(m_workerJobMutex);
 
-            if (ok && path.IsValid()) {
-                res.success = true;
-                res.length = path.GetLength();
+            if (m_generation.load() == reqGen && g_nav.IsLoaded()) {
+                NavPath path;
+                bool ok = NavPathFinder::BuildPath(
+                    g_nav.GetGrid(), req.start, req.goal, path, req.flags,
+                    g_bsp.IsLoaded() ? &g_bsp : nullptr
+                );
 
-                // Store completed path safely
-                int pathId = g_nextPathId++;
-                {
-                    // Access to g_activePaths on worker is protected or queued
-                    // Here we assign pathId and store path in result for main thread insertion
-                }
-                res.pathId = pathId;
+                if (ok && path.IsValid() && m_generation.load() == reqGen) {
+                    res.success = true;
+                    res.length = path.GetLength();
 
-                // Lock active paths to register
-                extern std::mutex g_activePathsMutex;
-                {
-                    std::lock_guard<std::mutex> lock(g_activePathsMutex);
-                    g_activePaths[pathId] = std::move(path);
+                    int pathId = g_nextPathId++;
+                    res.pathId = pathId;
+
+                    extern std::mutex g_activePathsMutex;
+                    {
+                        std::lock_guard<std::mutex> lock(g_activePathsMutex);
+                        g_activePaths[pathId] = std::move(path);
+                    }
                 }
             }
         }
 
-        {
+        if (m_generation.load() == reqGen) {
             std::lock_guard<std::mutex> lock(m_resultMutex);
             m_completed.push_back(res);
         }

@@ -61,7 +61,13 @@ static cell AMX_NATIVE_CALL bsp_load_map(AMX *amx, cell *params) {
     }
 
     std::string bspPath = FindMapBSP(mapname);
-    if (bspPath.empty() || !g_bsp.Load(bspPath)) {
+    if (bspPath.empty()) {
+        return 0;
+    }
+
+    AsyncPathManager::Get().ClearAndDrain();
+
+    if (!g_bsp.Load(bspPath)) {
         MF_Log("[%s] Failed to load BSP file '%s'.", MODULE_LOGTAG, bspPath.c_str());
         return 0;
     }
@@ -692,11 +698,19 @@ static cell AMX_NATIVE_CALL bsp_get_texture_name(AMX *amx, cell *params) {
         return 0;
     }
 
-    if (!g_bsp.IsLoaded()) return 0;
+    int maxlen = params[3];
+    if (maxlen <= 0) return 0;
+
+    if (!g_bsp.IsLoaded()) {
+        MF_SetAmxString(amx, params[2], "", maxlen);
+        return 0;
+    }
 
     int idx = params[1];
-    int maxlen = params[3];
-    if (idx < 0 || idx >= g_bsp.GetTextureCount() || maxlen <= 0) return 0;
+    if (idx < 0 || idx >= g_bsp.GetTextureCount()) {
+        MF_SetAmxString(amx, params[2], "", maxlen);
+        return 0;
+    }
 
     const char* name = g_bsp.GetTextureName(idx);
     return static_cast<cell>(MF_SetAmxString(amx, params[2], name, maxlen));
@@ -794,16 +808,27 @@ static cell AMX_NATIVE_CALL bsp_get_entity_key(AMX *amx, cell *params) {
         return 0;
     }
 
-    if (!g_bsp.IsLoaded()) return 0;
+    int maxlen = params[4];
+    if (maxlen <= 0) return 0;
+
+    if (!g_bsp.IsLoaded()) {
+        MF_SetAmxString(amx, params[3], "", maxlen);
+        return 0;
+    }
 
     int entIdx = params[1];
     int len = 0;
     char *key = MF_GetAmxString(amx, params[2], 0, &len);
-    int maxlen = params[4];
-    if (!key || len <= 0 || maxlen <= 0) return 0;
+    if (!key || len <= 0) {
+        MF_SetAmxString(amx, params[3], "", maxlen);
+        return 0;
+    }
 
     const BSPEntity* ent = g_bsp.GetEntity(entIdx);
-    if (!ent) return 0;
+    if (!ent) {
+        MF_SetAmxString(amx, params[3], "", maxlen);
+        return 0;
+    }
 
     std::string val = ent->GetString(key);
     return static_cast<cell>(MF_SetAmxString(amx, params[3], val.c_str(), maxlen));
@@ -1147,10 +1172,31 @@ static cell AMX_NATIVE_CALL bsp_get_face_polygon(AMX *amx, cell *params) {
     std::vector<Vector3> verts(maxVerts);
     int written = g_bsp.GetFacePolygon(faceIdx, verts.data(), maxVerts);
 
+    // Detect if output is a 2D Pawn array (array of relative row offsets) or flat 1D array
+    // In Pawn, a 2D array output[maxVerts][3] has an offset table of maxVerts elements.
+    // Each output[i] holds the byte offset from &output[i] to the start of row i.
+    // For a 3-element row (12 bytes), row 1 address is (&output[0] + 4) + output[1] = &output[0] + output[0] + 12
+    // Which means output[1] = output[0] + 8 (2 * sizeof(cell)).
+    bool is2D = false;
+    if (maxVerts > 1) {
+        is2D = (output[0] >= static_cast<cell>(maxVerts * sizeof(cell))) &&
+               (output[0] % sizeof(cell) == 0) &&
+               (output[1] == output[0] + 2 * sizeof(cell));
+    } else if (maxVerts == 1) {
+        is2D = (output[0] == sizeof(cell));
+    }
+
     for (int i = 0; i < written; ++i) {
-        output[i * 3 + 0] = amx_ftoc(verts[i].x);
-        output[i * 3 + 1] = amx_ftoc(verts[i].y);
-        output[i * 3 + 2] = amx_ftoc(verts[i].z);
+        if (is2D) {
+            cell* row = reinterpret_cast<cell*>(reinterpret_cast<uint8_t*>(&output[i]) + output[i]);
+            row[0] = amx_ftoc(verts[i].x);
+            row[1] = amx_ftoc(verts[i].y);
+            row[2] = amx_ftoc(verts[i].z);
+        } else {
+            output[i * 3 + 0] = amx_ftoc(verts[i].x);
+            output[i * 3 + 1] = amx_ftoc(verts[i].y);
+            output[i * 3 + 2] = amx_ftoc(verts[i].z);
+        }
     }
 
     return static_cast<cell>(written);
@@ -1318,14 +1364,20 @@ static cell AMX_NATIVE_CALL bsp_get_entity_target(AMX *amx, cell *params) {
         return 0;
     }
 
-    if (!g_bsp.IsLoaded()) return 0;
-
-    int entIdx = params[1];
     int maxlen = params[3];
     if (maxlen <= 0) return 0;
 
+    if (!g_bsp.IsLoaded()) {
+        MF_SetAmxString(amx, params[2], "", maxlen);
+        return 0;
+    }
+
+    int entIdx = params[1];
     const BSPEntity* ent = g_bsp.GetEntity(entIdx);
-    if (!ent) return 0;
+    if (!ent) {
+        MF_SetAmxString(amx, params[2], "", maxlen);
+        return 0;
+    }
 
     std::string val = ent->GetString("target");
     return static_cast<cell>(MF_SetAmxString(amx, params[2], val.c_str(), maxlen));
@@ -1339,14 +1391,20 @@ static cell AMX_NATIVE_CALL bsp_get_entity_targetname(AMX *amx, cell *params) {
         return 0;
     }
 
-    if (!g_bsp.IsLoaded()) return 0;
-
-    int entIdx = params[1];
     int maxlen = params[3];
     if (maxlen <= 0) return 0;
 
+    if (!g_bsp.IsLoaded()) {
+        MF_SetAmxString(amx, params[2], "", maxlen);
+        return 0;
+    }
+
+    int entIdx = params[1];
     const BSPEntity* ent = g_bsp.GetEntity(entIdx);
-    if (!ent) return 0;
+    if (!ent) {
+        MF_SetAmxString(amx, params[2], "", maxlen);
+        return 0;
+    }
 
     std::string val = ent->GetString("targetname");
     return static_cast<cell>(MF_SetAmxString(amx, params[2], val.c_str(), maxlen));

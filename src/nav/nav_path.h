@@ -38,6 +38,8 @@ private:
     std::vector<NavPathSegment> m_segments;
 };
 
+#include <mutex>
+
 class NavPathFinder {
 public:
     static bool BuildPath(
@@ -59,6 +61,9 @@ public:
         const BSPFile* bsp = nullptr
     );
 
+    static std::mutex& GetMutex() { return s_pathfinderMutex; }
+
 private:
     static uint32_t s_masterMarker;
+    static std::mutex s_pathfinderMutex;
 };

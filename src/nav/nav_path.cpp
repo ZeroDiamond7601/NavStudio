@@ -5,6 +5,7 @@
 #include <cmath>
 
 uint32_t NavPathFinder::s_masterMarker = 1;
+std::mutex NavPathFinder::s_pathfinderMutex;
 
 NavPath::NavPath() {
 }
@@ -95,6 +96,8 @@ bool NavPathFinder::BuildPathBetweenAreas(
 ) {
     outPath.Clear();
     if (!startArea || !goalArea) return false;
+
+    std::lock_guard<std::mutex> lock(s_pathfinderMutex);
 
     // Trivial case: within the same area
     if (startArea == goalArea) {
@@ -198,13 +201,15 @@ bool NavPathFinder::BuildPathBetweenAreas(
     NavArea* endpointArea = reachedGoal ? goalArea : closestArea;
     if (!endpointArea) return false;
 
-    // Backtrack path
+    // Backtrack path with cycle protection
     std::vector<NavArea*> areaPath;
     std::vector<NavTraverseType> howPath;
 
-    for (NavArea* a = endpointArea; a != nullptr; a = a->GetParent()) {
+    size_t maxAreas = 10000;
+    for (NavArea* a = endpointArea; a != nullptr && areaPath.size() < maxAreas; a = a->GetParent()) {
         areaPath.push_back(a);
         howPath.push_back(a->GetParentHow());
+        if (a == startArea) break;
     }
 
     std::reverse(areaPath.begin(), areaPath.end());

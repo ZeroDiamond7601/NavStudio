@@ -4,7 +4,7 @@
 #include <navmesh>
 
 #define PLUGIN  "NavMesh Core Demo"
-#define VERSION "1.0.3"
+#define VERSION "1.0.4"
 #define AUTHOR  "Ziyad"
 
 #define MAX_ASYNC_TRACKING 256
@@ -466,6 +466,13 @@ public Cmd_NavFaces(id)
         new firstFace = faces[0];
         new vertCount = bsp_get_face_vertex_count(firstFace);
         client_print(id, print_chat, "[NavMesh Faces] First face #%d has %d vertices.", firstFace, vertCount);
+
+        new Float:poly[16][3];
+        new polyVerts = bsp_get_face_polygon(firstFace, poly, 16);
+        if (polyVerts > 0)
+        {
+            client_print(id, print_chat, "[NavMesh Faces] Face #%d v0: (%.1f, %.1f, %.1f)", firstFace, poly[0][0], poly[0][1], poly[0][2]);
+        }
     }
 
     return PLUGIN_HANDLED;
