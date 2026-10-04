@@ -26,6 +26,7 @@ if(MSVC)
         _CRT_SECURE_NO_WARNINGS
         HAVE_STDINT_H
         NOMINMAX
+        NO_MSVC8_AUTO_COMPAT
     )
     # Statically link MSVC runtime (/MT) for standalone portability on game servers
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

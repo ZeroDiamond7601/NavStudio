@@ -1,13 +1,16 @@
 #pragma once
 
+#include <unordered_map>
+#include <mutex>
+#include <atomic>
+#include <vector>
+#include <string>
+
 #include "amxxmodule.h"
 #include "../bsp/bsp_file.h"
 #include "../nav/nav_file.h"
 #include "../nav/nav_path.h"
 #include "../nav/async_pathfinder.h"
-#include <unordered_map>
-#include <mutex>
-#include <atomic>
 
 extern BSPFile g_bsp;
 extern NavMesh g_nav;

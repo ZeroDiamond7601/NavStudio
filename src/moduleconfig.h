@@ -1,12 +1,24 @@
 #ifndef _INCLUDE_MODULECONFIG_H
 #define _INCLUDE_MODULECONFIG_H
 
+#ifndef HAVE_STDINT_H
 #define HAVE_STDINT_H
+#endif
+
+#ifndef HAVE_STRING_H
 #define HAVE_STRING_H
+#endif
+
+#ifndef NO_ALLOC_OVERRIDES
 #define NO_ALLOC_OVERRIDES
+#endif
 
 #ifndef NOMINMAX
 #define NOMINMAX
+#endif
+
+#ifndef NO_MSVC8_AUTO_COMPAT
+#define NO_MSVC8_AUTO_COMPAT
 #endif
 
 #define MODULE_NAME "NavMesh Core"
