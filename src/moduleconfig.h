@@ -3,6 +3,11 @@
 
 #define HAVE_STDINT_H
 #define HAVE_STRING_H
+#define NO_ALLOC_OVERRIDES
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 
 #define MODULE_NAME "NavMesh Core"
 #define MODULE_VERSION "1.0.0"
@@ -13,6 +18,13 @@
 
 #define FN_AMXX_ATTACH OnAmxxAttach
 #define FN_AMXX_DETACH OnAmxxDetach
-#define FN_AMXX_PLUGINS_LOADED OnPluginsLoaded
+#define FN_AMXX_PLUGINSLOADED OnPluginsLoaded
+#define FN_AMXX_PLUGINSUNLOADED OnPluginsUnloaded
+
+// Forward declarations for amxxmodule.cpp
+void OnAmxxAttach();
+void OnAmxxDetach();
+void OnPluginsLoaded();
+void OnPluginsUnloaded();
 
 #endif

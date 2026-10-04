@@ -11,13 +11,13 @@ int main(int argc, char* argv[]) {
     std::cout << " NavMesh Core - CS 1.6 BSP & NAV Verification CLI\n";
     std::cout << "=========================================================\n\n";
 
-    if (argc < 2) {
+    if (argc < 2 || std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h" || std::string(argv[1]) == "-v" || std::string(argv[1]) == "--version") {
         std::cout << "Usage:\n";
         std::cout << "  nav_cli <path_to_bsp_or_nav> [optional_second_file]\n\n";
         std::cout << "Examples:\n";
         std::cout << "  nav_cli de_dust2.bsp de_dust2.nav\n";
         std::cout << "  nav_cli cstrike/maps/de_dust2.bsp\n";
-        return 1;
+        return 0;
     }
 
     std::string bspPath = "";

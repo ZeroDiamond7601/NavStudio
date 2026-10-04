@@ -25,6 +25,7 @@ if(MSVC)
         _USRDLL
         _CRT_SECURE_NO_WARNINGS
         HAVE_STDINT_H
+        NOMINMAX
     )
     # Statically link MSVC runtime (/MT) for standalone portability on game servers
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -42,7 +43,7 @@ set(SDK_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/sdk/hlsdk/pm_shared
 )
 
-# Core sources for BSP and NAV engines
+# Core sources for BSP and NAV engines (pure algorithms & geometry, no AMXX dependencies)
 set(CORE_SOURCES
     src/bsp/bsp_entity.cpp
     src/bsp/bsp_file.cpp
@@ -50,7 +51,6 @@ set(CORE_SOURCES
     src/nav/nav_grid.cpp
     src/nav/nav_path.cpp
     src/nav/nav_file.cpp
-    src/nav/async_pathfinder.cpp
 )
 
 find_package(Threads REQUIRED)
@@ -59,6 +59,7 @@ find_package(Threads REQUIRED)
 if(BUILD_AMXX_MODULE)
     set(MODULE_SOURCES
         ${CORE_SOURCES}
+        src/nav/async_pathfinder.cpp
         src/amxx/amxx_api.cpp
         src/amxx/amxx_bsp_natives.cpp
         src/amxx/amxx_nav_natives.cpp
@@ -94,7 +95,6 @@ if(BUILD_CLI)
 
     add_executable(nav_cli ${CLI_SOURCES})
     target_include_directories(nav_cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(nav_cli PRIVATE Threads::Threads)
 
     set_target_properties(nav_cli PROPERTIES
         OUTPUT_NAME "nav_cli"

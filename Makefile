@@ -36,14 +36,13 @@ $(TARGET): $(SRC)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SRC) -o $(TARGET)
 
 cli:
-	$(CXX) -O3 -std=c++17 -pthread -Isrc \
+	$(CXX) -O3 -std=c++17 -Isrc \
 		src/bsp/bsp_entity.cpp \
 		src/bsp/bsp_file.cpp \
 		src/nav/nav_area.cpp \
 		src/nav/nav_grid.cpp \
 		src/nav/nav_path.cpp \
 		src/nav/nav_file.cpp \
-		src/nav/async_pathfinder.cpp \
 		src/cli/main.cpp \
 		-o nav_cli
 
