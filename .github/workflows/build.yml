@@ -1,0 +1,101 @@
+name: CI & Build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build-linux:
+    name: Build Linux (x86)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install 32-bit Build Dependencies
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib cmake
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Project
+        run: cmake --build build --config Release -j$(nproc)
+
+      - name: Test CLI
+        run: ./build/nav_cli
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: navmesh-linux-i386
+          path: |
+            build/navmesh_amxx_i386.so
+            build/nav_cli
+
+  build-windows:
+    name: Build Windows (Win32)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure CMake (Win32)
+        run: cmake -B build -A Win32
+
+      - name: Build Project
+        run: cmake --build build --config Release
+
+      - name: Test CLI
+        run: .\build\Release\nav_cli.exe
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: navmesh-windows-x86
+          path: |
+            build/Release/navmesh_amxx.dll
+            build/Release/nav_cli.exe
+
+  release:
+    name: Create GitHub Release
+    needs: [build-linux, build-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Linux Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: navmesh-linux-i386
+          path: release_pkg/
+
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: navmesh-windows-x86
+          path: release_pkg/
+
+      - name: Prepare Package
+        run: |
+          mkdir -p release_pkg/scripting/include
+          cp scripting/include/navmesh.inc release_pkg/scripting/include/
+          cp scripting/navmesh_test.sma release_pkg/scripting/
+          cp README.md release_pkg/
+          cd release_pkg && zip -r ../navmesh_amxx_release.zip .
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: navmesh_amxx_release.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

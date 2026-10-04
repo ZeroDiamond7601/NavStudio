@@ -1,0 +1,284 @@
+# NavMesh Core - AMX Mod X Navigation System
+
+[![CI & Build](https://github.com/USERNAME/REPO/actions/workflows/build.yml/badge.svg)](https://github.com/USERNAME/REPO/actions)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20(x86)-brightgreen.svg)]()
+[![Compatibility](https://img.shields.io/badge/AMXX-1.8.x%20--%201.10.x%20%7C%20ReHLDS-orange.svg)]()
+
+**NavMesh Core** is a high-performance C++ module for **AMX Mod X** (GoldSrc / Counter-Strike 1.6 / Counter-Strike: Condition Zero). It provides direct, memory-mapped access to GoldSrc **`.bsp`** maps (Version 30) and Counter-Strike **`.nav`** navigation meshes (Versions 4 & 5), featuring ultra-fast collision tracing, spatial partitioning, and full **A\* pathfinding** with portal smoothing.
+
+---
+
+## Features
+
+### 🗺️ GoldSrc BSP Engine (`.bsp`)
+* **Direct Lump Parsing:** Reads and caches GoldSrc BSP lumps (Planes, Nodes, Clipnodes, Leaves, Models, Visibility, Entities) directly in memory with bounds safety.
+* **Exact Ray & Hull Tracing:** Supports exact Hull 0 (Point / Bullets) and Hulls 1–3 (Player standing, crouch, large hull) raycasting against world geometry and brush models (`*1`, `*2`, doors, breakables).
+* **Ground Height Snapping:** Native downward ground trace for accurately snapping origins to floor geometry.
+* **Visibility Engine:** Uncompressed PVS and PAS bitmask checks to determine if two BSP leaves can see or hear each other.
+* **Entity Extraction:** Direct parsing of the raw entity lump without requiring engine entity dictionary lookups.
+
+### 🧭 Navigation Mesh System (`.nav`)
+* **Format Compatibility:** Fully parses Counter-Strike 1.6 / Condition Zero `.nav` files (Magic `0xFEEDFACE`, Versions 4 and 5).
+* **Bilinear Quad Elevation:** Calculates exact ground elevation at any `(x, y)` coordinate inside an area quad using 4-corner bilinear interpolation.
+* **Spatial Grid:** Uniform 2D hash grid (cell size 300 units) providing $O(1)$ spatial queries for nearest area lookups.
+* **Tactical Data:** Access to hiding spots (cover, sniper spots), approach areas, encounter paths, and named map places (e.g., `"BombsiteA"`, `"TSpawn"`).
+* **Ladder Support:** Automatically extracts and links `func_ladder` entities from the BSP into the navigation graph.
+
+### 🚀 A* Pathfinding Engine
+* **Portal Waypoints:** Uses portal boundaries between adjacent areas so calculated paths route cleanly through doorways instead of blindly aiming for area centers.
+* **Custom Traversal Costs:** Supports options to avoid crouching, avoid jumping, or prefer paths with cover.
+* **Line-of-Sight Smoothing:** Optional string-pulling optimization that checks line-of-sight against BSP geometry to remove redundant waypoints.
+* **Active Path Handles:** High-performance path instance management exposed directly to AMXX Pawn scripting.
+
+---
+
+## Directory Structure
+
+```text
+nav_module/
+├── .github/
+│   └── workflows/
+│       └── build.yml               # Automated multi-platform CI & GitHub Releases
+├── sdk/                            # Self-contained AMXX / Metamod / HLSDK headers
+│   ├── amxmodx/
+│   ├── metamod/
+│   └── hlsdk/
+├── src/
+│   ├── math/
+│   │   └── vector3.h               # Vector math library
+│   ├── bsp/
+│   │   ├── bsp_types.h             # GoldSrc BSP v30 lump definitions
+│   │   ├── bsp_file.h / .cpp       # BSP loader and ray casting engine
+│   │   └── bsp_entity.h / .cpp     # Map entity parsing
+│   ├── nav/
+│   │   ├── nav_types.h             # Navigation mesh constants and structs
+│   │   ├── nav_area.h / .cpp       # Area quad elevation and connections
+│   │   ├── nav_grid.h / .cpp       # Spatial uniform 2D grid
+│   │   ├── nav_path.h / .cpp       # A* Pathfinding engine
+│   │   └── nav_file.h / .cpp       # .nav file parser and serializer
+│   ├── amxx/
+│   │   ├── amxx_api.h / .cpp       # Module lifecycle and exports
+│   │   ├── amxx_bsp_natives.cpp    # BSP Pawn natives
+│   │   └── amxx_nav_natives.cpp    # NAV Pawn natives
+│   ├── cli/
+│   │   └── main.cpp                # Standalone verification & benchmark CLI
+│   └── moduleconfig.h              # AMXX module metadata
+├── scripting/
+│   ├── include/
+│   │   └── navmesh.inc             # Pawn include file with documentation
+│   └── navmesh_test.sma            # Example test plugin
+├── CMakeLists.txt                  # Multi-platform CMake build configuration
+├── Makefile                        # Linux direct Makefile
+├── .gitignore
+├── LICENSE
+└── README.md
+```
+
+---
+
+## Installation
+
+1. Download the latest release from the **Releases** tab:
+   * **Linux:** `navmesh_amxx_i386.so`
+   * **Windows:** `navmesh_amxx.dll`
+2. Copy the binary to your server:
+   * `cstrike/addons/amxmodx/modules/navmesh_amxx_i386.so` (Linux)
+   * `cstrike/addons/amxmodx/modules/navmesh_amxx.dll` (Windows)
+3. Open `cstrike/addons/amxmodx/configs/modules.ini` and add:
+   ```ini
+   navmesh
+   ```
+4. Copy `scripting/include/navmesh.inc` to your compiler's `include/` directory.
+5. Restart your server.
+
+---
+
+## Building from Source
+
+### Prerequisites
+* **Linux:** `gcc-multilib`, `g++-multilib`, `cmake` (or `make`)
+* **Windows:** Visual Studio 2019/2022/2026 (Desktop development with C++ workload) or MinGW32
+
+### Linux (Ubuntu / Debian x86)
+```bash
+# 1. Install 32-bit compilation tools
+sudo dpkg --add-architecture i386
+sudo apt-get update
+sudo apt-get install -y gcc-multilib g++-multilib cmake
+
+# 2. Build with CMake
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+
+# Output binary: build/navmesh_amxx_i386.so
+```
+
+Alternatively, use the standalone Makefile:
+```bash
+make
+```
+
+### Windows (MSVC 32-bit)
+Open **Developer Command Prompt for VS** and run:
+```cmd
+cmake -B build -A Win32
+cmake --build build --config Release
+
+:: Output binary: build\Release\navmesh_amxx.dll
+```
+
+---
+
+## Standalone CLI Tool (`nav_cli`)
+
+The project includes a standalone CLI executable that allows testing `.bsp` and `.nav` files from the command line without running a game server:
+
+```bash
+./build/nav_cli cstrike/maps/de_dust2.bsp czero/maps/de_dust2.nav
+```
+
+**Sample Output:**
+```text
+=========================================================
+ NavMesh Core - CS 1.6 BSP & NAV Verification CLI
+=========================================================
+
+[BSP] Loading: de_dust2.bsp...
+  -> BSP loaded successfully!
+  -> Entities: 147
+  -> Models: 43
+  -> CT Spawns: 32
+  -> T Spawns: 32
+
+[NAV] Loading: de_dust2.nav...
+  -> NAV loaded successfully!
+  -> Format version: 5
+  -> Total Navigation Areas: 718
+  -> Places: TSpawn, BombsiteB, CTSpawn, Side, Middle, BombsiteA...
+
+[PATHFINDING] Running A* Benchmark...
+  -> Start Position: (-1680, -840, 128)
+  -> Goal Position:  (280, 2240, 32)
+  -> Path found!
+  -> Waypoints count: 18
+  -> Total Path length: 3412.50 units
+```
+
+---
+
+## Pawn API Overview (`navmesh.inc`)
+
+### BSP Functions
+```pawn
+native bsp_load_map(const mapname[]);
+native bsp_is_loaded();
+native bsp_get_leaf(const Float:origin[3]);
+native bsp_check_vis(leaf_a, leaf_b);
+native bsp_check_pas(leaf_a, leaf_b);
+native bsp_trace_line(const Float:start[3], const Float:end[3], Float:hitPos[3] = Float:{0.0,0.0,0.0}, Float:hitNormal[3] = Float:{0.0,0.0,0.0});
+native bsp_trace_hull(const Float:start[3], const Float:end[3], hull_type, Float:hitPos[3] = Float:{0.0,0.0,0.0}, Float:hitNormal[3] = Float:{0.0,0.0,0.0});
+native bsp_trace_wall(const Float:start[3], const Float:end[3], hull_type);
+native bsp_trace_model(model_idx, const Float:start[3], const Float:end[3], hull_type);
+native bsp_get_ground(const Float:start[3], Float:out[3], Float:max_drop = 2000.0);
+native bsp_get_contents(const Float:origin[3]);
+native bsp_get_entity_count(const classname[] = "");
+native bsp_get_entity_origin(const classname[], target_index, Float:output[3]);
+native bsp_get_brush_model(const classname[], target_index, Float:out_mins[3], Float:out_maxs[3]);
+native bsp_get_entities(const classname[], Float:output[], max_found);
+```
+
+### NavMesh & Pathfinding Functions
+```pawn
+native nav_load(const mapname[] = "");
+native nav_unload();
+native nav_is_loaded();
+native nav_get_area_count();
+native nav_get_area_by_id(area_id);
+native nav_get_area_id(area_index);
+native nav_get_nearest_area(const Float:pos[3], Float:max_dist = 1000.0);
+native nav_get_area_at_point(const Float:pos[3], Float:max_z_delta = 40.0);
+native nav_get_area_center(area_index, Float:center[3]);
+native nav_get_area_extent(area_index, Float:mins[3], Float:maxs[3]);
+native Float:nav_get_area_z(area_index, Float:x, Float:y);
+native nav_get_area_flags(area_index);
+native nav_is_point_in_area(area_index, const Float:pos[3], Float:max_z_delta = 40.0);
+native nav_get_closest_point(area_index, const Float:pos[3], Float:closest[3]);
+native Float:nav_get_distance_to_area(area_index, const Float:pos[3]);
+native nav_get_adjacent_count(area_index, NavDirType:direction);
+native nav_get_adjacent_area(area_index, NavDirType:direction, adj_index);
+native nav_is_connected(area_a, area_b, direction = -1);
+native nav_get_place_name(area_index, output[], maxlen);
+native nav_get_hiding_spot_count(area_index);
+native nav_get_hiding_spot(area_index, spot_index, Float:pos[3], &flags);
+native nav_get_ladder_count();
+native nav_get_ladder_info(ladder_index, Float:top[3], Float:bottom[3], &Float:length, &Float:width, &direction);
+
+// Pathfinding
+native nav_build_path(const Float:start[3], const Float:goal[3], &path_id, flags = NAV_PATH_DEFAULT);
+native nav_path_get_segment_count(path_id);
+native nav_path_get_point(path_id, segment_index, Float:pos[3]);
+native nav_path_get_area(path_id, segment_index);
+native NavTraverseType:nav_path_get_how(path_id, segment_index);
+native Float:nav_path_get_length(path_id);
+native nav_path_get_point_along(path_id, Float:dist, Float:pos[3]);
+native nav_path_destroy(path_id);
+native nav_path_clear_all();
+```
+
+---
+
+## Example Usage
+
+```pawn
+#include <amxmodx>
+#include <fakemeta>
+#include <navmesh>
+
+public plugin_init()
+{
+    register_plugin("Nav Example", "1.0", "Author");
+    register_clcmd("say /path", "Cmd_Path");
+
+    new map[64];
+    get_mapname(map, charsmax(map));
+    bsp_load_map(map);
+    nav_load(map);
+}
+
+public Cmd_Path(id)
+{
+    new Float:start[3], Float:goal[3];
+    pev(id, pev_origin, start);
+
+    // Set goal 1000 units away
+    goal[0] = start[0] + 500.0;
+    goal[1] = start[1] + 500.0;
+    goal[2] = start[2];
+
+    new pathId = 0;
+    if (nav_build_path(start, goal, pathId, NAV_PATH_SMOOTH))
+    {
+        new count = nav_path_get_segment_count(pathId);
+        new Float:length = nav_path_get_length(pathId);
+        client_print(id, print_chat, "Path found! Waypoints: %d, Length: %.1f units", count, length);
+
+        for (new i = 0; i < count; i++)
+        {
+            new Float:wp[3];
+            nav_path_get_point(pathId, i, wp);
+            // Process waypoint...
+        }
+
+        nav_path_destroy(pathId);
+    }
+    return PLUGIN_HANDLED;
+}
+```
+
+---
+
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
+Portions based on AMX Mod X SDK, Metamod, and ReGameDLL.

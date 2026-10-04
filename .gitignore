@@ -1,0 +1,42 @@
+# Build artifacts
+build/
+bin/
+out/
+Release/
+Debug/
+x64/
+Win32/
+
+# Compiled objects & libraries
+*.obj
+*.o
+*.dll
+*.so
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.a
+*.exe
+nav_cli
+
+# Reference repositories (cloned during development)
+references/
+
+# IDE files
+.vs/
+.vscode/
+*.vcxproj.user
+*.vcxproj.filters
+*.sln.docstates
+*.suo
+*.user
+
+# Operating System
+.DS_Store
+Thumbs.db
+
+# Logs & temp
+*.log
+*.tmp
+scratch/
