@@ -50,7 +50,10 @@ set(CORE_SOURCES
     src/nav/nav_grid.cpp
     src/nav/nav_path.cpp
     src/nav/nav_file.cpp
+    src/nav/async_pathfinder.cpp
 )
+
+find_package(Threads REQUIRED)
 
 # AMXX Module Target
 if(BUILD_AMXX_MODULE)
@@ -65,6 +68,7 @@ if(BUILD_AMXX_MODULE)
     add_library(navmesh_amxx SHARED ${MODULE_SOURCES})
 
     target_include_directories(navmesh_amxx PRIVATE ${SDK_INCLUDES})
+    target_link_libraries(navmesh_amxx PRIVATE Threads::Threads)
 
     if(WIN32)
         set_target_properties(navmesh_amxx PROPERTIES
@@ -90,6 +94,7 @@ if(BUILD_CLI)
 
     add_executable(nav_cli ${CLI_SOURCES})
     target_include_directories(nav_cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(nav_cli PRIVATE Threads::Threads)
 
     set_target_properties(nav_cli PROPERTIES
         OUTPUT_NAME "nav_cli"

@@ -216,6 +216,8 @@ native nav_get_ladder_info(ladder_index, Float:top[3], Float:bottom[3], &Float:l
 
 // Pathfinding
 native nav_build_path(const Float:start[3], const Float:goal[3], &path_id, flags = NAV_PATH_DEFAULT);
+native nav_build_path_async(const Float:start[3], const Float:goal[3], flags = NAV_PATH_DEFAULT);
+native nav_process_async();
 native nav_path_get_segment_count(path_id);
 native nav_path_get_point(path_id, segment_index, Float:pos[3]);
 native nav_path_get_area(path_id, segment_index);
@@ -224,12 +226,18 @@ native Float:nav_path_get_length(path_id);
 native nav_path_get_point_along(path_id, Float:dist, Float:pos[3]);
 native nav_path_destroy(path_id);
 native nav_path_clear_all();
+
+### Forwards
+```pawn
+forward nav_on_map_loaded(bsp_loaded, nav_loaded, area_count);
+forward nav_on_path_computed(task_id, path_id, Float:length, success);
 ```
 
 ---
 
 ## Example Usage
 
+### Synchronous Pathfinding
 ```pawn
 #include <amxmodx>
 #include <fakemeta>
@@ -239,11 +247,6 @@ public plugin_init()
 {
     register_plugin("Nav Example", "1.0", "Author");
     register_clcmd("say /path", "Cmd_Path");
-
-    new map[64];
-    get_mapname(map, charsmax(map));
-    bsp_load_map(map);
-    nav_load(map);
 }
 
 public Cmd_Path(id)
@@ -251,7 +254,7 @@ public Cmd_Path(id)
     new Float:start[3], Float:goal[3];
     pev(id, pev_origin, start);
 
-    // Set goal 1000 units away
+    // Set goal 500 units away
     goal[0] = start[0] + 500.0;
     goal[1] = start[1] + 500.0;
     goal[2] = start[2];
@@ -273,6 +276,25 @@ public Cmd_Path(id)
         nav_path_destroy(pathId);
     }
     return PLUGIN_HANDLED;
+}
+```
+
+### Asynchronous Offloaded Pathfinding
+```pawn
+// Queue non-blocking pathfinding job on background worker thread
+new taskId = nav_build_path_async(start, goal, NAV_PATH_SMOOTH);
+
+// Fired on the main server thread when worker completes:
+public nav_on_path_computed(task_id, path_id, Float:length, success)
+{
+    if (!success || !path_id)
+        return;
+
+    new count = nav_path_get_segment_count(path_id);
+    server_print("Async path computed: %d waypoints, %.1f units", count, length);
+
+    // Process waypoints and destroy handle
+    nav_path_destroy(path_id);
 }
 ```
 

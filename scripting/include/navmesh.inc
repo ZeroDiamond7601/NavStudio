@@ -453,6 +453,26 @@ native nav_get_ladder_info(ladder_index, Float:top[3], Float:bottom[3], &Float:l
 native nav_build_path(const Float:start[3], const Float:goal[3], &path_id, flags = NAV_PATH_DEFAULT);
 
 /**
+ * Computes an optimal A* path between two world positions asynchronously on a background worker thread.
+ * When path calculation completes, the 'nav_on_path_computed' forward is invoked on the main server thread.
+ *
+ * @param start         Starting [x, y, z]
+ * @param goal          Goal [x, y, z]
+ * @param flags         Pathfinding flags (NAV_PATH_AVOID_CROUCH, NAV_PATH_SMOOTH, etc.)
+ * @return              Unique task ID (> 0) on success, or 0 on failure
+ */
+native nav_build_path_async(const Float:start[3], const Float:goal[3], flags = NAV_PATH_DEFAULT);
+
+/**
+ * Manually polls and processes completed background worker path tasks.
+ * If Metamod is active, this is called automatically in StartFrame_Post.
+ * In standalone AMXX without Metamod hooks, call this inside server_frame().
+ *
+ * @return              1 on success
+ */
+native nav_process_async();
+
+/**
  * Gets the number of waypoints (segments) in a calculated path.
  *
  * @param path_id       Path handle
@@ -520,3 +540,26 @@ native nav_path_destroy(path_id);
  * @return              1 on success
  */
 native nav_path_clear_all();
+
+/* ========================================================================== */
+/*                                  FORWARDS                                  */
+/* ========================================================================== */
+
+/**
+ * Called when a BSP or NAV map is loaded or reloaded.
+ *
+ * @param bsp_loaded    1 if BSP world geometry is loaded, 0 otherwise
+ * @param nav_loaded    1 if NAV navigation mesh is loaded, 0 otherwise
+ * @param area_count    Total number of navigation areas loaded
+ */
+forward nav_on_map_loaded(bsp_loaded, nav_loaded, area_count);
+
+/**
+ * Called on the main server thread when an asynchronous path request completes.
+ *
+ * @param task_id       The unique request ID returned by nav_build_path_async
+ * @param path_id       The created path handle (valid if success == 1), or 0
+ * @param length        Total path length in world units
+ * @param success       1 if a path was successfully found, 0 if unreachable/failed
+ */
+forward nav_on_path_computed(task_id, path_id, Float:length, success);

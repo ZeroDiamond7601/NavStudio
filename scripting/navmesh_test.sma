@@ -7,17 +7,29 @@
 #define VERSION "1.0.0"
 #define AUTHOR  "Ziyad"
 
+#define MAX_ASYNC_TRACKING 256
+
 new g_BeamSprite;
+
+// Track which player requested an async path
+new g_TaskToPlayer[MAX_ASYNC_TRACKING];
 
 public plugin_init()
 {
     register_plugin(PLUGIN, VERSION, AUTHOR);
 
-    register_clcmd("say /navinfo", "Cmd_NavInfo", ADMIN_ALL, "Display current nav and bsp info");
-    register_clcmd("say /navpath", "Cmd_NavPath", ADMIN_ALL, "Build path to crosshair target");
+    register_clcmd("say /navinfo",   "Cmd_NavInfo",   ADMIN_ALL, "Display current nav and bsp info");
+    register_clcmd("say /navpath",   "Cmd_NavPath",   ADMIN_ALL, "Build synchronous path (green laser)");
+    register_clcmd("say /navasync",  "Cmd_NavAsync",  ADMIN_ALL, "Build asynchronous path (blue laser)");
     register_clcmd("say /navground", "Cmd_NavGround", ADMIN_ALL, "Test ground detection");
 
-    // Load navigation data on map start
+    // Clear task tracking table
+    for (new i = 0; i < MAX_ASYNC_TRACKING; i++)
+    {
+        g_TaskToPlayer[i] = 0;
+    }
+
+    // Auto-load map navigation data
     new szMap[64];
     get_mapname(szMap, charsmax(szMap));
 
@@ -44,6 +56,69 @@ public plugin_init()
 public plugin_precache()
 {
     g_BeamSprite = precache_model("sprites/laserbeam.spr");
+}
+
+public server_frame()
+{
+    // If not compiled as Metamod plugin, poll completed async tasks each frame.
+    // In Metamod mode, StartFrame_Post handles this automatically.
+    nav_process_async();
+}
+
+/**
+ * Forward: Called when BSP or NAV data finishes loading.
+ */
+public nav_on_map_loaded(bsp_loaded, nav_loaded, area_count)
+{
+    server_print("[NavMesh Demo] nav_on_map_loaded forward: BSP=%d, NAV=%d, Areas=%d",
+                 bsp_loaded, nav_loaded, area_count);
+}
+
+/**
+ * Forward: Called on the main server thread when a background worker finishes computing an A* path.
+ */
+public nav_on_path_computed(task_id, path_id, Float:length, success)
+{
+    new playerId = 0;
+    if (task_id > 0 && task_id < MAX_ASYNC_TRACKING)
+    {
+        playerId = g_TaskToPlayer[task_id];
+        g_TaskToPlayer[task_id] = 0;
+    }
+
+    if (!success || path_id == 0)
+    {
+        if (playerId && is_user_connected(playerId))
+        {
+            client_print(playerId, print_chat, "[NavMesh Async] Path calculation failed (no route found)!");
+        }
+        return;
+    }
+
+    new count = nav_path_get_segment_count(path_id);
+
+    if (playerId && is_user_connected(playerId))
+    {
+        client_print(playerId, print_chat,
+                     "[NavMesh Async] Task #%d complete: %d segments, %.1f units (Blue laser).",
+                     task_id, count, length);
+
+        // Draw blue laser beams between path waypoints
+        for (new i = 1; i < count; i++)
+        {
+            new Float:p1[3], Float:p2[3];
+            nav_path_get_point(path_id, i - 1, p1);
+            nav_path_get_point(path_id, i, p2);
+
+            p1[2] += 12.0;
+            p2[2] += 12.0;
+
+            DrawBeam(p1, p2, 100, 0, 150, 255); // Cyan/Blue beam
+        }
+    }
+
+    // Always release path handle after use
+    nav_path_destroy(path_id);
 }
 
 public Cmd_NavInfo(id)
@@ -84,31 +159,10 @@ public Cmd_NavPath(id)
     new Float:start[3], Float:end[3];
     pev(id, pev_origin, start);
 
-    // Aim trace forward 2000 units
-    new Float:viewOfs[3], Float:angles[3], Float:forwardVec[3];
-    pev(id, pev_view_ofs, viewOfs);
-    pev(id, pev_v_angle, angles);
-
-    new Float:eyes[3];
-    eyes[0] = start[0] + viewOfs[0];
-    eyes[1] = start[1] + viewOfs[1];
-    eyes[2] = start[2] + viewOfs[2];
-
-    engfunc(EngFunc_AngleVectors, angles, forwardVec, Float:{0.0,0.0,0.0}, Float:{0.0,0.0,0.0});
-
-    new Float:traceEnd[3];
-    traceEnd[0] = eyes[0] + forwardVec[0] * 2000.0;
-    traceEnd[1] = eyes[1] + forwardVec[1] * 2000.0;
-    traceEnd[2] = eyes[2] + forwardVec[2] * 2000.0;
-
-    // Use our module's BSP trace
-    bsp_trace_line(eyes, traceEnd, end);
-
-    // Drop goal to ground
-    new Float:goalGround[3];
-    if (bsp_get_ground(end, goalGround, 500.0))
+    if (!GetCrosshairTarget(id, end))
     {
-        end = goalGround;
+        client_print(id, print_chat, "[NavMesh] Failed to determine target point!");
+        return PLUGIN_HANDLED;
     }
 
     new pathId = 0;
@@ -121,23 +175,52 @@ public Cmd_NavPath(id)
     new count = nav_path_get_segment_count(pathId);
     new Float:len = nav_path_get_length(pathId);
 
-    client_print(id, print_chat, "[NavMesh] Path found! Segments: %d | Length: %.1f units", count, len);
+    client_print(id, print_chat, "[NavMesh] Sync Path: Segments: %d | Length: %.1f units (Green laser)", count, len);
 
-    // Draw beams between waypoints
+    // Draw green laser beams
     for (new i = 1; i < count; i++)
     {
         new Float:p1[3], Float:p2[3];
         nav_path_get_point(pathId, i - 1, p1);
         nav_path_get_point(pathId, i, p2);
 
-        // Raise slightly off ground for visibility
         p1[2] += 10.0;
         p2[2] += 10.0;
 
-        DrawBeam(p1, p2, 100);
+        DrawBeam(p1, p2, 100, 0, 255, 100); // Green
     }
 
     nav_path_destroy(pathId);
+    return PLUGIN_HANDLED;
+}
+
+public Cmd_NavAsync(id)
+{
+    if (!is_user_alive(id))
+        return PLUGIN_HANDLED;
+
+    new Float:start[3], Float:end[3];
+    pev(id, pev_origin, start);
+
+    if (!GetCrosshairTarget(id, end))
+    {
+        client_print(id, print_chat, "[NavMesh Async] Failed to determine target point!");
+        return PLUGIN_HANDLED;
+    }
+
+    new taskId = nav_build_path_async(start, end, NAV_PATH_SMOOTH);
+    if (!taskId)
+    {
+        client_print(id, print_chat, "[NavMesh Async] Failed to dispatch async path task!");
+        return PLUGIN_HANDLED;
+    }
+
+    if (taskId < MAX_ASYNC_TRACKING)
+    {
+        g_TaskToPlayer[taskId] = id;
+    }
+
+    client_print(id, print_chat, "[NavMesh Async] Request #%d queued on worker thread...", taskId);
     return PLUGIN_HANDLED;
 }
 
@@ -162,7 +245,37 @@ public Cmd_NavGround(id)
     return PLUGIN_HANDLED;
 }
 
-stock DrawBeam(const Float:p1[3], const Float:p2[3], lifeTimeTenths)
+static bool:GetCrosshairTarget(id, Float:outGround[3])
+{
+    new Float:start[3], Float:viewOfs[3], Float:angles[3], Float:forwardVec[3];
+    pev(id, pev_origin, start);
+    pev(id, pev_view_ofs, viewOfs);
+    pev(id, pev_v_angle, angles);
+
+    new Float:eyes[3];
+    eyes[0] = start[0] + viewOfs[0];
+    eyes[1] = start[1] + viewOfs[1];
+    eyes[2] = start[2] + viewOfs[2];
+
+    engfunc(EngFunc_AngleVectors, angles, forwardVec, Float:{0.0,0.0,0.0}, Float:{0.0,0.0,0.0});
+
+    new Float:traceEnd[3];
+    traceEnd[0] = eyes[0] + forwardVec[0] * 2000.0;
+    traceEnd[1] = eyes[1] + forwardVec[1] * 2000.0;
+    traceEnd[2] = eyes[2] + forwardVec[2] * 2000.0;
+
+    new Float:end[3];
+    bsp_trace_line(eyes, traceEnd, end);
+
+    if (!bsp_get_ground(end, outGround, 500.0))
+    {
+        outGround = end;
+    }
+
+    return true;
+}
+
+stock DrawBeam(const Float:p1[3], const Float:p2[3], lifeTimeTenths, r, g, b)
 {
     message_begin(MSG_BROADCAST, SVC_TEMPENTITY);
     write_byte(TE_BEAMPOINTS);
@@ -173,15 +286,15 @@ stock DrawBeam(const Float:p1[3], const Float:p2[3], lifeTimeTenths)
     write_coord(floatround(p2[1]));
     write_coord(floatround(p2[2]));
     write_short(g_BeamSprite);
-    write_byte(0);           // starting frame
-    write_byte(0);           // frame rate
+    write_byte(0);              // starting frame
+    write_byte(0);              // frame rate
     write_byte(lifeTimeTenths); // life in 0.1s
-    write_byte(10);          // line width
-    write_byte(0);           // noise
-    write_byte(0);           // red
-    write_byte(255);         // green
-    write_byte(100);         // blue
-    write_byte(200);         // brightness
-    write_byte(0);           // scroll speed
+    write_byte(10);             // line width
+    write_byte(0);              // noise
+    write_byte(r);              // red
+    write_byte(g);              // green
+    write_byte(b);              // blue
+    write_byte(200);            // brightness
+    write_byte(0);              // scroll speed
     message_end();
 }

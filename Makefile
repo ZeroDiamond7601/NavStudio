@@ -1,7 +1,7 @@
 # Makefile for Linux 32-bit AMX Mod X module
 
 CXX = g++
-CXXFLAGS = -m32 -fPIC -shared -O3 -Wall -Wno-narrowing -Wno-write-strings -std=c++17
+CXXFLAGS = -m32 -fPIC -shared -O3 -Wall -Wno-narrowing -Wno-write-strings -std=c++17 -pthread
 
 SDK_AMXX = sdk/amxmodx/public
 SDK_METAMOD = sdk/metamod
@@ -22,6 +22,7 @@ SRC = src/bsp/bsp_entity.cpp \
       src/nav/nav_grid.cpp \
       src/nav/nav_path.cpp \
       src/nav/nav_file.cpp \
+      src/nav/async_pathfinder.cpp \
       src/amxx/amxx_api.cpp \
       src/amxx/amxx_bsp_natives.cpp \
       src/amxx/amxx_nav_natives.cpp \
@@ -35,13 +36,14 @@ $(TARGET): $(SRC)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SRC) -o $(TARGET)
 
 cli:
-	$(CXX) -O3 -std=c++17 -Isrc \
+	$(CXX) -O3 -std=c++17 -pthread -Isrc \
 		src/bsp/bsp_entity.cpp \
 		src/bsp/bsp_file.cpp \
 		src/nav/nav_area.cpp \
 		src/nav/nav_grid.cpp \
 		src/nav/nav_path.cpp \
 		src/nav/nav_file.cpp \
+		src/nav/async_pathfinder.cpp \
 		src/cli/main.cpp \
 		-o nav_cli
 
