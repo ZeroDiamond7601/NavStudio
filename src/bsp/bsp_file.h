@@ -21,26 +21,56 @@ public:
     int GetContents(const Vector3& origin) const;
     bool CheckVis(int leafA, int leafB) const;
     bool CheckPAS(int leafA, int leafB) const;
+    bool DecompressPVS(int leafIndex, uint8_t* outBuffer, size_t bufferSize) const;
+    bool DecompressPAS(int leafIndex, uint8_t* outBuffer, size_t bufferSize) const;
+    int GetVisibleLeafCount(int leafIndex) const;
+    bool IsPointVisible(const Vector3& ptA, const Vector3& ptB) const;
+    bool IsPointAudible(const Vector3& ptA, const Vector3& ptB) const;
+
+    // World & Leaves info
+    bool GetWorldBounds(Vector3& mins, Vector3& maxs) const;
+    bool GetLeafBounds(int leafIndex, Vector3& mins, Vector3& maxs) const;
+    int GetLeafContents(int leafIndex) const;
+    int GetLeafAmbient(int leafIndex, int channel) const;
+    int GetPVSByteSize() const { return (m_numLeaves + 7) / 8; }
 
     // Collision tracing
     bool TraceWorld(const Vector3& start, const Vector3& end, int hullType, BSPTraceResult* tr = nullptr) const;
     bool TraceModel(int modelIndex, const Vector3& start, const Vector3& end, int hullType, BSPTraceResult* tr = nullptr) const;
+    bool TraceTexture(const Vector3& start, const Vector3& end, char* outTexture, size_t maxLen) const;
     bool GetGround(const Vector3& start, Vector3* outGround, float maxDrop = 2000.0f) const;
 
     // Entities
     const std::vector<BSPEntity>& GetEntities() const { return m_entities; }
     std::vector<const BSPEntity*> FindEntities(const std::string& classname) const;
+    const BSPEntity* GetEntity(int index) const;
+    int GetEntityCount() const { return static_cast<int>(m_entities.size()); }
 
     // Model and geometry data
     const dmodel_t* GetModel(int index) const;
     int GetModelCount() const { return m_numModels; }
     int GetLeafCount() const { return m_numLeaves; }
+    int GetNodeCount() const { return m_numNodes; }
+    int GetPlaneCount() const { return m_numPlanes; }
+    int GetFaceCount() const { return m_numFaces; }
+    const dplane_t* GetPlane(int index) const;
+    const dface_t* GetFace(int index) const;
     const std::string& GetMapName() const { return m_mapName; }
+
+    // Textures
+    int GetTextureCount() const { return static_cast<int>(m_textures.size()); }
+    const char* GetTextureName(int index) const;
+    bool GetTextureDimensions(int index, int& width, int& height) const;
+    int FindTexture(const char* name) const;
+    const char* GetFaceTextureName(int faceIndex) const;
 
 private:
     bool ParseLumps(const uint8_t* buffer, size_t size);
     bool TraceNodeRecursive(int nodeNum, float p1f, float p2f, const Vector3& p1, const Vector3& p2, BSPTraceResult* tr) const;
     bool TraceClipnodeRecursive(int clipnodeNum, float p1f, float p2f, const Vector3& p1, const Vector3& p2, BSPTraceResult* tr) const;
+    int FindFaceOnNode(int nodeNum, const Vector3& point) const;
+    bool IsPointInFace(int faceIndex, const Vector3& point) const;
+    Vector3 GetFaceCentroid(int faceIndex) const;
 
 private:
     bool m_loaded;
@@ -62,8 +92,27 @@ private:
     const dmodel_t* m_models;
     int m_numModels;
 
+    const texinfo_t* m_texinfo;
+    int m_numTexInfo;
+
+    const dface_t* m_faces;
+    int m_numFaces;
+
+    const dvertex_t* m_vertices;
+    int m_numVertices;
+
+    const dedge_t* m_edges;
+    int m_numEdges;
+
+    const int32_t* m_surfedges;
+    int m_numSurfEdges;
+
+    const uint16_t* m_marksurfaces;
+    int m_numMarkSurfaces;
+
     const uint8_t* m_visdata;
     int m_visdatalen;
 
+    std::vector<BSPTextureInfo> m_textures;
     std::vector<BSPEntity> m_entities;
 };

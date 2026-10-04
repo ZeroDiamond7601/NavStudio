@@ -2,6 +2,7 @@
 #include <fstream>
 #include <cstring>
 #include <algorithm>
+#include <cmath>
 
 BSPFile::BSPFile()
     : m_loaded(false),
@@ -10,6 +11,12 @@ BSPFile::BSPFile()
       m_clipnodes(nullptr), m_numClipnodes(0),
       m_leaves(nullptr), m_numLeaves(0),
       m_models(nullptr), m_numModels(0),
+      m_texinfo(nullptr), m_numTexInfo(0),
+      m_faces(nullptr), m_numFaces(0),
+      m_vertices(nullptr), m_numVertices(0),
+      m_edges(nullptr), m_numEdges(0),
+      m_surfedges(nullptr), m_numSurfEdges(0),
+      m_marksurfaces(nullptr), m_numMarkSurfaces(0),
       m_visdata(nullptr), m_visdatalen(0) {
 }
 
@@ -32,9 +39,22 @@ void BSPFile::Unload() {
     m_numLeaves = 0;
     m_models = nullptr;
     m_numModels = 0;
+    m_texinfo = nullptr;
+    m_numTexInfo = 0;
+    m_faces = nullptr;
+    m_numFaces = 0;
+    m_vertices = nullptr;
+    m_numVertices = 0;
+    m_edges = nullptr;
+    m_numEdges = 0;
+    m_surfedges = nullptr;
+    m_numSurfEdges = 0;
+    m_marksurfaces = nullptr;
+    m_numMarkSurfaces = 0;
     m_visdata = nullptr;
     m_visdatalen = 0;
 
+    m_textures.clear();
     m_entities.clear();
 }
 
@@ -105,6 +125,41 @@ bool BSPFile::ParseLumps(const uint8_t* buffer, size_t size) {
     PARSE_LUMP_SAFE(dclipnode_t, m_clipnodes, m_numClipnodes, LUMP_CLIPNODES);
     PARSE_LUMP_SAFE(dleaf_t, m_leaves, m_numLeaves, LUMP_LEAVES);
     PARSE_LUMP_SAFE(dmodel_t, m_models, m_numModels, LUMP_MODELS);
+    PARSE_LUMP_SAFE(texinfo_t, m_texinfo, m_numTexInfo, LUMP_TEXINFO);
+    PARSE_LUMP_SAFE(dface_t, m_faces, m_numFaces, LUMP_FACES);
+    PARSE_LUMP_SAFE(dvertex_t, m_vertices, m_numVertices, LUMP_VERTICES);
+    PARSE_LUMP_SAFE(dedge_t, m_edges, m_numEdges, LUMP_EDGES);
+    PARSE_LUMP_SAFE(int32_t, m_surfedges, m_numSurfEdges, LUMP_SURFEDGES);
+    PARSE_LUMP_SAFE(uint16_t, m_marksurfaces, m_numMarkSurfaces, LUMP_MARKSURFACES);
+
+    #undef PARSE_LUMP_SAFE
+
+    // Textures lump
+    m_textures.clear();
+    int32_t texOfs = header->lumps[LUMP_TEXTURES].fileofs;
+    int32_t texLen = header->lumps[LUMP_TEXTURES].filelen;
+    if (texOfs >= 0 && texLen >= static_cast<int32_t>(sizeof(int32_t)) && static_cast<size_t>(texOfs + texLen) <= size) {
+        const dmiptexlump_t* miptexLump = reinterpret_cast<const dmiptexlump_t*>(buffer + texOfs);
+        int32_t numMiptex = miptexLump->nummiptex;
+        if (numMiptex > 0 && numMiptex < 65536) {
+            m_textures.reserve(static_cast<size_t>(numMiptex));
+            for (int32_t i = 0; i < numMiptex; ++i) {
+                size_t ofsPos = sizeof(int32_t) + i * sizeof(int32_t);
+                if (ofsPos + sizeof(int32_t) > static_cast<size_t>(texLen)) break;
+
+                int32_t dataOfs = miptexLump->dataofs[i];
+                BSPTextureInfo info = {};
+                if (dataOfs >= 0 && static_cast<size_t>(dataOfs + sizeof(miptex_t)) <= static_cast<size_t>(texLen)) {
+                    const miptex_t* mt = reinterpret_cast<const miptex_t*>(buffer + texOfs + dataOfs);
+                    std::strncpy(info.name, mt->name, sizeof(info.name) - 1);
+                    info.name[sizeof(info.name) - 1] = '\0';
+                    info.width = static_cast<int>(mt->width);
+                    info.height = static_cast<int>(mt->height);
+                }
+                m_textures.push_back(info);
+            }
+        }
+    }
 
     // Visdata lump
     int32_t visOfs = header->lumps[LUMP_VISIBILITY].fileofs;
@@ -169,56 +224,326 @@ int BSPFile::GetContents(const Vector3& origin) const {
 bool BSPFile::CheckVis(int leafA, int leafB) const {
     if (!m_loaded || !m_visdata || m_visdatalen == 0) return true;
     if (leafA <= 0 || leafA >= m_numLeaves || leafB <= 0 || leafB >= m_numLeaves) return true;
+    if (leafA == leafB) return true;
 
     int offset = m_leaves[leafA].visofs;
     if (offset < 0 || offset >= m_visdatalen) return true;
 
     int currentLeaf = 1;
     const uint8_t* v = m_visdata + offset;
-    while (currentLeaf < m_numLeaves) {
+    const uint8_t* vEnd = m_visdata + m_visdatalen;
+
+    while (currentLeaf < m_numLeaves && v < vEnd) {
         if (v[0] == 0) {
-            currentLeaf += 8 * v[1];
-            v += 2;
+            v++;
+            if (v >= vEnd) break;
+            currentLeaf += 8 * (*v++);
         } else {
-            for (int bit = 1; bit <= 8; bit++) {
+            uint8_t byteVal = *v++;
+            for (int bit = 0; bit < 8; ++bit) {
                 if (currentLeaf == leafB) {
-                    return (v[0] & (1 << (bit - 1))) != 0;
+                    return (byteVal & (1 << bit)) != 0;
                 }
                 currentLeaf++;
             }
-            v++;
         }
     }
     return false;
 }
 
+bool BSPFile::DecompressPVS(int leafIndex, uint8_t* outBuffer, size_t bufferSize) const {
+    if (!m_loaded || !m_visdata || m_visdatalen == 0 || !outBuffer || bufferSize == 0) return false;
+    if (leafIndex <= 0 || leafIndex >= m_numLeaves) return false;
+
+    size_t rowBytes = static_cast<size_t>((m_numLeaves + 7) / 8);
+    size_t copyBytes = std::min(rowBytes, bufferSize);
+    std::memset(outBuffer, 0, bufferSize);
+
+    int offset = m_leaves[leafIndex].visofs;
+    if (offset < 0 || offset >= m_visdatalen) {
+        std::memset(outBuffer, 0xFF, copyBytes);
+        return true;
+    }
+
+    size_t outPos = 0;
+    const uint8_t* in = m_visdata + offset;
+    const uint8_t* inEnd = m_visdata + m_visdatalen;
+
+    while (outPos < copyBytes && in < inEnd) {
+        if (*in != 0) {
+            outBuffer[outPos++] = *in++;
+        } else {
+            in++;
+            if (in >= inEnd) break;
+            uint8_t count = *in++;
+            size_t toZero = std::min(static_cast<size_t>(count), copyBytes - outPos);
+            std::memset(outBuffer + outPos, 0, toZero);
+            outPos += count;
+        }
+    }
+
+    return true;
+}
+
+bool BSPFile::DecompressPAS(int leafIndex, uint8_t* outBuffer, size_t bufferSize) const {
+    if (!m_loaded || !m_visdata || m_visdatalen == 0 || !outBuffer || bufferSize == 0) return false;
+    if (leafIndex <= 0 || leafIndex >= m_numLeaves) return false;
+
+    size_t rowBytes = static_cast<size_t>((m_numLeaves + 7) / 8);
+    size_t copyBytes = std::min(rowBytes, bufferSize);
+
+    std::vector<uint8_t> pvsA(rowBytes, 0);
+    if (!DecompressPVS(leafIndex, pvsA.data(), rowBytes)) {
+        return false;
+    }
+
+    std::memcpy(outBuffer, pvsA.data(), copyBytes);
+
+    std::vector<uint8_t> pvsK(rowBytes, 0);
+    for (int k = 1; k < m_numLeaves; ++k) {
+        size_t byteIdx = static_cast<size_t>((k - 1) / 8);
+        int bitIdx = (k - 1) % 8;
+        if (byteIdx < pvsA.size() && (pvsA[byteIdx] & (1 << bitIdx))) {
+            if (DecompressPVS(k, pvsK.data(), rowBytes)) {
+                for (size_t b = 0; b < copyBytes; ++b) {
+                    outBuffer[b] |= pvsK[b];
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
 bool BSPFile::CheckPAS(int leafA, int leafB) const {
     if (!m_loaded || !m_visdata || m_visdatalen == 0) return true;
     if (leafA <= 0 || leafA >= m_numLeaves || leafB <= 0 || leafB >= m_numLeaves) return true;
+    if (leafA == leafB) return true;
 
-    int offset = m_leaves[leafA].visofs;
-    if (offset < 0) return true;
+    // Fast path: visible means audible
+    if (CheckVis(leafA, leafB)) return true;
 
-    int pasOffset = offset + (m_numLeaves + 7) / 8;
-    if (pasOffset >= m_visdatalen) return true;
+    size_t rowBytes = static_cast<size_t>((m_numLeaves + 7) / 8);
+    std::vector<uint8_t> pvsA(rowBytes, 0);
+    if (!DecompressPVS(leafA, pvsA.data(), rowBytes)) return true;
 
-    int currentLeaf = 1;
-    const uint8_t* v = m_visdata + pasOffset;
-    while (currentLeaf < m_numLeaves) {
-        if (v[0] == 0) {
-            currentLeaf += 8 * v[1];
-            v += 2;
-        } else {
-            for (int bit = 1; bit <= 8; bit++) {
-                if (currentLeaf == leafB) {
-                    return (v[0] & (1 << (bit - 1))) != 0;
-                }
-                currentLeaf++;
+    for (int k = 1; k < m_numLeaves; ++k) {
+        size_t byteIdx = static_cast<size_t>((k - 1) / 8);
+        int bitIdx = (k - 1) % 8;
+        if (byteIdx < pvsA.size() && (pvsA[byteIdx] & (1 << bitIdx))) {
+            if (CheckVis(k, leafB)) {
+                return true;
             }
-            v++;
         }
     }
+
     return false;
+}
+
+int BSPFile::GetVisibleLeafCount(int leafIndex) const {
+    if (!m_loaded || leafIndex <= 0 || leafIndex >= m_numLeaves) return 0;
+    size_t rowBytes = static_cast<size_t>((m_numLeaves + 7) / 8);
+    std::vector<uint8_t> pvs(rowBytes, 0);
+    if (!DecompressPVS(leafIndex, pvs.data(), rowBytes)) return 0;
+
+    int count = 0;
+    for (int k = 1; k < m_numLeaves; ++k) {
+        size_t byteIdx = static_cast<size_t>((k - 1) / 8);
+        int bitIdx = (k - 1) % 8;
+        if (byteIdx < pvs.size() && (pvs[byteIdx] & (1 << bitIdx))) {
+            count++;
+        }
+    }
+    return count;
+}
+
+bool BSPFile::IsPointVisible(const Vector3& ptA, const Vector3& ptB) const {
+    int leafA = GetLeafIDAtPoint(ptA);
+    int leafB = GetLeafIDAtPoint(ptB);
+    return CheckVis(leafA, leafB);
+}
+
+bool BSPFile::IsPointAudible(const Vector3& ptA, const Vector3& ptB) const {
+    int leafA = GetLeafIDAtPoint(ptA);
+    int leafB = GetLeafIDAtPoint(ptB);
+    return CheckPAS(leafA, leafB);
+}
+
+bool BSPFile::GetWorldBounds(Vector3& mins, Vector3& maxs) const {
+    if (!m_loaded || m_numModels <= 0 || !m_models) return false;
+    mins = m_models[0].mins;
+    maxs = m_models[0].maxs;
+    return true;
+}
+
+bool BSPFile::GetLeafBounds(int leafIndex, Vector3& mins, Vector3& maxs) const {
+    if (!m_loaded || leafIndex < 0 || leafIndex >= m_numLeaves || !m_leaves) return false;
+    mins = Vector3(static_cast<float>(m_leaves[leafIndex].mins[0]),
+                   static_cast<float>(m_leaves[leafIndex].mins[1]),
+                   static_cast<float>(m_leaves[leafIndex].mins[2]));
+    maxs = Vector3(static_cast<float>(m_leaves[leafIndex].maxs[0]),
+                   static_cast<float>(m_leaves[leafIndex].maxs[1]),
+                   static_cast<float>(m_leaves[leafIndex].maxs[2]));
+    return true;
+}
+
+int BSPFile::GetLeafContents(int leafIndex) const {
+    if (!m_loaded || leafIndex < 0 || leafIndex >= m_numLeaves || !m_leaves) return CONTENTS_EMPTY;
+    return m_leaves[leafIndex].contents;
+}
+
+int BSPFile::GetLeafAmbient(int leafIndex, int channel) const {
+    if (!m_loaded || leafIndex < 0 || leafIndex >= m_numLeaves || !m_leaves || channel < 0 || channel > 3) return 0;
+    return m_leaves[leafIndex].ambient_level[channel];
+}
+
+const dplane_t* BSPFile::GetPlane(int index) const {
+    if (!m_loaded || index < 0 || index >= m_numPlanes) return nullptr;
+    return &m_planes[index];
+}
+
+const dface_t* BSPFile::GetFace(int index) const {
+    if (!m_loaded || index < 0 || index >= m_numFaces) return nullptr;
+    return &m_faces[index];
+}
+
+const char* BSPFile::GetTextureName(int index) const {
+    if (!m_loaded || index < 0 || index >= static_cast<int>(m_textures.size())) return "";
+    return m_textures[index].name;
+}
+
+bool BSPFile::GetTextureDimensions(int index, int& width, int& height) const {
+    if (!m_loaded || index < 0 || index >= static_cast<int>(m_textures.size())) {
+        width = 0;
+        height = 0;
+        return false;
+    }
+    width = m_textures[index].width;
+    height = m_textures[index].height;
+    return true;
+}
+
+int BSPFile::FindTexture(const char* name) const {
+    if (!m_loaded || !name || name[0] == '\0') return -1;
+    for (size_t i = 0; i < m_textures.size(); ++i) {
+#if defined(_WIN32)
+        if (_stricmp(m_textures[i].name, name) == 0) return static_cast<int>(i);
+#else
+        if (strcasecmp(m_textures[i].name, name) == 0) return static_cast<int>(i);
+#endif
+    }
+    return -1;
+}
+
+const char* BSPFile::GetFaceTextureName(int faceIndex) const {
+    if (!m_loaded || faceIndex < 0 || faceIndex >= m_numFaces || !m_faces || !m_texinfo) return "";
+    const dface_t* face = &m_faces[faceIndex];
+    if (face->texinfo < 0 || face->texinfo >= m_numTexInfo) return "";
+    int miptex = m_texinfo[face->texinfo].miptex;
+    if (miptex < 0 || miptex >= static_cast<int>(m_textures.size())) return "";
+    return m_textures[miptex].name;
+}
+
+bool BSPFile::IsPointInFace(int faceIndex, const Vector3& point) const {
+    if (faceIndex < 0 || faceIndex >= m_numFaces || !m_faces || !m_planes || !m_vertices || !m_edges || !m_surfedges) {
+        return false;
+    }
+
+    const dface_t* face = &m_faces[faceIndex];
+    if (face->planenum < 0 || face->planenum >= m_numPlanes) return false;
+    if (face->numedges < 3) return false;
+
+    Vector3 pn = m_planes[face->planenum].normal;
+    if (face->side != 0) {
+        pn = pn * -1.0f;
+    }
+
+    for (int16_t i = 0; i < face->numedges; ++i) {
+        int32_t seIdx = face->firstedge + i;
+        if (seIdx < 0 || seIdx >= m_numSurfEdges) return false;
+
+        int32_t se = m_surfedges[seIdx];
+        uint32_t edgeIdx = static_cast<uint32_t>(std::abs(se));
+        if (edgeIdx >= static_cast<uint32_t>(m_numEdges)) return false;
+
+        const dedge_t* edge = &m_edges[edgeIdx];
+        uint16_t v0Idx = (se > 0) ? edge->v[0] : edge->v[1];
+        uint16_t v1Idx = (se > 0) ? edge->v[1] : edge->v[0];
+
+        if (v0Idx >= m_numVertices || v1Idx >= m_numVertices) return false;
+
+        Vector3 p0 = m_vertices[v0Idx].point;
+        Vector3 p1 = m_vertices[v1Idx].point;
+
+        Vector3 edgeDir = p1 - p0;
+        Vector3 inward = edgeDir.Cross(pn);
+
+        if (inward.Dot(point - p0) < -0.1f) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+Vector3 BSPFile::GetFaceCentroid(int faceIndex) const {
+    if (faceIndex < 0 || faceIndex >= m_numFaces || !m_faces || !m_vertices || !m_edges || !m_surfedges) {
+        return Vector3();
+    }
+
+    const dface_t* face = &m_faces[faceIndex];
+    if (face->numedges == 0) return Vector3();
+
+    Vector3 sum;
+    int count = 0;
+    for (int16_t i = 0; i < face->numedges; ++i) {
+        int32_t seIdx = face->firstedge + i;
+        if (seIdx < 0 || seIdx >= m_numSurfEdges) break;
+
+        int32_t se = m_surfedges[seIdx];
+        uint32_t edgeIdx = static_cast<uint32_t>(std::abs(se));
+        if (edgeIdx >= static_cast<uint32_t>(m_numEdges)) break;
+
+        const dedge_t* edge = &m_edges[edgeIdx];
+        uint16_t v0Idx = (se > 0) ? edge->v[0] : edge->v[1];
+        if (v0Idx < m_numVertices) {
+            sum = sum + m_vertices[v0Idx].point;
+            count++;
+        }
+    }
+
+    if (count > 0) {
+        return sum * (1.0f / static_cast<float>(count));
+    }
+    return Vector3();
+}
+
+int BSPFile::FindFaceOnNode(int nodeNum, const Vector3& point) const {
+    if (nodeNum < 0 || nodeNum >= m_numNodes || !m_nodes || !m_faces) return -1;
+    const dnode_t* node = &m_nodes[nodeNum];
+    if (node->numfaces == 0) return -1;
+    if (node->numfaces == 1) return node->firstface;
+
+    int bestFace = node->firstface;
+    float bestDistSq = 1e30f;
+
+    for (uint16_t i = 0; i < node->numfaces; ++i) {
+        int faceIdx = node->firstface + i;
+        if (faceIdx >= m_numFaces) break;
+
+        if (IsPointInFace(faceIdx, point)) {
+            return faceIdx;
+        }
+
+        Vector3 centroid = GetFaceCentroid(faceIdx);
+        float dsq = point.DistToSqr(centroid);
+        if (dsq < bestDistSq) {
+            bestDistSq = dsq;
+            bestFace = faceIdx;
+        }
+    }
+
+    return bestFace;
 }
 
 bool BSPFile::TraceNodeRecursive(int nodeNum, float p1f, float p2f, const Vector3& p1, const Vector3& p2, BSPTraceResult* tr) const {
@@ -259,14 +584,29 @@ bool BSPFile::TraceNodeRecursive(int nodeNum, float p1f, float p2f, const Vector
 
     int side = (t1 < 0.0f) ? 1 : 0;
     if (TraceNodeRecursive(node->children[side], p1f, midf, p1, mid, tr)) {
+        return true;
+    }
+
+    if (TraceNodeRecursive(node->children[1 - side], midf, p2f, mid, p2, tr)) {
         if (tr && tr->planeNormal == Vector3(0, 0, 0)) {
             tr->planeNormal = (side == 0) ? plane->normal : (plane->normal * -1.0f);
             tr->planeDist = plane->dist;
+            tr->hitPlane = node->planenum;
+
+            int faceIdx = FindFaceOnNode(nodeNum, mid);
+            if (faceIdx >= 0) {
+                tr->hitFace = faceIdx;
+                const char* tex = GetFaceTextureName(faceIdx);
+                if (tex && tex[0] != '\0') {
+                    std::strncpy(tr->hitTexture, tex, sizeof(tr->hitTexture) - 1);
+                    tr->hitTexture[sizeof(tr->hitTexture) - 1] = '\0';
+                }
+            }
         }
         return true;
     }
 
-    return TraceNodeRecursive(node->children[1 - side], midf, p2f, mid, p2, tr);
+    return false;
 }
 
 bool BSPFile::TraceClipnodeRecursive(int clipnodeNum, float p1f, float p2f, const Vector3& p1, const Vector3& p2, BSPTraceResult* tr) const {
@@ -309,16 +649,42 @@ bool BSPFile::TraceClipnodeRecursive(int clipnodeNum, float p1f, float p2f, cons
         if (tr && tr->planeNormal == Vector3(0, 0, 0)) {
             tr->planeNormal = (side == 0) ? plane->normal : (plane->normal * -1.0f);
             tr->planeDist = plane->dist;
+            tr->hitPlane = node->planenum;
         }
         return true;
     }
 
-    return TraceClipnodeRecursive(node->children[1 - side], midf, p2f, mid, p2, tr);
+    if (TraceClipnodeRecursive(node->children[1 - side], midf, p2f, mid, p2, tr)) {
+        if (tr && tr->planeNormal == Vector3(0, 0, 0)) {
+            tr->planeNormal = (side == 0) ? plane->normal : (plane->normal * -1.0f);
+            tr->planeDist = plane->dist;
+            tr->hitPlane = node->planenum;
+        }
+        return true;
+    }
+
+    return false;
 }
 
 bool BSPFile::TraceWorld(const Vector3& start, const Vector3& end, int hullType, BSPTraceResult* tr) const {
     if (!m_loaded || m_numModels <= 0 || !m_models) return false;
-    return TraceModel(0, start, end, hullType, tr);
+    bool hit = TraceModel(0, start, end, hullType, tr);
+
+    if (hit && tr && hullType != HULL_POINT && tr->hitTexture[0] == '\0') {
+        // Resolve surface texture on clipnode hit by tracing a short ray against Hull 0
+        Vector3 dir = (end - start).Normalized();
+        Vector3 testStart = tr->endpos - dir * 2.0f;
+        Vector3 testEnd = tr->endpos + dir * 4.0f;
+        BSPTraceResult pointTr;
+        if (TraceModel(0, testStart, testEnd, HULL_POINT, &pointTr)) {
+            tr->hitFace = pointTr.hitFace;
+            tr->hitPlane = pointTr.hitPlane;
+            std::strncpy(tr->hitTexture, pointTr.hitTexture, sizeof(tr->hitTexture) - 1);
+            tr->hitTexture[sizeof(tr->hitTexture) - 1] = '\0';
+        }
+    }
+
+    return hit;
 }
 
 bool BSPFile::TraceModel(int modelIndex, const Vector3& start, const Vector3& end, int hullType, BSPTraceResult* tr) const {
@@ -331,6 +697,9 @@ bool BSPFile::TraceModel(int modelIndex, const Vector3& start, const Vector3& en
         tr->allsolid = false;
         tr->startsolid = false;
         tr->hitContents = CONTENTS_EMPTY;
+        tr->hitPlane = -1;
+        tr->hitFace = -1;
+        tr->hitTexture[0] = '\0';
         tr->planeNormal = Vector3(0.0f, 0.0f, 0.0f);
         tr->planeDist = 0.0f;
     }
@@ -342,6 +711,25 @@ bool BSPFile::TraceModel(int modelIndex, const Vector3& start, const Vector3& en
     return TraceClipnodeRecursive(headnode, 0.0f, 1.0f, start, end, tr);
 }
 
+bool BSPFile::TraceTexture(const Vector3& start, const Vector3& end, char* outTexture, size_t maxLen) const {
+    if (!outTexture || maxLen == 0) return false;
+    outTexture[0] = '\0';
+    if (!m_loaded) return false;
+
+    BSPTraceResult tr;
+    if (!TraceModel(0, start, end, HULL_POINT, &tr)) {
+        return false;
+    }
+
+    if (tr.hitTexture[0] != '\0') {
+        std::strncpy(outTexture, tr.hitTexture, maxLen - 1);
+        outTexture[maxLen - 1] = '\0';
+        return true;
+    }
+
+    return false;
+}
+
 bool BSPFile::GetGround(const Vector3& start, Vector3* outGround, float maxDrop) const {
     if (!m_loaded || !outGround) return false;
 
@@ -349,10 +737,8 @@ bool BSPFile::GetGround(const Vector3& start, Vector3* outGround, float maxDrop)
     end.z -= maxDrop;
 
     BSPTraceResult tr;
-    // Trace with Hull 1 (standard player hull)
     bool hit = TraceWorld(start, end, HULL_HUMAN, &tr);
     if (!hit) {
-        // Fallback to point trace if human hull is tight
         hit = TraceWorld(start, end, HULL_POINT, &tr);
     }
 
@@ -372,6 +758,11 @@ std::vector<const BSPEntity*> BSPFile::FindEntities(const std::string& classname
         }
     }
     return result;
+}
+
+const BSPEntity* BSPFile::GetEntity(int index) const {
+    if (!m_loaded || index < 0 || index >= static_cast<int>(m_entities.size())) return nullptr;
+    return &m_entities[index];
 }
 
 const dmodel_t* BSPFile::GetModel(int index) const {

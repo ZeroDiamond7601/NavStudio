@@ -12,11 +12,13 @@
 ## Features
 
 ### GoldSrc BSP Engine (`.bsp`)
-* **Direct Lump Parsing:** Reads and caches GoldSrc BSP lumps (Planes, Nodes, Clipnodes, Leaves, Models, Visibility, Entities) directly in memory with bounds safety.
+* **Direct Lump Parsing:** Reads and caches GoldSrc BSP lumps (Planes, Nodes, Clipnodes, Leaves, Models, Visibility, Textures, Texinfo, Faces, Vertices, Edges, Surfedges, Marksurfaces, Entities) directly in memory with strict bounds safety.
 * **Exact Ray & Hull Tracing:** Supports exact Hull 0 (Point / Bullets) and Hulls 1–3 (Player standing, crouch, large hull) raycasting against world geometry and brush models (`*1`, `*2`, doors, breakables).
+* **Surface Texture Detection:** Detects the exact surface texture name at ray or hull collision points (e.g., `wood`, `metal`, `dirt`, `sky`).
 * **Ground Height Snapping:** Native downward ground trace for accurately snapping origins to floor geometry.
-* **Visibility Engine:** Uncompressed PVS and PAS bitmask checks to determine if two BSP leaves can see or hear each other.
-* **Entity Extraction:** Direct parsing of the raw entity lump without requiring engine entity dictionary lookups.
+* **Visibility & Audibility Engine:** PVS (Potentially Visible Set) and PAS (Potentially Audible Set) decompressed bitmasks, direct point-to-point visibility and audibility checks, and visible leaf count queries.
+* **Map Geometry & Bounds:** Fast access to world bounds, leaf bounding boxes, contents codes, ambient audio levels, planes, and node/leaf counts.
+* **Entity & Texture Metadata:** Key-value property lookups on BSP entities and texture dimension queries.
 
 ### Navigation Mesh System (`.nav`)
 * **Format Compatibility:** Fully parses Counter-Strike 1.6 / Condition Zero `.nav` files (Magic `0xFEEDFACE`, Versions 4 and 5).
@@ -171,20 +173,58 @@ The project includes a standalone CLI executable that allows testing `.bsp` and 
 
 ### BSP Functions
 ```pawn
+// Map loading & status
 native bsp_load_map(const mapname[]);
 native bsp_is_loaded();
+
+// Visibility & Audibility (PVS & PAS)
 native bsp_get_leaf(const Float:origin[3]);
 native bsp_check_vis(leaf_a, leaf_b);
 native bsp_check_pas(leaf_a, leaf_b);
+native bsp_is_point_visible(const Float:ptA[3], const Float:ptB[3]);
+native bsp_is_point_audible(const Float:ptA[3], const Float:ptB[3]);
+native bsp_get_pvs_size();
+native bsp_get_leaf_pvs(leaf_index, buffer[], maxlen);
+native bsp_get_leaf_pas(leaf_index, buffer[], maxlen);
+native bsp_get_visible_leaf_count(leaf_index);
+
+// Collision & Tracing
 native bsp_trace_line(const Float:start[3], const Float:end[3], Float:hitPos[3] = Float:{0.0,0.0,0.0}, Float:hitNormal[3] = Float:{0.0,0.0,0.0});
+native bsp_trace_line_ex(const Float:start[3], const Float:end[3], Float:hitPos[3], Float:hitNormal[3], texture[], maxlen);
 native bsp_trace_hull(const Float:start[3], const Float:end[3], hull_type, Float:hitPos[3] = Float:{0.0,0.0,0.0}, Float:hitNormal[3] = Float:{0.0,0.0,0.0});
+native bsp_trace_hull_ex(const Float:start[3], const Float:end[3], hull_type, Float:hitPos[3], Float:hitNormal[3], texture[], maxlen);
+native bsp_trace_texture(const Float:start[3], const Float:end[3], texture[], maxlen);
 native bsp_trace_wall(const Float:start[3], const Float:end[3], hull_type);
 native bsp_trace_model(model_idx, const Float:start[3], const Float:end[3], hull_type);
 native bsp_get_ground(const Float:start[3], Float:out[3], Float:max_drop = 2000.0);
 native bsp_get_contents(const Float:origin[3]);
+
+// World, Leaves & Geometry
+native bsp_get_world_bounds(Float:mins[3], Float:maxs[3]);
+native bsp_get_leaf_bounds(leaf_index, Float:mins[3], Float:maxs[3]);
+native bsp_get_leaf_contents(leaf_index);
+native bsp_get_leaf_ambient(leaf_index, channel);
+native bsp_get_leaf_count();
+native bsp_get_node_count();
+native bsp_get_plane_count();
+native bsp_get_face_count();
+native bsp_get_plane(plane_index, Float:normal[3], &Float:dist, &type);
+
+// Textures & Surfaces
+native bsp_get_texture_count();
+native bsp_get_texture_name(texture_index, name[], maxlen);
+native bsp_get_texture_size(texture_index, &width, &height);
+native bsp_find_texture(const name[]);
+
+// Entities & Submodels
 native bsp_get_entity_count(const classname[] = "");
 native bsp_get_entity_origin(const classname[], target_index, Float:output[3]);
+native bsp_get_entity_key(entity_index, const key[], value[], maxlen);
+native bsp_find_entity_by_key(const key[], const value[], start_index = 0);
 native bsp_get_brush_model(const classname[], target_index, Float:out_mins[3], Float:out_maxs[3]);
+native bsp_get_model_count();
+native bsp_get_model_bounds(model_index, Float:mins[3], Float:maxs[3]);
+native bsp_get_model_origin(model_index, Float:origin[3]);
 native bsp_get_entities(const classname[], Float:output[], max_found);
 ```
 

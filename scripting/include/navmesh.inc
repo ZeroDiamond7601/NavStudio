@@ -119,6 +119,60 @@ native bsp_check_vis(leaf_a, leaf_b);
 native bsp_check_pas(leaf_a, leaf_b);
 
 /**
+ * Checks if a 3D point ptB is potentially visible from ptA using PVS.
+ *
+ * @param ptA       Source [x, y, z] coordinate
+ * @param ptB       Target [x, y, z] coordinate
+ * @return          1 if potentially visible, 0 if occluded
+ */
+native bsp_is_point_visible(const Float:ptA[3], const Float:ptB[3]);
+
+/**
+ * Checks if a 3D point ptB is potentially audible from ptA using PAS.
+ *
+ * @param ptA       Source [x, y, z] coordinate
+ * @param ptB       Target [x, y, z] coordinate
+ * @return          1 if potentially audible, 0 otherwise
+ */
+native bsp_is_point_audible(const Float:ptA[3], const Float:ptB[3]);
+
+/**
+ * Gets the size of a decompressed PVS/PAS row in bytes ((num_leaves + 7) / 8).
+ *
+ * @return          Size in bytes
+ */
+native bsp_get_pvs_size();
+
+/**
+ * Decompresses the Potentially Visible Set (PVS) bitmask for a leaf.
+ * Each cell in buffer receives 1 byte (8 leaves per byte).
+ *
+ * @param leaf_index    Leaf index (1 to num_leaves - 1)
+ * @param buffer        Cell array to store decompressed bytes
+ * @param maxlen        Maximum array length
+ * @return              Number of bytes written
+ */
+native bsp_get_leaf_pvs(leaf_index, buffer[], maxlen);
+
+/**
+ * Computes and decompresses the Potentially Audible Set (PAS) bitmask for a leaf.
+ *
+ * @param leaf_index    Leaf index
+ * @param buffer        Cell array to store decompressed bytes
+ * @param maxlen        Maximum array length
+ * @return              Number of bytes written
+ */
+native bsp_get_leaf_pas(leaf_index, buffer[], maxlen);
+
+/**
+ * Gets the total number of leaves visible from a specific leaf.
+ *
+ * @param leaf_index    Leaf index
+ * @return              Count of visible leaves
+ */
+native bsp_get_visible_leaf_count(leaf_index);
+
+/**
  * Traces a line (Hull 0) against world geometry.
  *
  * @param start     Starting [x, y, z] coordinate
@@ -128,6 +182,19 @@ native bsp_check_pas(leaf_a, leaf_b);
  * @return          1 if hit occurred, 0 if line is clear
  */
 native bsp_trace_line(const Float:start[3], const Float:end[3], Float:hitPos[3] = Float:{0.0, 0.0, 0.0}, Float:hitNormal[3] = Float:{0.0, 0.0, 0.0});
+
+/**
+ * Traces a line (Hull 0) against world geometry and retrieves the impacted surface texture.
+ *
+ * @param start     Starting [x, y, z] coordinate
+ * @param end       Ending [x, y, z] coordinate
+ * @param hitPos    Output array for hit coordinate
+ * @param hitNormal Output array for surface normal vector
+ * @param texture   Output string buffer to receive texture name (e.g. "dirt", "wood")
+ * @param maxlen    Maximum texture string buffer length
+ * @return          1 if hit occurred, 0 if line is clear
+ */
+native bsp_trace_line_ex(const Float:start[3], const Float:end[3], Float:hitPos[3], Float:hitNormal[3], texture[], maxlen);
 
 /**
  * Traces a collision hull (0-3) against world geometry.
@@ -140,6 +207,31 @@ native bsp_trace_line(const Float:start[3], const Float:end[3], Float:hitPos[3] 
  * @return          1 if hit occurred, 0 if line is clear
  */
 native bsp_trace_hull(const Float:start[3], const Float:end[3], hull_type, Float:hitPos[3] = Float:{0.0, 0.0, 0.0}, Float:hitNormal[3] = Float:{0.0, 0.0, 0.0});
+
+/**
+ * Traces a collision hull (0-3) against world geometry and retrieves the impacted surface texture.
+ *
+ * @param start     Starting [x, y, z] coordinate
+ * @param end       Ending [x, y, z] coordinate
+ * @param hull_type Collision hull type (0-3)
+ * @param hitPos    Output array for hit coordinate
+ * @param hitNormal Output array for surface normal vector
+ * @param texture   Output string buffer to receive texture name
+ * @param maxlen    Maximum texture string buffer length
+ * @return          1 if hit occurred, 0 if line is clear
+ */
+native bsp_trace_hull_ex(const Float:start[3], const Float:end[3], hull_type, Float:hitPos[3], Float:hitNormal[3], texture[], maxlen);
+
+/**
+ * Traces a zero-width ray against world geometry and returns the hit surface texture name.
+ *
+ * @param start     Starting [x, y, z]
+ * @param end       Ending [x, y, z]
+ * @param texture   Output string buffer for texture name
+ * @param maxlen    Maximum buffer length
+ * @return          1 if hit occurred and texture found, 0 otherwise
+ */
+native bsp_trace_texture(const Float:start[3], const Float:end[3], texture[], maxlen);
 
 /**
  * Traces a line against world geometry (backward compatibility with bsp-core).
@@ -181,6 +273,116 @@ native bsp_get_ground(const Float:start[3], Float:out[3], Float:max_drop = 2000.
 native bsp_get_contents(const Float:origin[3]);
 
 /**
+ * Gets the world bounding box (minimum and maximum coordinates) of the map.
+ *
+ * @param mins      Output array for minimum [x, y, z]
+ * @param maxs      Output array for maximum [x, y, z]
+ * @return          1 on success, 0 on failure
+ */
+native bsp_get_world_bounds(Float:mins[3], Float:maxs[3]);
+
+/**
+ * Gets the bounding box of a specific BSP leaf.
+ *
+ * @param leaf_index    Leaf index
+ * @param mins          Output array for minimum [x, y, z]
+ * @param maxs          Output array for maximum [x, y, z]
+ * @return              1 on success, 0 on failure
+ */
+native bsp_get_leaf_bounds(leaf_index, Float:mins[3], Float:maxs[3]);
+
+/**
+ * Gets the contents flags of a specific BSP leaf.
+ *
+ * @param leaf_index    Leaf index
+ * @return              Contents integer (e.g. CONTENTS_SOLID, CONTENTS_WATER, CONTENTS_EMPTY)
+ */
+native bsp_get_leaf_contents(leaf_index);
+
+/**
+ * Gets the ambient lighting/audio level of a leaf.
+ *
+ * @param leaf_index    Leaf index
+ * @param channel       Ambient channel (0-3)
+ * @return              Ambient level (0-255)
+ */
+native bsp_get_leaf_ambient(leaf_index, channel);
+
+/**
+ * Gets total count of leaves in the BSP tree.
+ *
+ * @return              Leaf count
+ */
+native bsp_get_leaf_count();
+
+/**
+ * Gets total count of BSP tree nodes.
+ *
+ * @return              Node count
+ */
+native bsp_get_node_count();
+
+/**
+ * Gets total count of geometric planes in the BSP.
+ *
+ * @return              Plane count
+ */
+native bsp_get_plane_count();
+
+/**
+ * Gets total count of surface faces in the BSP.
+ *
+ * @return              Face count
+ */
+native bsp_get_face_count();
+
+/**
+ * Gets geometric plane parameters by plane index.
+ *
+ * @param plane_index   Plane index
+ * @param normal        Output array for plane normal vector [x, y, z]
+ * @param dist          Output float for plane distance from origin
+ * @param type          Output integer for plane type (0=X, 1=Y, 2=Z, 3=ANYX, 4=ANYY, 5=ANYZ)
+ * @return              1 on success, 0 on failure
+ */
+native bsp_get_plane(plane_index, Float:normal[3], &Float:dist, &type);
+
+/**
+ * Gets total number of textures referenced in the BSP.
+ *
+ * @return              Texture count
+ */
+native bsp_get_texture_count();
+
+/**
+ * Gets the name of a texture by texture index.
+ *
+ * @param texture_index Texture index (0 to count-1)
+ * @param name          Output string buffer
+ * @param maxlen        Maximum buffer length
+ * @return              Number of characters written
+ */
+native bsp_get_texture_name(texture_index, name[], maxlen);
+
+/**
+ * Gets the pixel dimensions of a texture.
+ *
+ * @param texture_index Texture index
+ * @param width         Output integer for texture width
+ * @param height        Output integer for texture height
+ * @return              1 on success, 0 on failure
+ */
+native bsp_get_texture_size(texture_index, &width, &height);
+
+/**
+ * Finds texture index by texture name (case-insensitive).
+ *
+ * @param name          Texture name
+ * @return              Texture index, or -1 if not found
+ */
+native bsp_find_texture(const name[]);
+
+/**
  * Gets the number of map entities parsed from the BSP.
  *
  * @param classname Optional classname filter (e.g. "info_player_start")
@@ -199,6 +401,27 @@ native bsp_get_entity_count(const classname[] = "");
 native bsp_get_entity_origin(const classname[], target_index, Float:output[3]);
 
 /**
+ * Reads any key-value property string from a BSP entity by its global entity index.
+ *
+ * @param entity_index  Entity index (0 to bsp_get_entity_count() - 1)
+ * @param key           Key name (e.g. "targetname", "angles", "speed")
+ * @param value         Output string buffer
+ * @param maxlen        Maximum string buffer length
+ * @return              Number of characters written
+ */
+native bsp_get_entity_key(entity_index, const key[], value[], maxlen);
+
+/**
+ * Finds the first or next entity matching a specific key-value pair.
+ *
+ * @param key           Key name to search for (e.g. "targetname")
+ * @param value         Value to match
+ * @param start_index   Start searching from this entity index
+ * @return              Entity index, or -1 if not found
+ */
+native bsp_find_entity_by_key(const key[], const value[], start_index = 0);
+
+/**
  * Gets bounding box (mins and maxs) of a brush model entity.
  *
  * @param classname     Entity classname (e.g., "func_wall")
@@ -208,6 +431,32 @@ native bsp_get_entity_origin(const classname[], target_index, Float:output[3]);
  * @return              1 on success, 0 on failure
  */
 native bsp_get_brush_model(const classname[], target_index, Float:out_mins[3], Float:out_maxs[3]);
+
+/**
+ * Gets total count of submodels (brush models like doors, triggers, platforms) in the BSP.
+ *
+ * @return              Model count
+ */
+native bsp_get_model_count();
+
+/**
+ * Gets the bounding box of a submodel.
+ *
+ * @param model_index   Model index (0 is world model, 1..N are submodels)
+ * @param mins          Output array for mins [x, y, z]
+ * @param maxs          Output array for maxs [x, y, z]
+ * @return              1 on success, 0 on failure
+ */
+native bsp_get_model_bounds(model_index, Float:mins[3], Float:maxs[3]);
+
+/**
+ * Gets the origin of a submodel.
+ *
+ * @param model_index   Model index
+ * @param origin        Output array for origin [x, y, z]
+ * @return              1 on success, 0 on failure
+ */
+native bsp_get_model_origin(model_index, Float:origin[3]);
 
 /**
  * Fills an array with origins of matching entities (bsp-core compatibility).

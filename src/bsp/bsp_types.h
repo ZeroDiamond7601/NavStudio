@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include "../math/vector3.h"
 
 #pragma pack(push, 1)
@@ -114,6 +115,42 @@ struct dmodel_t {
     int32_t numfaces;
 };
 
+struct dmiptexlump_t {
+    int32_t nummiptex;
+    int32_t dataofs[1];
+};
+
+struct miptex_t {
+    char name[16];
+    uint32_t width;
+    uint32_t height;
+    uint32_t offsets[4];
+};
+
+struct texinfo_t {
+    float vecs[2][4];
+    int32_t miptex;
+    int32_t flags;
+};
+
+struct dface_t {
+    int16_t planenum;
+    int16_t side;
+    int32_t firstedge;
+    int16_t numedges;
+    int16_t texinfo;
+    uint8_t styles[4];
+    int32_t lightofs;
+};
+
+struct dvertex_t {
+    Vector3 point;
+};
+
+struct dedge_t {
+    uint16_t v[2];
+};
+
 #pragma pack(pop)
 
 struct BSPTraceResult {
@@ -124,8 +161,21 @@ struct BSPTraceResult {
     Vector3 planeNormal;
     float planeDist;
     int32_t hitContents;
+    int32_t hitPlane;
+    int32_t hitFace;
+    char hitTexture[16];
 
     BSPTraceResult()
         : allsolid(false), startsolid(false), fraction(1.0f),
-          endpos(), planeNormal(), planeDist(0.0f), hitContents(CONTENTS_EMPTY) {}
+          endpos(), planeNormal(), planeDist(0.0f), hitContents(CONTENTS_EMPTY),
+          hitPlane(-1), hitFace(-1) {
+        hitTexture[0] = '\0';
+    }
 };
+
+struct BSPTextureInfo {
+    char name[16];
+    int width;
+    int height;
+};
+

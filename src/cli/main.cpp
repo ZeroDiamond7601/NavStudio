@@ -48,13 +48,46 @@ int main(int argc, char* argv[]) {
         if (bsp.Load(bspPath)) {
             std::cout << "  -> BSP loaded successfully!\n";
             std::cout << "  -> Entities: " << bsp.GetEntities().size() << "\n";
-            std::cout << "  -> Models: " << bsp.GetModelCount() << "\n";
-            std::cout << "  -> Leaves: " << bsp.GetLeafCount() << "\n";
+            std::cout << "  -> Models:   " << bsp.GetModelCount() << "\n";
+            std::cout << "  -> Leaves:   " << bsp.GetLeafCount() << "\n";
+            std::cout << "  -> Nodes:    " << bsp.GetNodeCount() << "\n";
+            std::cout << "  -> Planes:   " << bsp.GetPlaneCount() << "\n";
+            std::cout << "  -> Faces:    " << bsp.GetFaceCount() << "\n";
+            std::cout << "  -> Textures: " << bsp.GetTextureCount() << "\n";
+
+            Vector3 mins, maxs;
+            if (bsp.GetWorldBounds(mins, maxs)) {
+                std::cout << "  -> World Bounds: Mins(" << mins.x << ", " << mins.y << ", " << mins.z << ") Maxs("
+                          << maxs.x << ", " << maxs.y << ", " << maxs.z << ")\n";
+            }
 
             auto ctSpawns = bsp.FindEntities("info_player_start");
             auto tSpawns = bsp.FindEntities("info_player_deathmatch");
             std::cout << "  -> CT Spawns: " << ctSpawns.size() << "\n";
-            std::cout << "  -> T Spawns: " << tSpawns.size() << "\n";
+            std::cout << "  -> T Spawns:  " << tSpawns.size() << "\n";
+
+            if (!ctSpawns.empty() && !tSpawns.empty()) {
+                Vector3 ctPos, tPos;
+                ctSpawns[0]->GetOrigin(ctPos);
+                tSpawns[0]->GetOrigin(tPos);
+                int ctLeaf = bsp.GetLeafIDAtPoint(ctPos);
+                int tLeaf = bsp.GetLeafIDAtPoint(tPos);
+                bool vis = bsp.CheckVis(ctLeaf, tLeaf);
+                bool pas = bsp.CheckPAS(ctLeaf, tLeaf);
+                std::cout << "  -> PVS Check (CT Leaf " << ctLeaf << " -> T Leaf " << tLeaf << "): "
+                          << (vis ? "VISIBLE" : "OCCLUDED") << "\n";
+                std::cout << "  -> PAS Check (CT Leaf " << ctLeaf << " -> T Leaf " << tLeaf << "): "
+                          << (pas ? "AUDIBLE" : "SILENT") << "\n";
+
+                // Test surface texture at ground below CT spawn
+                Vector3 ground;
+                char texName[64] = {0};
+                Vector3 traceDown = ctPos;
+                traceDown.z -= 500.0f;
+                if (bsp.TraceTexture(ctPos, traceDown, texName, sizeof(texName))) {
+                    std::cout << "  -> Surface Texture below CT spawn: '" << texName << "'\n";
+                }
+            }
         } else {
             std::cout << "  -> Failed to open/parse BSP file.\n";
         }

@@ -18,10 +18,13 @@ public plugin_init()
 {
     register_plugin(PLUGIN, VERSION, AUTHOR);
 
-    register_clcmd("say /navinfo",   "Cmd_NavInfo",   ADMIN_ALL, "Display current nav and bsp info");
-    register_clcmd("say /navpath",   "Cmd_NavPath",   ADMIN_ALL, "Build synchronous path (green laser)");
-    register_clcmd("say /navasync",  "Cmd_NavAsync",  ADMIN_ALL, "Build asynchronous path (blue laser)");
-    register_clcmd("say /navground", "Cmd_NavGround", ADMIN_ALL, "Test ground detection");
+    register_clcmd("say /navinfo",    "Cmd_NavInfo",    ADMIN_ALL, "Display current nav and bsp info");
+    register_clcmd("say /navpath",    "Cmd_NavPath",    ADMIN_ALL, "Build synchronous path (green laser)");
+    register_clcmd("say /navasync",   "Cmd_NavAsync",   ADMIN_ALL, "Build asynchronous path (blue laser)");
+    register_clcmd("say /navground",  "Cmd_NavGround",  ADMIN_ALL, "Test ground detection");
+    register_clcmd("say /navtexture", "Cmd_NavTexture", ADMIN_ALL, "Trace hit surface texture");
+    register_clcmd("say /navbounds",  "Cmd_NavBounds",  ADMIN_ALL, "Display map world bounds and geometry counts");
+    register_clcmd("say /navpvs",      "Cmd_NavPVS",      ADMIN_ALL, "Check PVS and PAS to crosshair target");
 
     // Clear task tracking table
     for (new i = 0; i < MAX_ASYNC_TRACKING; i++)
@@ -241,6 +244,109 @@ public Cmd_NavGround(id)
     {
         client_print(id, print_chat, "[NavMesh] No ground found within 2000 units!");
     }
+
+    return PLUGIN_HANDLED;
+}
+
+public Cmd_NavTexture(id)
+{
+    if (!is_user_alive(id))
+        return PLUGIN_HANDLED;
+
+    new Float:start[3], Float:viewOfs[3], Float:angles[3], Float:forwardVec[3];
+    pev(id, pev_origin, start);
+    pev(id, pev_view_ofs, viewOfs);
+    pev(id, pev_v_angle, angles);
+
+    new Float:eyes[3];
+    eyes[0] = start[0] + viewOfs[0];
+    eyes[1] = start[1] + viewOfs[1];
+    eyes[2] = start[2] + viewOfs[2];
+
+    engfunc(EngFunc_AngleVectors, angles, forwardVec, Float:{0.0,0.0,0.0}, Float:{0.0,0.0,0.0});
+
+    new Float:traceEnd[3];
+    traceEnd[0] = eyes[0] + forwardVec[0] * 3000.0;
+    traceEnd[1] = eyes[1] + forwardVec[1] * 3000.0;
+    traceEnd[2] = eyes[2] + forwardVec[2] * 3000.0;
+
+    new Float:hitPos[3], Float:hitNormal[3], texture[64];
+    if (bsp_trace_line_ex(eyes, traceEnd, hitPos, hitNormal, texture, charsmax(texture)))
+    {
+        client_print(id, print_chat, "[NavMesh] Hit Surface Texture: '%s'", texture);
+        client_print(id, print_chat, "[NavMesh] Hit Pos: (%.1f, %.1f, %.1f) | Normal: (%.2f, %.2f, %.2f)",
+                     hitPos[0], hitPos[1], hitPos[2], hitNormal[0], hitNormal[1], hitNormal[2]);
+
+        // Draw brief red laser beam to hit point
+        DrawBeam(eyes, hitPos, 20, 255, 50, 50);
+    }
+    else
+    {
+        client_print(id, print_chat, "[NavMesh] Trace reached maximum range without hitting geometry.");
+    }
+
+    return PLUGIN_HANDLED;
+}
+
+public Cmd_NavBounds(id)
+{
+    if (!bsp_is_loaded())
+    {
+        client_print(id, print_chat, "[NavMesh] BSP is not loaded!");
+        return PLUGIN_HANDLED;
+    }
+
+    new Float:mins[3], Float:maxs[3];
+    bsp_get_world_bounds(mins, maxs);
+
+    new Float:origin[3];
+    pev(id, pev_origin, origin);
+    new leaf = bsp_get_leaf(origin);
+    new visCount = bsp_get_visible_leaf_count(leaf);
+
+    client_print(id, print_chat, "[NavMesh Bounds] World Mins: (%.0f, %.0f, %.0f) | Maxs: (%.0f, %.0f, %.0f)",
+                 mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2]);
+    client_print(id, print_chat, "[NavMesh Geometry] Leaves: %d (Visible here: %d) | Nodes: %d | Planes: %d",
+                 bsp_get_leaf_count(), visCount, bsp_get_node_count(), bsp_get_plane_count());
+    client_print(id, print_chat, "[NavMesh Geometry] Faces: %d | Textures: %d | Submodels: %d | Entities: %d",
+                 bsp_get_face_count(), bsp_get_texture_count(), bsp_get_model_count(), bsp_get_entity_count());
+
+    return PLUGIN_HANDLED;
+}
+
+public Cmd_NavPVS(id)
+{
+    if (!is_user_alive(id))
+        return PLUGIN_HANDLED;
+
+    new Float:start[3], Float:viewOfs[3];
+    pev(id, pev_origin, start);
+    pev(id, pev_view_ofs, viewOfs);
+
+    new Float:eyes[3];
+    eyes[0] = start[0] + viewOfs[0];
+    eyes[1] = start[1] + viewOfs[1];
+    eyes[2] = start[2] + viewOfs[2];
+
+    new Float:target[3];
+    if (!GetCrosshairTarget(id, target))
+    {
+        client_print(id, print_chat, "[NavMesh] Could not determine crosshair target point!");
+        return PLUGIN_HANDLED;
+    }
+
+    new leafA = bsp_get_leaf(eyes);
+    new leafB = bsp_get_leaf(target);
+
+    new isVis = bsp_is_point_visible(eyes, target);
+    new isAud = bsp_is_point_audible(eyes, target);
+
+    client_print(id, print_chat, "[NavMesh PVS/PAS] Leaf %d -> Leaf %d", leafA, leafB);
+    client_print(id, print_chat, "[NavMesh PVS/PAS] Potentially Visible (PVS): %s", isVis ? "YES" : "NO");
+    client_print(id, print_chat, "[NavMesh PVS/PAS] Potentially Audible (PAS): %s", isAud ? "YES" : "NO");
+
+    // Draw yellow beam to target
+    DrawBeam(eyes, target, 30, 255, 255, 0);
 
     return PLUGIN_HANDLED;
 }
