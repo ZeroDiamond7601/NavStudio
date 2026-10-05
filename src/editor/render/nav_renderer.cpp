@@ -63,12 +63,12 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
             r = 1.0f; g = 0.9f; b = 0.1f; a = 0.88f; // Selected: Yellow
         } else if (isHovered) {
             r = 0.1f; g = 0.9f; b = 0.95f; a = 0.78f; // Hovered: Cyan
-        } else if (area->HasAttributes(NAV_MESH_CROUCH)) {
+        } else if (area->HasAttributes(NAV_ATTR_CROUCH)) {
             r = 0.15f; g = 0.45f; b = 0.95f; a = 0.65f; // Crouch: Blue
-        } else if (area->HasAttributes(NAV_MESH_JUMP)) {
+        } else if (area->HasAttributes(NAV_ATTR_JUMP)) {
             r = 0.95f; g = 0.55f; b = 0.15f; a = 0.65f; // Jump: Orange
-        } else if (area->HasAttributes(NAV_MESH_TRANSIENT) || area->HasAttributes(NAV_MESH_NO_HOSTAGES)) {
-            r = 0.9f; g = 0.2f; b = 0.2f; a = 0.65f; // Blocked: Red
+        } else if (area->HasAttributes(NAV_ATTR_NO_JUMP)) {
+            r = 0.85f; g = 0.35f; b = 0.15f; a = 0.65f; // No Jump: Red-Orange
         }
 
         Vector3 cNW = area->GetCorner(NAV_CORNER_NORTH_WEST);

@@ -334,26 +334,23 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
         ImGui::Text("Attributes / Flags:");
 
         uint8_t flags = area->GetAttributes();
-        bool crouch = (flags & NAV_MESH_CROUCH) != 0;
-        bool jump = (flags & NAV_MESH_JUMP) != 0;
-        bool precise = (flags & NAV_MESH_PRECISE) != 0;
-        bool noJump = (flags & NAV_MESH_NO_JUMP) != 0;
-        bool transient = (flags & NAV_MESH_TRANSIENT) != 0;
+        bool crouch = (flags & NAV_ATTR_CROUCH) != 0;
+        bool jump = (flags & NAV_ATTR_JUMP) != 0;
+        bool precise = (flags & NAV_ATTR_PRECISE) != 0;
+        bool noJump = (flags & NAV_ATTR_NO_JUMP) != 0;
 
         bool changed = false;
         if (ImGui::Checkbox("Crouch", &crouch)) changed = true;
         if (ImGui::Checkbox("Jump", &jump)) changed = true;
         if (ImGui::Checkbox("Precise", &precise)) changed = true;
         if (ImGui::Checkbox("No Jump", &noJump)) changed = true;
-        if (ImGui::Checkbox("Transient (Blocked)", &transient)) changed = true;
 
         if (changed) {
             uint8_t newFlags = 0;
-            if (crouch) newFlags |= NAV_MESH_CROUCH;
-            if (jump) newFlags |= NAV_MESH_JUMP;
-            if (precise) newFlags |= NAV_MESH_PRECISE;
-            if (noJump) newFlags |= NAV_MESH_NO_JUMP;
-            if (transient) newFlags |= NAV_MESH_TRANSIENT;
+            if (crouch) newFlags |= NAV_ATTR_CROUCH;
+            if (jump) newFlags |= NAV_ATTR_JUMP;
+            if (precise) newFlags |= NAV_ATTR_PRECISE;
+            if (noJump) newFlags |= NAV_ATTR_NO_JUMP;
 
             cmdMgr.ExecuteCommand(std::make_unique<CmdSetAreaAttributes>(&scene, id, newFlags));
         }
