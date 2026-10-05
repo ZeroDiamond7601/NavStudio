@@ -2,10 +2,10 @@
 
 [![CI & Build](https://github.com/ZeroDiamond7601/amxmodx-navmesh/actions/workflows/build.yml/badge.svg)](https://github.com/ZeroDiamond7601/amxmodx-navmesh/actions)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20(x86)-brightgreen.svg)]()
+[![Platform](https://img.shields.io/badge/Platform-Debian%20%7C%20Linux%20%7C%20Windows%20(x86)-brightgreen.svg)]()
 [![Compatibility](https://img.shields.io/badge/AMXX-1.8.x%20--%201.10.x%20%7C%20ReHLDS-orange.svg)]()
 
-**NavMesh Core** is a high-performance C++ module for **AMX Mod X** (GoldSrc / Counter-Strike 1.6 / Counter-Strike: Condition Zero). It provides direct, memory-mapped access to GoldSrc **`.bsp`** maps (Version 30) and Counter-Strike **`.nav`** navigation meshes (Versions 4 & 5), featuring ultra-fast collision tracing, spatial partitioning, and full **A\* pathfinding** with portal smoothing.
+**NavMesh Core** is a high-performance C++ module for **AMX Mod X** (GoldSrc / Counter-Strike 1.6 / Counter-Strike: Condition Zero). It provides direct, memory-mapped access to GoldSrc **`.bsp`** maps (Version 30) and Counter-Strike **`.nav`** navigation meshes (Versions 4 & 5), featuring ultra-fast collision tracing, spatial partitioning, full **A\* pathfinding** with portal smoothing, a standalone verification CLI, and **NavStudio**, a hardware-accelerated 3D desktop visualizer and mesh editor.
 
 ---
 
@@ -13,7 +13,7 @@
 
 ### GoldSrc BSP Engine (`.bsp`)
 * **Direct Lump Parsing:** Reads and caches GoldSrc BSP lumps (Planes, Nodes, Clipnodes, Leaves, Models, Visibility, Textures, Texinfo, Faces, Vertices, Edges, Surfedges, Marksurfaces, Entities, Lighting) directly in memory with strict bounds safety.
-* **Exact Ray & Hull Tracing:** Supports exact Hull 0 (Point / Bullets) and Hulls 1–3 (Player standing, crouch, large hull) raycasting against world geometry and brush models (`*1`, `*2`, doors, breakables).
+* **Exact Ray & Hull Tracing:** Supports exact Hull 0 (Point / Bullets) and Hulls 1-3 (Player standing, crouch, large hull) raycasting against world geometry and brush models (`*1`, `*2`, doors, breakables).
 * **Surface Lightmap & Illumination Sampling:** Samples exact luxel lighting along arbitrary rays or at 3D face coordinates with bilinear interpolation across the 16-unit lightmap grid, returning both scalar brightness and full RGB channels.
 * **Material Classification & Texture Flags:** Automatically parses and classifies surfaces into physical engine material types (`MAT_CONCRETE`, `MAT_METAL`, `MAT_WOOD`, `MAT_VENT`, `MAT_GRATE`, `MAT_TILE`, `MAT_SLOSH`, `MAT_GLASS`, `MAT_FLESH`, etc.) and detects transparency, fluid, sky, and animated texture flags.
 * **Face Polygon Vertices Extraction:** Extracts ordered 3D world polygon vertices for any face in the map via surfedge/edge index chains.
@@ -27,8 +27,8 @@
 ### Navigation Mesh System (`.nav`)
 * **Format Compatibility:** Fully parses Counter-Strike 1.6 / Condition Zero `.nav` files (Magic `0xFEEDFACE`, Versions 4 and 5).
 * **Bilinear Quad Elevation:** Calculates exact ground elevation at any `(x, y)` coordinate inside an area quad using 4-corner bilinear interpolation.
-* **Spatial Grid:** Uniform 2D hash grid (cell size 300 units) providing $O(1)$ spatial queries for nearest area lookups.
-* **Tactical Data:** Access to hiding spots (cover, sniper spots), approach areas, encounter paths, and named map places (e.g., `"BombsiteA"`, `"TSpawn"`).
+* **Spatial Grid:** Uniform 2D hash grid (cell size 300 units) providing O(1) spatial queries for nearest area lookups.
+* **Tactical Data:** Access to hiding spots (cover, sniper spots), approach areas, encounter paths, and named map places (e.g. `"BombsiteA"`, `"TSpawn"`).
 * **Ladder Support:** Automatically extracts and links `func_ladder` entities from the BSP into the navigation graph.
 
 ### A* Pathfinding Engine
@@ -36,6 +36,19 @@
 * **Custom Traversal Costs:** Supports options to avoid crouching, avoid jumping, or prefer paths with cover.
 * **Line-of-Sight Smoothing:** Optional string-pulling optimization that checks line-of-sight against BSP geometry to remove redundant waypoints.
 * **Active Path Handles:** High-performance path instance management exposed directly to AMXX Pawn scripting.
+* **Asynchronous Offloaded Pathfinding:** Non-blocking worker threads handle multi-route A* calculations and dispatch results via event forwards (`nav_on_path_computed`).
+
+### NavStudio: 3D BSP Visualizer & NavMesh Editor
+* **Hardware-Accelerated 3D Viewport:** OpenGL 3.3 Core rendering with Dear ImGui docking interface.
+* **Multiple Shading Modes:** Solid clay shading, wireframe edge display, and Ghost / X-Ray mode (translucent BSP walls to view navigation meshes through floors and ceilings).
+* **NavMesh Inspection:** Color-coded area quads (Normal, Crouch, Jump, Blocked), directional connection lines (cyan for two-way, magenta for one-way), and ladder bounding boxes.
+* **Interactive Editing Tools:**
+  * **Floor Snapping:** Casts downward rays to the BSP collision hull to ground floating area corner vertices.
+  * **Attribute Flag Editor:** Toggle `NAV_ATTR_CROUCH`, `NAV_ATTR_JUMP`, `NAV_ATTR_PRECISE`, and `NAV_ATTR_NO_JUMP`.
+  * **Place Name Manager:** Search, filter, and assign designated map locations.
+  * **Area Connections:** View, link, and toggle area traversability.
+* **Undo / Redo System:** Command-pattern history stack (`Ctrl+Z` / `Ctrl+Y`) for non-destructive mesh authoring.
+* **Area Hierarchy Search:** Filterable tree view of all areas with instant camera focus (`F` key).
 
 ---
 
@@ -45,7 +58,7 @@
 nav_module/
 ├── .github/
 │   └── workflows/
-│       └── build.yml               # Automated multi-platform CI & GitHub Releases
+│       └── build.yml               # Debian container & Windows CI workflow
 ├── sdk/                            # Self-contained AMXX / Metamod / HLSDK headers
 │   ├── amxmodx/
 │   ├── metamod/
@@ -69,12 +82,20 @@ nav_module/
 │   │   └── amxx_nav_natives.cpp    # NAV Pawn natives
 │   ├── cli/
 │   │   └── main.cpp                # Standalone verification & benchmark CLI
-│   └── moduleconfig.h              # AMXX module metadata
+│   └── editor/                     # NavStudio 3D desktop visualizer & editor
+│       ├── camera/                 # FPS Flycam, Orbit, and 2D cameras
+│       ├── commands/               # Command pattern undo/redo engine
+│       ├── glad/                   # Embedded OpenGL 3.3 Core loader
+│       ├── math/                   # Matrix4 MVP and unprojection math
+│       ├── render/                 # BSP and NavMesh OpenGL renderers and shaders
+│       ├── scene/                  # Scene manager and raycast picker
+│       ├── ui/                     # Dear ImGui dockspace, inspector, and hierarchy
+│       └── main.cpp                # GLFW window and application loop
 ├── scripting/
 │   ├── include/
 │   │   └── navmesh.inc             # Pawn include file with documentation
 │   └── navmesh_test.sma            # Example test plugin
-├── CMakeLists.txt                  # Multi-platform CMake build configuration
+├── CMakeLists.txt                  # Modular CMake configuration (nav_core, amxx, cli, editor)
 ├── Makefile                        # Linux direct Makefile
 ├── .gitignore
 ├── LICENSE
@@ -85,10 +106,12 @@ nav_module/
 
 ## Installation
 
-1. Download the latest release from the **Releases** tab:
-   * **Linux:** `navmesh_amxx_i386.so`
-   * **Windows:** `navmesh_amxx.dll`
-2. Copy the binary to your server:
+1. Download the latest release from the [GitHub Releases](https://github.com/ZeroDiamond7601/amxmodx-navmesh/releases) page:
+   * **Linux Module:** `navmesh_amxx_i386.so` (Compiled in Debian Bookworm with static libstdc++)
+   * **Windows Module:** `navmesh_amxx.dll`
+   * **Windows GUI Editor:** `nav_editor.exe`
+   * **Command-Line Tool:** `nav_cli.exe` / `nav_cli`
+2. Copy the module binary to your server:
    * `cstrike/addons/amxmodx/modules/navmesh_amxx_i386.so` (Linux)
    * `cstrike/addons/amxmodx/modules/navmesh_amxx.dll` (Windows)
 3. Open `cstrike/addons/amxmodx/configs/modules.ini` and add:
@@ -102,43 +125,92 @@ nav_module/
 
 ## Building from Source
 
-### Prerequisites
-* **Linux:** `gcc-multilib`, `g++-multilib`, `cmake` (or `make`)
-* **Windows:** Visual Studio 2019/2022/2026 (Desktop development with C++ workload) or MinGW32
+### CMake Build Options
 
-### Linux (Ubuntu / Debian x86)
+| Option | Default | Description |
+| :--- | :--- | :--- |
+| `BUILD_AMXX_MODULE` | `ON` | Compiles the AMX Mod X server binary (`navmesh_amxx`) |
+| `BUILD_CLI` | `ON` | Compiles the headless map verification tool (`nav_cli`) |
+| `BUILD_EDITOR` | `OFF` | Compiles the NavStudio 3D GUI editor (`nav_editor`) |
+
+### Linux (Debian / Ubuntu x86)
+
 ```bash
-# 1. Install 32-bit compilation tools
+# 1. Install 32-bit compilation dependencies
 sudo dpkg --add-architecture i386
 sudo apt-get update
-sudo apt-get install -y gcc-multilib g++-multilib cmake
+sudo apt-get install -y gcc-multilib g++-multilib cmake make
 
-# 2. Build with CMake
+# 2. Build the AMXX module and CLI tool
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
+cmake --build build --config Release -j$(nproc)
 
-# Output binary: build/navmesh_amxx_i386.so
+# Output binaries:
+# build/navmesh_amxx_i386.so
+# build/nav_cli
 ```
 
-Alternatively, use the standalone Makefile:
+To build NavStudio on Linux, install `libgl1-mesa-dev` and `libx11-dev`, then pass `-DBUILD_EDITOR=ON`:
 ```bash
-make
+sudo apt-get install -y libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_EDITOR=ON
+cmake --build build --config Release -j$(nproc)
+
+# Output binary: build/nav_editor
 ```
 
-### Windows (MSVC 32-bit)
-Open **Developer Command Prompt for VS** and run:
-```cmd
-cmake -B build -A Win32
+### Windows (MSVC)
+
+Open **Developer Command Prompt for Visual Studio** or PowerShell:
+
+```powershell
+# 1. Configure with the GUI editor enabled
+cmake -B build -A Win32 -DBUILD_EDITOR=ON
+
+# 2. Compile the Release build
 cmake --build build --config Release
 
-:: Output binary: build\Release\navmesh_amxx.dll
+# Output binaries:
+# build\Release\navmesh_amxx.dll
+# build\Release\nav_cli.exe
+# build\Release\nav_editor.exe
 ```
+
+---
+
+## NavStudio Usage Guide
+
+Launch NavStudio from the terminal or by double-clicking `nav_editor.exe`:
+
+```cmd
+nav_editor.exe cstrike/maps/de_dust2.bsp
+```
+
+If a `.nav` file exists in the same directory, it will automatically load alongside the BSP geometry.
+
+### Controls and Shortcuts
+
+| Action | Shortcut |
+| :--- | :--- |
+| **Move Camera (Flycam)** | `W / A / S / D` |
+| **Elevate Camera Up / Down** | `E / Q` |
+| **Look Around** | Right-Click + Drag |
+| **Adjust Camera Speed** | Mouse Wheel (while holding Right-Click) |
+| **Orbit Selected Area** | `Alt` + Left-Click + Drag |
+| **Focus Camera on Selection** | `F` |
+| **Reset Camera** | `Home` |
+| **Select NavArea** | Left-Click (in 3D Viewport or Hierarchy) |
+| **Snap Area to Floor** | `S` |
+| **Undo** | `Ctrl + Z` |
+| **Redo** | `Ctrl + Y` |
+| **Save Navigation Mesh** | `Ctrl + S` |
+| **Open Map / NavMesh** | `Ctrl + O` |
 
 ---
 
 ## Standalone CLI Tool (`nav_cli`)
 
-The project includes a standalone CLI executable that allows testing `.bsp` and `.nav` files from the command line without running a game server:
+The project includes a headless CLI tool to analyze maps, verify geometry, and benchmark A* pathfinding without running a game server:
 
 ```bash
 ./build/nav_cli cstrike/maps/de_dust2.bsp czero/maps/de_dust2.nav
@@ -292,6 +364,7 @@ native Float:nav_path_get_length(path_id);
 native nav_path_get_point_along(path_id, Float:dist, Float:pos[3]);
 native nav_path_destroy(path_id);
 native nav_path_clear_all();
+```
 
 ### Forwards
 ```pawn
