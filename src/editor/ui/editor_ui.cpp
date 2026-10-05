@@ -1,5 +1,5 @@
 #include "editor/ui/editor_ui.h"
-#include "third_party/imgui/imgui.h"
+#include <imgui.h>
 #include "editor/commands/nav_commands.h"
 #include <cstdio>
 #include <cstring>

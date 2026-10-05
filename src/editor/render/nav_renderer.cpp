@@ -157,12 +157,17 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
     // Ladder rendering
     for (const NavLadder* ladder : nav.GetLadders()) {
         if (!ladder) continue;
-        Vector3 top = ladder->m_top;
-        Vector3 bottom = ladder->m_bottom;
-        float halfW = ladder->m_width * 0.5f;
+        Vector3 top = ladder->top;
+        Vector3 bottom = ladder->bottom;
+        float halfW = ladder->width * 0.5f;
 
-        Vector3 ladderDir = (top - bottom).Normalize();
-        Vector3 sideDir = ladder->m_normal.Cross(Vector3(0, 0, 1)).Normalize();
+        Vector3 normal(0, 1, 0);
+        if (ladder->dir == NAV_DIR_NORTH) normal = Vector3(0, 1, 0);
+        else if (ladder->dir == NAV_DIR_SOUTH) normal = Vector3(0, -1, 0);
+        else if (ladder->dir == NAV_DIR_EAST) normal = Vector3(1, 0, 0);
+        else if (ladder->dir == NAV_DIR_WEST) normal = Vector3(-1, 0, 0);
+
+        Vector3 sideDir = normal.Cross(Vector3(0, 0, 1)).Normalized();
 
         Vector3 p0 = bottom - sideDir * halfW;
         Vector3 p1 = bottom + sideDir * halfW;

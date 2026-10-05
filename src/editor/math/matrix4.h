@@ -56,8 +56,8 @@ struct Matrix4 {
     }
 
     static Matrix4 LookAt(const Vector3& eye, const Vector3& target, const Vector3& up) {
-        Vector3 f = (target - eye).Normalize();
-        Vector3 s = f.Cross(up).Normalize();
+        Vector3 f = (target - eye).Normalized();
+        Vector3 s = f.Cross(up).Normalized();
         Vector3 u = s.Cross(f);
 
         Matrix4 res;

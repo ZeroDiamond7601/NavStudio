@@ -129,10 +129,10 @@ void Camera::UpdateVectors() {
     f.x = std::cos(pitchRad) * std::cos(yawRad);
     f.y = std::cos(pitchRad) * std::sin(yawRad);
     f.z = std::sin(pitchRad);
-    m_forward = f.Normalize();
+    m_forward = f.Normalized();
 
-    m_right = m_forward.Cross(m_worldUp).Normalize();
-    m_up = m_right.Cross(m_forward).Normalize();
+    m_right = m_forward.Cross(m_worldUp).Normalized();
+    m_up = m_right.Cross(m_forward).Normalized();
 
     if (m_mode == CAMERA_MODE_ORBIT) {
         m_position = m_target - m_forward * m_orbitDistance;

@@ -30,7 +30,7 @@ Ray ScenePicker::ScreenPointToRay(
     Vector3 farWorld = invViewProj.MultiplyPoint(farPointNDC);
 
     ray.origin = nearWorld;
-    ray.direction = (farWorld - nearWorld).Normalize();
+    ray.direction = (farWorld - nearWorld).Normalized();
     return ray;
 }
 

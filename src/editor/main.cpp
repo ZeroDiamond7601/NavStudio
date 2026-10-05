@@ -1,9 +1,9 @@
 #include "editor/glad/include/glad/glad.h"
 #include <GLFW/glfw3.h>
 
-#include "third_party/imgui/imgui.h"
-#include "third_party/imgui/backends/imgui_impl_glfw.h"
-#include "third_party/imgui/backends/imgui_impl_opengl3.h"
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
 
 #include "editor/scene/editor_scene.h"
 #include "editor/scene/scene_picker.h"
