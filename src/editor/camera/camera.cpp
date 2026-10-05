@@ -89,7 +89,7 @@ void Camera::ProcessMouseMovement(float xoffset, float yoffset, bool constrainPi
         return;
     }
 
-    m_yaw += xoffset;
+    m_yaw -= xoffset;
     m_pitch += yoffset;
 
     if (constrainPitch) {
