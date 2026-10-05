@@ -15,13 +15,39 @@
 
 #include <cstdio>
 #include <iostream>
+#include <algorithm>
+#include <cctype>
 
 static Camera g_camera;
+static EditorScene* g_activeScene = nullptr;
 static bool g_isRightMouseDown = false;
 static bool g_isAltDown = false;
 static double g_lastMouseX = 0.0;
 static double g_lastMouseY = 0.0;
 static bool g_firstMouse = true;
+
+static void DropCallback(GLFWwindow* /*window*/, int count, const char** paths) {
+    if (!g_activeScene || count <= 0 || !paths) return;
+
+    for (int i = 0; i < count; ++i) {
+        if (!paths[i]) continue;
+        std::string path = paths[i];
+        std::string lowerPath = path;
+        std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+
+        if (lowerPath.length() >= 4 && lowerPath.compare(lowerPath.length() - 4, 4, ".bsp") == 0) {
+            std::printf("[DragDrop] Loading BSP map: %s\n", path.c_str());
+            g_activeScene->LoadBSP(path);
+        } else if (lowerPath.length() >= 4 && lowerPath.compare(lowerPath.length() - 4, 4, ".nav") == 0) {
+            std::printf("[DragDrop] Loading NAV mesh: %s\n", path.c_str());
+            g_activeScene->LoadNAV(path);
+        } else {
+            std::printf("[DragDrop] Unsupported file format: %s\n", path.c_str());
+        }
+    }
+}
 
 static void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
     ImGuiIO& io = ImGui::GetIO();
@@ -118,6 +144,7 @@ int main(int argc, char* argv[]) {
     glfwSetMouseButtonCallback(window, MouseButtonCallback);
     glfwSetCursorPosCallback(window, CursorPosCallback);
     glfwSetScrollCallback(window, ScrollCallback);
+    glfwSetDropCallback(window, DropCallback);
 
     // Setup Dear ImGui context with docking
     IMGUI_CHECKVERSION();
@@ -141,6 +168,7 @@ int main(int argc, char* argv[]) {
     }
 
     EditorScene scene;
+    g_activeScene = &scene;
     CommandManager cmdMgr;
     EditorUI editorUI;
     editorUI.Init();

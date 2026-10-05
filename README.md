@@ -180,13 +180,20 @@ cmake --build build --config Release
 
 ## NavStudio Usage Guide
 
-Launch NavStudio from the terminal or by double-clicking `nav_editor.exe`:
+Launch NavStudio by double-clicking `nav_editor.exe` or directly from the terminal:
 
 ```cmd
 nav_editor.exe cstrike/maps/de_dust2.bsp
 ```
 
-If a `.nav` file exists in the same directory, it will automatically load alongside the BSP geometry.
+### Loading Maps and Navigation Meshes
+
+NavStudio supports multiple methods to open files:
+* **Drag and Drop:** Drag any `.bsp` or `.nav` file directly from Windows Explorer / file manager into the 3D viewport window.
+* **Native File Dialog:** Select `File -> Open BSP Map...` (`Ctrl + O`) or `File -> Open NAV Mesh...` (`Ctrl + Shift + O`).
+* **Tool Palette Buttons:** Click `Open BSP Map...` or `Open NAV Mesh...` in the Tool Palette on the left sidebar.
+* **Direct Path Prompt:** Select `File -> Open File from Path...` to type or paste any file path directly.
+* **Automatic Pairing:** Loading a `.bsp` map automatically searches for and loads the matching `.nav` file in the same directory.
 
 ### Controls and Shortcuts
 
@@ -203,8 +210,11 @@ If a `.nav` file exists in the same directory, it will automatically load alongs
 | **Snap Area to Floor** | `S` |
 | **Undo** | `Ctrl + Z` |
 | **Redo** | `Ctrl + Y` |
+| **Open BSP Map** | `Ctrl + O` |
+| **Open NAV Mesh** | `Ctrl + Shift + O` |
 | **Save Navigation Mesh** | `Ctrl + S` |
-| **Open Map / NavMesh** | `Ctrl + O` |
+| **Save NAV Mesh As** | `Ctrl + Shift + S` |
+
 
 ---
 

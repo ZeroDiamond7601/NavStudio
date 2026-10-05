@@ -156,6 +156,7 @@ if(BUILD_EDITOR)
         src/editor/scene/editor_scene.cpp
         src/editor/scene/scene_picker.cpp
         src/editor/ui/editor_ui.cpp
+        src/editor/ui/file_dialog.cpp
         src/editor/glad/src/glad.c
         ${IMGUI_SOURCES}
     )
@@ -177,6 +178,7 @@ if(BUILD_EDITOR)
     )
 
     if(WIN32)
+        target_link_libraries(nav_editor PRIVATE comdlg32)
         set_target_properties(nav_editor PROPERTIES OUTPUT_NAME "nav_editor")
     endif()
 endif()

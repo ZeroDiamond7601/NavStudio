@@ -17,12 +17,6 @@ public:
     bool IsMouseOverUI() const { return m_mouseOverUI; }
     bool RequestQuit() const { return m_requestQuit; }
 
-    const std::string& GetOpenBSPRequested() const { return m_openBSPRequested; }
-    void ClearOpenBSPRequested() { m_openBSPRequested.clear(); }
-
-    const std::string& GetOpenNAVRequested() const { return m_openNAVRequested; }
-    void ClearOpenNAVRequested() { m_openNAVRequested.clear(); }
-
 private:
     void RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
     void RenderToolPalette(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
@@ -30,14 +24,18 @@ private:
     void RenderInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
     void RenderStatusBar(const EditorScene& scene, const Camera& camera);
     void RenderHelpModal();
+    void RenderWelcomeOverlay(EditorScene& scene);
+    void RenderOpenPathModal(EditorScene& scene);
 
     bool m_mouseOverUI;
     bool m_requestQuit;
     bool m_showHelpModal;
+    bool m_showOpenPathModal;
     char m_searchFilter[64];
     char m_placeEditBuffer[64];
-    std::string m_openBSPRequested;
-    std::string m_openNAVRequested;
+    char m_openPathBuffer[512];
+    int m_openPathType; // 0 = BSP, 1 = NAV
+    std::string m_openPathStatusMessage;
 };
 
 #endif // EDITOR_UI_H

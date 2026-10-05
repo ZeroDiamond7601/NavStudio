@@ -1,6 +1,7 @@
 #include "editor/ui/editor_ui.h"
 #include <imgui.h>
 #include "editor/commands/nav_commands.h"
+#include "editor/ui/file_dialog.h"
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
@@ -9,9 +10,12 @@ EditorUI::EditorUI()
     : m_mouseOverUI(false)
     , m_requestQuit(false)
     , m_showHelpModal(false)
+    , m_showOpenPathModal(false)
+    , m_openPathType(0)
 {
     m_searchFilter[0] = '\0';
     m_placeEditBuffer[0] = '\0';
+    m_openPathBuffer[0] = '\0';
 }
 
 EditorUI::~EditorUI() {
@@ -48,6 +52,35 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     ImGuiIO& io = ImGui::GetIO();
     m_mouseOverUI = io.WantCaptureMouse;
 
+    // Handle global shortcuts when not typing into input fields
+    if (!io.WantTextInput) {
+        if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_O, false)) {
+            std::string path = FileDialog::OpenFile(FileDialog::kBSPFilter, "Open GoldSrc BSP Map");
+            if (!path.empty()) {
+                scene.LoadBSP(path);
+            }
+        } else if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_O, false)) {
+            std::string path = FileDialog::OpenFile(FileDialog::kNAVFilter, "Open Navigation Mesh");
+            if (!path.empty()) {
+                scene.LoadNAV(path);
+            }
+        } else if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_S, false) && scene.HasNAV()) {
+            if (!scene.GetNAVPath().empty()) {
+                scene.SaveNAV();
+            } else {
+                std::string path = FileDialog::SaveFile(FileDialog::kNAVFilter, "nav", "Save Navigation Mesh");
+                if (!path.empty()) {
+                    scene.SaveNAV(path);
+                }
+            }
+        } else if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_S, false) && scene.HasNAV()) {
+            std::string path = FileDialog::SaveFile(FileDialog::kNAVFilter, "nav", "Save Navigation Mesh As");
+            if (!path.empty()) {
+                scene.SaveNAV(path);
+            }
+        }
+    }
+
     // Build main dockspace over viewport
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -76,8 +109,16 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     RenderInspector(scene, camera, cmdMgr);
     RenderStatusBar(scene, camera);
 
+    if (!scene.HasBSP() && !scene.HasNAV()) {
+        RenderWelcomeOverlay(scene);
+    }
+
     if (m_showHelpModal) {
         RenderHelpModal();
+    }
+
+    if (m_showOpenPathModal) {
+        RenderOpenPathModal(scene);
     }
 }
 
@@ -85,14 +126,38 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Open BSP Map...", "Ctrl+O")) {
-                m_openBSPRequested = "prompt";
+                std::string path = FileDialog::OpenFile(FileDialog::kBSPFilter, "Open GoldSrc BSP Map");
+                if (!path.empty()) {
+                    scene.LoadBSP(path);
+                }
             }
             if (ImGui::MenuItem("Open NAV Mesh...", "Ctrl+Shift+O")) {
-                m_openNAVRequested = "prompt";
+                std::string path = FileDialog::OpenFile(FileDialog::kNAVFilter, "Open Navigation Mesh");
+                if (!path.empty()) {
+                    scene.LoadNAV(path);
+                }
+            }
+            if (ImGui::MenuItem("Open File from Path...", nullptr)) {
+                m_showOpenPathModal = true;
+                m_openPathBuffer[0] = '\0';
+                m_openPathStatusMessage.clear();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Save NAV Mesh", "Ctrl+S", false, scene.HasNAV())) {
-                scene.SaveNAV();
+                if (!scene.GetNAVPath().empty()) {
+                    scene.SaveNAV();
+                } else {
+                    std::string path = FileDialog::SaveFile(FileDialog::kNAVFilter, "nav", "Save Navigation Mesh");
+                    if (!path.empty()) {
+                        scene.SaveNAV(path);
+                    }
+                }
+            }
+            if (ImGui::MenuItem("Save NAV Mesh As...", "Ctrl+Shift+S", false, scene.HasNAV())) {
+                std::string path = FileDialog::SaveFile(FileDialog::kNAVFilter, "nav", "Save Navigation Mesh As");
+                if (!path.empty()) {
+                    scene.SaveNAV(path);
+                }
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
@@ -100,6 +165,7 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
             ImGui::EndMenu();
         }
+
 
         if (ImGui::BeginMenu("Edit")) {
             std::string undoLabel = "Undo";
@@ -202,17 +268,44 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 }
 
 void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
-    ImGui::SetNextWindowSize(ImVec2(160, 240), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(180, 340), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Tool Palette")) {
-        NavArea* sel = scene.GetSelectedArea();
-
-        if (ImGui::Button("Select [V]", ImVec2(-1, 26))) {
-            // Select mode
+        ImGui::Text("File Actions:");
+        if (ImGui::Button("Open BSP Map...", ImVec2(-1, 26))) {
+            std::string path = FileDialog::OpenFile(FileDialog::kBSPFilter, "Open GoldSrc BSP Map");
+            if (!path.empty()) {
+                scene.LoadBSP(path);
+            }
+        }
+        if (ImGui::Button("Open NAV Mesh...", ImVec2(-1, 26))) {
+            std::string path = FileDialog::OpenFile(FileDialog::kNAVFilter, "Open Navigation Mesh");
+            if (!path.empty()) {
+                scene.LoadNAV(path);
+            }
+        }
+        if (ImGui::Button("Save NAV Mesh", ImVec2(-1, 26))) {
+            if (scene.HasNAV()) {
+                if (!scene.GetNAVPath().empty()) {
+                    scene.SaveNAV();
+                } else {
+                    std::string path = FileDialog::SaveFile(FileDialog::kNAVFilter, "nav", "Save Navigation Mesh");
+                    if (!path.empty()) {
+                        scene.SaveNAV(path);
+                    }
+                }
+            }
         }
 
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
+
+        ImGui::Text("Edit Tools:");
+        NavArea* sel = scene.GetSelectedArea();
+
+        if (ImGui::Button("Select [V]", ImVec2(-1, 26))) {
+            // Select mode
+        }
 
         if (ImGui::Button("Snap to Floor [S]", ImVec2(-1, 26))) {
             if (sel && scene.HasBSP()) {
@@ -244,6 +337,7 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
     }
     ImGui::End();
 }
+
 
 void EditorUI::RenderHierarchy(EditorScene& scene, Camera& camera) {
     ImGui::SetNextWindowSize(ImVec2(240, 400), ImGuiCond_FirstUseEver);
@@ -468,6 +562,121 @@ void EditorUI::RenderHelpModal() {
             m_showHelpModal = false;
             ImGui::CloseCurrentPopup();
         }
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderWelcomeOverlay(EditorScene& scene) {
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImVec2 center = viewport->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(480, 270), ImGuiCond_Always);
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_NoSavedSettings;
+
+    if (ImGui::Begin("NavStudio - Welcome", nullptr, flags)) {
+        ImGui::TextWrapped("No GoldSrc BSP map or Navigation Mesh is currently loaded.");
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Drag & drop a .bsp or .nav file directly onto this window,");
+        ImGui::TextDisabled("or choose an action below to get started:");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Open BSP Map (.bsp)...", ImVec2(-1, 32))) {
+            std::string path = FileDialog::OpenFile(FileDialog::kBSPFilter, "Open GoldSrc BSP Map");
+            if (!path.empty()) {
+                scene.LoadBSP(path);
+            }
+        }
+
+        if (ImGui::Button("Open NAV Mesh (.nav)...", ImVec2(-1, 32))) {
+            std::string path = FileDialog::OpenFile(FileDialog::kNAVFilter, "Open Navigation Mesh");
+            if (!path.empty()) {
+                scene.LoadNAV(path);
+            }
+        }
+
+        if (ImGui::Button("Enter File Path Directly...", ImVec2(-1, 30))) {
+            m_showOpenPathModal = true;
+            m_openPathBuffer[0] = '\0';
+            m_openPathStatusMessage.clear();
+        }
+
+        ImGui::Spacing();
+        ImGui::TextDisabled("Loading a BSP map automatically searches for and loads matching .nav.");
+    }
+    ImGui::End();
+}
+
+void EditorUI::RenderOpenPathModal(EditorScene& scene) {
+    ImGui::OpenPopup("Open File by Path");
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(520, 210), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("Open File by Path", &m_showOpenPathModal, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Enter the absolute or relative path to a .bsp or .nav file:");
+        ImGui::Spacing();
+
+        ImGui::SetNextItemWidth(380);
+        ImGui::InputText("##PathInput", m_openPathBuffer, sizeof(m_openPathBuffer));
+        ImGui::SameLine();
+        if (ImGui::Button("Browse...")) {
+            std::string chosen = FileDialog::OpenFile(FileDialog::kAllFilter, "Select Map or Nav Mesh");
+            if (!chosen.empty()) {
+                std::strncpy(m_openPathBuffer, chosen.c_str(), sizeof(m_openPathBuffer) - 1);
+                m_openPathBuffer[sizeof(m_openPathBuffer) - 1] = '\0';
+            }
+        }
+
+        if (!m_openPathStatusMessage.empty()) {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", m_openPathStatusMessage.c_str());
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Load File", ImVec2(120, 28))) {
+            std::string p = m_openPathBuffer;
+            if (p.empty()) {
+                m_openPathStatusMessage = "File path cannot be empty.";
+            } else {
+                std::string lowerP = p;
+                std::transform(lowerP.begin(), lowerP.end(), lowerP.begin(), [](unsigned char c) {
+                    return static_cast<char>(std::tolower(c));
+                });
+
+                bool ok = false;
+                if (lowerP.length() >= 4 && lowerP.compare(lowerP.length() - 4, 4, ".bsp") == 0) {
+                    ok = scene.LoadBSP(p);
+                } else if (lowerP.length() >= 4 && lowerP.compare(lowerP.length() - 4, 4, ".nav") == 0) {
+                    ok = scene.LoadNAV(p);
+                } else {
+                    ok = scene.LoadBSP(p) || scene.LoadNAV(p);
+                }
+
+                if (ok) {
+                    m_openPathStatusMessage.clear();
+                    m_showOpenPathModal = false;
+                    ImGui::CloseCurrentPopup();
+                } else {
+                    m_openPathStatusMessage = "Failed to load file. Please check path and file validity.";
+                }
+            }
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(100, 28))) {
+            m_showOpenPathModal = false;
+            m_openPathStatusMessage.clear();
+            ImGui::CloseCurrentPopup();
+        }
+
         ImGui::EndPopup();
     }
 }
