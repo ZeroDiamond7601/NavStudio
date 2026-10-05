@@ -40,3 +40,7 @@ Thumbs.db
 *.log
 *.tmp
 scratch/
+
+# Third-party dependencies
+third_party/
+

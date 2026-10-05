@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(BUILD_AMXX_MODULE "Build AMX Mod X module library" ON)
 option(BUILD_CLI "Build standalone command-line verification tool" ON)
+option(BUILD_EDITOR "Build NavStudio standalone GUI editor" OFF)
 
 # Force 32-bit target for Linux when building AMXX module
 if(UNIX AND NOT APPLE)
@@ -23,7 +24,6 @@ if(MSVC)
     add_compile_definitions(
         WIN32
         _WINDOWS
-        _USRDLL
         _CRT_SECURE_NO_WARNINGS
         HAVE_STDINT_H
         NOMINMAX
@@ -33,7 +33,7 @@ if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-# Include directories
+# Include directories for SDK
 set(SDK_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/sdk/amxmodx/public
@@ -45,7 +45,9 @@ set(SDK_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/sdk/hlsdk/pm_shared
 )
 
-# Core sources for BSP and NAV engines (pure algorithms & geometry, no AMXX dependencies)
+find_package(Threads REQUIRED)
+
+# Core sources for BSP and NAV engines (pure algorithms & geometry, reusable by all targets)
 set(CORE_SOURCES
     src/bsp/bsp_entity.cpp
     src/bsp/bsp_file.cpp
@@ -55,12 +57,13 @@ set(CORE_SOURCES
     src/nav/nav_file.cpp
 )
 
-find_package(Threads REQUIRED)
+add_library(nav_core STATIC ${CORE_SOURCES})
+target_include_directories(nav_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(nav_core PUBLIC Threads::Threads)
 
 # AMXX Module Target
 if(BUILD_AMXX_MODULE)
     set(MODULE_SOURCES
-        ${CORE_SOURCES}
         src/nav/async_pathfinder.cpp
         src/amxx/amxx_api.cpp
         src/amxx/amxx_bsp_natives.cpp
@@ -69,11 +72,11 @@ if(BUILD_AMXX_MODULE)
     )
 
     add_library(navmesh_amxx SHARED ${MODULE_SOURCES})
-
     target_include_directories(navmesh_amxx PRIVATE ${SDK_INCLUDES})
-    target_link_libraries(navmesh_amxx PRIVATE Threads::Threads)
+    target_link_libraries(navmesh_amxx PRIVATE nav_core)
 
-    if(WIN32)
+    if(MSVC)
+        target_compile_definitions(navmesh_amxx PRIVATE _USRDLL)
         set_target_properties(navmesh_amxx PROPERTIES
             OUTPUT_NAME "navmesh_amxx"
             PREFIX ""
@@ -90,16 +93,90 @@ endif()
 
 # Standalone CLI / Verification Target
 if(BUILD_CLI)
-    set(CLI_SOURCES
-        ${CORE_SOURCES}
-        src/cli/main.cpp
-    )
-
-    add_executable(nav_cli ${CLI_SOURCES})
-    target_include_directories(nav_cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(nav_cli PRIVATE Threads::Threads)
-
+    add_executable(nav_cli src/cli/main.cpp)
+    target_link_libraries(nav_cli PRIVATE nav_core)
     set_target_properties(nav_cli PROPERTIES
         OUTPUT_NAME "nav_cli"
     )
+endif()
+
+# Standalone GUI Editor (NavStudio) Target
+if(BUILD_EDITOR)
+    find_package(OpenGL REQUIRED)
+
+    # GLFW windowing
+    if(NOT TARGET glfw)
+        set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+        set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+        if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/glfw/CMakeLists.txt)
+            add_subdirectory(third_party/glfw)
+        else()
+            include(FetchContent)
+            FetchContent_Declare(
+                glfw
+                GIT_REPOSITORY https://github.com/glfw/glfw.git
+                GIT_TAG 3.4
+            )
+            FetchContent_MakeAvailable(glfw)
+        endif()
+    endif()
+
+    # Dear ImGui (Docking branch)
+    if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui.cpp)
+        include(FetchContent)
+        FetchContent_Declare(
+            imgui
+            GIT_REPOSITORY https://github.com/ocornut/imgui.git
+            GIT_TAG docking
+        )
+        FetchContent_MakeAvailable(imgui)
+        set(IMGUI_DIR ${imgui_SOURCE_DIR})
+    else()
+        set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
+    endif()
+
+    set(IMGUI_SOURCES
+        ${IMGUI_DIR}/imgui.cpp
+        ${IMGUI_DIR}/imgui_demo.cpp
+        ${IMGUI_DIR}/imgui_draw.cpp
+        ${IMGUI_DIR}/imgui_tables.cpp
+        ${IMGUI_DIR}/imgui_widgets.cpp
+        ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+        ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+    )
+
+    set(EDITOR_SOURCES
+        src/editor/main.cpp
+        src/editor/camera/camera.cpp
+        src/editor/render/shader.cpp
+        src/editor/render/bsp_renderer.cpp
+        src/editor/render/nav_renderer.cpp
+        src/editor/scene/editor_scene.cpp
+        src/editor/scene/scene_picker.cpp
+        src/editor/ui/editor_ui.cpp
+        src/editor/glad/src/glad.c
+        ${IMGUI_SOURCES}
+    )
+
+    add_executable(nav_editor ${EDITOR_SOURCES})
+    target_include_directories(nav_editor PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/editor
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/editor/glad/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+        ${IMGUI_DIR}
+        ${IMGUI_DIR}/backends
+    )
+    target_link_libraries(nav_editor PRIVATE
+        nav_core
+        glfw
+        OpenGL::GL
+        Threads::Threads
+    )
+
+    if(WIN32)
+        set_target_properties(nav_editor PROPERTIES OUTPUT_NAME "nav_editor")
+    endif()
 endif()
