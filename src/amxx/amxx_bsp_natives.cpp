@@ -13,31 +13,33 @@ static std::string FindMapBSP(const char* mapname) {
         return "";
     }
 
+    FILE* f = nullptr;
+
     // If mapname already ends with .bsp
     if (strstr(mapname, ".bsp") != nullptr) {
         snprintf(path, sizeof(path), "%s", mapname);
-        FILE* f = fopen(path, "rb");
+        f = fopen(path, "rb");
         if (f) { fclose(f); return std::string(path); }
     }
 
     // Try cstrike/maps/<mapname>.bsp
     snprintf(path, sizeof(path), "cstrike/maps/%s.bsp", mapname);
-    FILE* f = fopen(path, "rb");
+    f = fopen(path, "rb");
     if (f) { fclose(f); return std::string(path); }
 
     // Try czero/maps/<mapname>.bsp
     snprintf(path, sizeof(path), "czero/maps/%s.bsp", mapname);
-    FILE* f = fopen(path, "rb");
+    f = fopen(path, "rb");
     if (f) { fclose(f); return std::string(path); }
 
     // Try valve/maps/<mapname>.bsp
     snprintf(path, sizeof(path), "valve/maps/%s.bsp", mapname);
-    FILE* f = fopen(path, "rb");
+    f = fopen(path, "rb");
     if (f) { fclose(f); return std::string(path); }
 
     // Try maps/<mapname>.bsp
     snprintf(path, sizeof(path), "maps/%s.bsp", mapname);
-    FILE* f = fopen(path, "rb");
+    f = fopen(path, "rb");
     if (f) { fclose(f); return std::string(path); }
 
     // Fallback default

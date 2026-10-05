@@ -857,7 +857,7 @@ int BSPFile::FindFaceOnNode(int nodeNum, const Vector3& point) const {
         }
 
         Vector3 centroid = GetFaceCentroid(faceIdx);
-        float dsq = point.DistToSqr(centroid);
+        float dsq = point.DistToSq(centroid);
         if (dsq < bestDistSq) {
             bestDistSq = dsq;
             bestFace = faceIdx;

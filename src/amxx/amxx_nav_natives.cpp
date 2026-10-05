@@ -6,10 +6,11 @@
 // Helper to resolve nav file path
 static std::string FindMapNAV(const char* mapname) {
     char path[512];
+    FILE* f = nullptr;
 
     if (mapname && strstr(mapname, ".nav") != nullptr) {
         snprintf(path, sizeof(path), "%s", mapname);
-        FILE* f = fopen(path, "rb");
+        f = fopen(path, "rb");
         if (f) { fclose(f); return std::string(path); }
     }
 
@@ -20,7 +21,7 @@ static std::string FindMapNAV(const char* mapname) {
 
     // Try czero/maps/<mapname>.nav
     snprintf(path, sizeof(path), "czero/maps/%s.nav", baseName);
-    FILE* f = fopen(path, "rb");
+    f = fopen(path, "rb");
     if (f) { fclose(f); return std::string(path); }
 
     // Try cstrike/maps/<mapname>.nav

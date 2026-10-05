@@ -96,6 +96,7 @@ if(BUILD_CLI)
 
     add_executable(nav_cli ${CLI_SOURCES})
     target_include_directories(nav_cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(nav_cli PRIVATE Threads::Threads)
 
     set_target_properties(nav_cli PROPERTIES
         OUTPUT_NAME "nav_cli"

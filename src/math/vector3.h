@@ -45,6 +45,7 @@ struct Vector3 {
 
     inline float DistTo(const Vector3& o) const { return (*this - o).Length(); }
     inline float DistToSq(const Vector3& o) const { return (*this - o).LengthSquared(); }
+    inline float DistToSqr(const Vector3& o) const { return DistToSq(o); }
     inline float DistTo2D(const Vector3& o) const { return (*this - o).Length2D(); }
     inline float DistTo2DSq(const Vector3& o) const { return (*this - o).Length2DSquared(); }
 
