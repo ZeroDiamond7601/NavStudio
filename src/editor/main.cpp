@@ -235,7 +235,7 @@ int main(int argc, char* argv[]) {
 
         float aspect = (displayH > 0) ? (static_cast<float>(displayW) / static_cast<float>(displayH)) : 1.0f;
         Matrix4 mvp = g_camera.GetProjectionMatrix(aspect) * g_camera.GetViewMatrix();
-        scene.Render(meshShader, lineShader, mvp);
+        scene.Render(meshShader, lineShader, mvp, g_camera.GetPosition());
 
         // Render ImGui Overlays and Dockspace
         ImGui_ImplOpenGL3_NewFrame();

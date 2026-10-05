@@ -40,8 +40,8 @@
 
 ### NavStudio: 3D BSP Visualizer & NavMesh Editor
 * **Hardware-Accelerated 3D Viewport:** OpenGL 3.3 Core rendering with Dear ImGui docking interface.
-* **Multiple Shading Modes:** Solid clay shading, wireframe edge display, and Ghost / X-Ray mode (translucent BSP walls to view navigation meshes through floors and ceilings).
-* **NavMesh Inspection:** Color-coded area quads (Normal, Crouch, Jump, Blocked), directional connection lines (cyan for two-way, magenta for one-way), and ladder bounding boxes.
+* **Multiple Shading Modes:** Solid clay shading with GoldSrc Z-Up hemisphere lighting, distance depth cueing, overlay brush edge outlines, wireframe edge display, and Ghost / X-Ray mode (translucent BSP walls to view navigation meshes through floors and ceilings).
+* **High-Visibility NavMesh Inspection:** Color-coded area quads (Normal, Crouch, Jump, Blocked) with polygon offset to eliminate Z-fighting against BSP floors, directional connection lines with arrowheads (cyan for two-way, magenta for one-way), and ladder rungs.
 * **Interactive Editing Tools:**
   * **Floor Snapping:** Casts downward rays to the BSP collision hull to ground floating area corner vertices.
   * **Attribute Flag Editor:** Toggle `NAV_ATTR_CROUCH`, `NAV_ATTR_JUMP`, `NAV_ATTR_PRECISE`, and `NAV_ATTR_NO_JUMP`.

@@ -11,6 +11,7 @@ BSPRenderer::BSPRenderer()
     , m_wireEbo(0)
     , m_wireIndexCount(0)
     , m_loaded(false)
+    , m_showWireframeOnSolid(true)
     , m_faceCount(0)
 {
 }
@@ -179,7 +180,7 @@ void BSPRenderer::GenerateWireframeBuffers(const std::vector<BSPVertex>& vertice
     m_wireIndexCount = static_cast<GLsizei>(lineIndices.size());
 }
 
-void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, BSPRenderMode mode) {
+void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, BSPRenderMode mode, const Vector3& camPos) {
     if (!m_loaded) return;
 
     Matrix4 modelMat = Matrix4::MakeIdentity();
@@ -188,24 +189,52 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
         meshShader.Bind();
         meshShader.SetMat4("u_MVP", mvp);
         meshShader.SetMat4("u_Model", modelMat);
+        meshShader.SetVec3("u_CameraPos", camPos.x, camPos.y, camPos.z);
         meshShader.SetVec4("u_BaseColor", 1.0f, 1.0f, 1.0f, 1.0f);
         meshShader.SetInt("u_UseTexture", 0);
         meshShader.SetFloat("u_Alpha", 1.0f);
         meshShader.SetInt("u_EnableLighting", 1);
 
+        if (m_showWireframeOnSolid) {
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(1.0f, 1.0f);
+        }
+
         glBindVertexArray(m_vao);
         glDrawElements(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
         meshShader.Unbind();
+
+        if (m_showWireframeOnSolid) {
+            glDisable(GL_POLYGON_OFFSET_FILL);
+
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            lineShader.Bind();
+            lineShader.SetMat4("u_MVP", mvp);
+            lineShader.SetVec4("u_Color", 0.18f, 0.20f, 0.24f, 0.65f);
+
+            glLineWidth(1.2f);
+            glBindVertexArray(m_wireVao);
+            glDrawElements(GL_LINES, m_wireIndexCount, GL_UNSIGNED_INT, 0);
+            glBindVertexArray(0);
+            lineShader.Unbind();
+            glLineWidth(1.0f);
+
+            glDisable(GL_BLEND);
+        }
     } else if (mode == BSP_RENDER_WIREFRAME) {
         lineShader.Bind();
         lineShader.SetMat4("u_MVP", mvp);
-        lineShader.SetVec4("u_Color", 0.45f, 0.45f, 0.48f, 1.0f);
+        lineShader.SetVec4("u_Color", 0.50f, 0.52f, 0.58f, 1.0f);
 
+        glLineWidth(1.2f);
         glBindVertexArray(m_wireVao);
         glDrawElements(GL_LINES, m_wireIndexCount, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
         lineShader.Unbind();
+        glLineWidth(1.0f);
     } else if (mode == BSP_RENDER_GHOST) {
         // Translucent BSP surfaces so NavMesh inside rooms is visible
         glEnable(GL_BLEND);
@@ -215,7 +244,8 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
         meshShader.Bind();
         meshShader.SetMat4("u_MVP", mvp);
         meshShader.SetMat4("u_Model", modelMat);
-        meshShader.SetVec4("u_BaseColor", 0.6f, 0.65f, 0.75f, 1.0f);
+        meshShader.SetVec3("u_CameraPos", camPos.x, camPos.y, camPos.z);
+        meshShader.SetVec4("u_BaseColor", 0.65f, 0.70f, 0.80f, 1.0f);
         meshShader.SetInt("u_UseTexture", 0);
         meshShader.SetFloat("u_Alpha", 0.18f);
         meshShader.SetInt("u_EnableLighting", 1);
@@ -227,11 +257,11 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
 
         glDepthMask(GL_TRUE);
 
-        // Draw subtle wireframe on top
         lineShader.Bind();
         lineShader.SetMat4("u_MVP", mvp);
-        lineShader.SetVec4("u_Color", 0.4f, 0.45f, 0.55f, 0.35f);
+        lineShader.SetVec4("u_Color", 0.42f, 0.48f, 0.60f, 0.40f);
 
+        glLineWidth(1.0f);
         glBindVertexArray(m_wireVao);
         glDrawElements(GL_LINES, m_wireIndexCount, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);

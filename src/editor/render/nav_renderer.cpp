@@ -47,7 +47,7 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
     std::vector<NavVertex> lineVertices;
     std::vector<uint32_t> lineIndices;
 
-    const float kZLift = 1.0f; // Lift slightly above floor to prevent Z-fighting
+    const float kZLift = 2.0f; // Elevate above floor to prevent surface overlap
 
     for (const NavArea* area : areas) {
         if (!area) continue;
@@ -56,19 +56,25 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
         bool isSelected = (id == selectedId);
         bool isHovered = (id == hoveredId);
 
-        // Determine area color based on selection and attributes
-        float r = 0.2f, g = 0.8f, b = 0.3f, a = 0.65f; // Normal: Green
+        // Determine area color based on selection and attributes with high contrast
+        float r = 0.15f, g = 0.82f, b = 0.38f, a = 0.70f; // Normal: High-contrast green
+        float lr = 0.30f, lg = 1.0f, lb = 0.50f, la = 1.0f;
 
         if (isSelected) {
-            r = 1.0f; g = 0.9f; b = 0.1f; a = 0.88f; // Selected: Yellow
+            r = 1.0f; g = 0.88f; b = 0.10f; a = 0.90f; // Selected: Glowing gold
+            lr = 1.0f; lg = 1.0f; lb = 0.30f; la = 1.0f;
         } else if (isHovered) {
-            r = 0.1f; g = 0.9f; b = 0.95f; a = 0.78f; // Hovered: Cyan
+            r = 0.05f; g = 0.92f; b = 1.0f; a = 0.80f; // Hovered: Electric cyan
+            lr = 0.50f; lg = 1.0f; lb = 1.0f; la = 1.0f;
         } else if (area->HasAttributes(NAV_ATTR_CROUCH)) {
-            r = 0.15f; g = 0.45f; b = 0.95f; a = 0.65f; // Crouch: Blue
+            r = 0.18f; g = 0.52f; b = 1.0f; a = 0.72f; // Crouch: Deep sky blue
+            lr = 0.40f; lg = 0.75f; lb = 1.0f; la = 1.0f;
         } else if (area->HasAttributes(NAV_ATTR_JUMP)) {
-            r = 0.95f; g = 0.55f; b = 0.15f; a = 0.65f; // Jump: Orange
+            r = 1.0f; g = 0.58f; b = 0.12f; a = 0.72f; // Jump: Bright amber
+            lr = 1.0f; lg = 0.75f; lb = 0.25f; la = 1.0f;
         } else if (area->HasAttributes(NAV_ATTR_NO_JUMP)) {
-            r = 0.85f; g = 0.35f; b = 0.15f; a = 0.65f; // No Jump: Red-Orange
+            r = 0.92f; g = 0.22f; b = 0.22f; a = 0.72f; // No Jump: Vivid red
+            lr = 1.0f; lg = 0.40f; lb = 0.40f; la = 1.0f;
         }
 
         Vector3 cNW = area->GetCorner(NAV_CORNER_NORTH_WEST);
@@ -103,17 +109,13 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
         quadIndices.push_back(baseVert + 2);
         quadIndices.push_back(baseVert + 3);
 
-        // Area border lines
-        float lr = isSelected ? 1.0f : (r * 0.5f);
-        float lg = isSelected ? 0.95f : (g * 0.5f);
-        float lb = isSelected ? 0.2f : (b * 0.5f);
-        float la = isSelected ? 1.0f : 0.9f;
-
+        // Area border lines elevated slightly above quads
+        float lineLift = isSelected ? 1.0f : 0.6f;
         uint32_t baseLineVert = static_cast<uint32_t>(lineVertices.size());
-        lineVertices.push_back({ cNW.x, cNW.y, cNW.z + 0.5f, 0,0,1, 0,0, lr, lg, lb, la });
-        lineVertices.push_back({ cNE.x, cNE.y, cNE.z + 0.5f, 0,0,1, 0,0, lr, lg, lb, la });
-        lineVertices.push_back({ cSE.x, cSE.y, cSE.z + 0.5f, 0,0,1, 0,0, lr, lg, lb, la });
-        lineVertices.push_back({ cSW.x, cSW.y, cSW.z + 0.5f, 0,0,1, 0,0, lr, lg, lb, la });
+        lineVertices.push_back({ cNW.x, cNW.y, cNW.z + lineLift, 0,0,1, 0,0, lr, lg, lb, la });
+        lineVertices.push_back({ cNE.x, cNE.y, cNE.z + lineLift, 0,0,1, 0,0, lr, lg, lb, la });
+        lineVertices.push_back({ cSE.x, cSE.y, cSE.z + lineLift, 0,0,1, 0,0, lr, lg, lb, la });
+        lineVertices.push_back({ cSW.x, cSW.y, cSW.z + lineLift, 0,0,1, 0,0, lr, lg, lb, la });
 
         lineIndices.push_back(baseLineVert + 0);
         lineIndices.push_back(baseLineVert + 1);
@@ -126,7 +128,7 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
 
         // Connection lines between area centroids
         Vector3 centerA = area->GetCenter();
-        centerA.z += (kZLift + 1.5f);
+        centerA.z += (kZLift + 2.0f);
 
         for (int d = 0; d < NUM_NAV_DIRECTIONS; ++d) {
             const auto& connects = area->GetAdjacentList(static_cast<NavDirType>(d));
@@ -135,26 +137,48 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
                 if (!target) continue;
 
                 Vector3 centerB = target->GetCenter();
-                centerB.z += (kZLift + 1.5f);
+                centerB.z += (kZLift + 2.0f);
 
                 bool isTwoWay = target->IsConnected(area);
 
-                // Cyan for two-way, Magenta for one-way
-                float cr = isTwoWay ? 0.2f : 0.95f;
-                float cg = isTwoWay ? 0.85f : 0.15f;
-                float cb = isTwoWay ? 0.95f : 0.95f;
+                // Bright Cyan for two-way, Vivid Magenta for one-way
+                float cr = isTwoWay ? 0.15f : 1.0f;
+                float cg = isTwoWay ? 0.90f : 0.20f;
+                float cb = isTwoWay ? 1.0f : 0.85f;
 
                 uint32_t cIdx = static_cast<uint32_t>(lineVertices.size());
-                lineVertices.push_back({ centerA.x, centerA.y, centerA.z, 0,0,1, 0,0, cr, cg, cb, 0.8f });
-                lineVertices.push_back({ centerB.x, centerB.y, centerB.z, 0,0,1, 0,0, cr, cg, cb, 0.8f });
+                lineVertices.push_back({ centerA.x, centerA.y, centerA.z, 0,0,1, 0,0, cr, cg, cb, 0.85f });
+                lineVertices.push_back({ centerB.x, centerB.y, centerB.z, 0,0,1, 0,0, cr, cg, cb, 0.85f });
 
                 lineIndices.push_back(cIdx);
                 lineIndices.push_back(cIdx + 1);
+
+                // Add directional arrowhead
+                Vector3 delta = centerB - centerA;
+                float dist = delta.Length();
+                if (dist > 24.0f) {
+                    Vector3 fwd = delta * (1.0f / dist);
+                    Vector3 side(-fwd.y, fwd.x, 0.0f);
+                    Vector3 tip = centerA + fwd * (dist * 0.72f);
+                    Vector3 leftBar = tip - fwd * 8.0f + side * 4.0f;
+                    Vector3 rightBar = tip - fwd * 8.0f - side * 4.0f;
+
+                    uint32_t aIdx = static_cast<uint32_t>(lineVertices.size());
+                    lineVertices.push_back({ tip.x, tip.y, tip.z, 0,0,1, 0,0, cr, cg, cb, 0.95f });
+                    lineVertices.push_back({ leftBar.x, leftBar.y, leftBar.z, 0,0,1, 0,0, cr, cg, cb, 0.95f });
+                    lineVertices.push_back({ tip.x, tip.y, tip.z, 0,0,1, 0,0, cr, cg, cb, 0.95f });
+                    lineVertices.push_back({ rightBar.x, rightBar.y, rightBar.z, 0,0,1, 0,0, cr, cg, cb, 0.95f });
+
+                    lineIndices.push_back(aIdx + 0);
+                    lineIndices.push_back(aIdx + 1);
+                    lineIndices.push_back(aIdx + 2);
+                    lineIndices.push_back(aIdx + 3);
+                }
             }
         }
     }
 
-    // Ladder rendering
+    // Ladder rendering with rungs
     for (const NavLadder* ladder : nav.GetLadders()) {
         if (!ladder) continue;
         Vector3 top = ladder->top;
@@ -175,7 +199,7 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
         Vector3 p3 = top - sideDir * halfW;
 
         uint32_t baseL = static_cast<uint32_t>(lineVertices.size());
-        float lr = 0.95f, lg = 0.85f, lb = 0.2f, la = 0.9f;
+        float lr = 1.0f, lg = 0.85f, lb = 0.2f, la = 0.95f;
 
         lineVertices.push_back({ p0.x, p0.y, p0.z, 0,0,1, 0,0, lr, lg, lb, la });
         lineVertices.push_back({ p1.x, p1.y, p1.z, 0,0,1, 0,0, lr, lg, lb, la });
@@ -188,7 +212,22 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
         // Top and bottom rungs
         lineIndices.push_back(baseL + 0); lineIndices.push_back(baseL + 1);
         lineIndices.push_back(baseL + 3); lineIndices.push_back(baseL + 2);
+
+        // Horizontal ladder rungs
+        float height = std::abs(top.z - bottom.z);
+        int rungs = std::max(2, static_cast<int>(height / 18.0f));
+        for (int r = 1; r < rungs; ++r) {
+            float t = static_cast<float>(r) / static_cast<float>(rungs);
+            Vector3 rungL = p0 + (p3 - p0) * t;
+            Vector3 rungR = p1 + (p2 - p1) * t;
+            uint32_t rIdx = static_cast<uint32_t>(lineVertices.size());
+            lineVertices.push_back({ rungL.x, rungL.y, rungL.z, 0,0,1, 0,0, lr, lg, lb, 0.85f });
+            lineVertices.push_back({ rungR.x, rungR.y, rungR.z, 0,0,1, 0,0, lr, lg, lb, 0.85f });
+            lineIndices.push_back(rIdx + 0);
+            lineIndices.push_back(rIdx + 1);
+        }
     }
+
 
     if (!quadIndices.empty()) {
         GenerateBuffers(quadVertices, quadIndices);
@@ -254,6 +293,10 @@ void NavRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
 
     Matrix4 modelMat = Matrix4::MakeIdentity();
 
+    // Polygon offset prevents Z-fighting against BSP floor geometry
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(-2.5f, -2.5f);
+
     // Render area quads with alpha blending
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -272,17 +315,20 @@ void NavRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
     glBindVertexArray(0);
     meshShader.Unbind();
 
+    glDisable(GL_POLYGON_OFFSET_FILL);
     glDepthMask(GL_TRUE);
 
-    // Render outlines and connection lines
+    // Render outlines and connection lines with bold width
     lineShader.Bind();
     lineShader.SetMat4("u_MVP", mvp);
     lineShader.SetVec4("u_Color", 1.0f, 1.0f, 1.0f, 1.0f);
 
+    glLineWidth(2.2f);
     glBindVertexArray(m_lineVao);
     glDrawElements(GL_LINES, m_lineIndexCount, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
     lineShader.Unbind();
+    glLineWidth(1.0f);
 
     glDisable(GL_BLEND);
 }

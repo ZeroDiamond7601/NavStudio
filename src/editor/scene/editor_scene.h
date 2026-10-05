@@ -59,7 +59,7 @@ public:
     NavArea* GetSelectedArea();
     uint32_t GetSelectedAreaID() const { return m_selectedAreaId; }
 
-    void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp);
+    void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, const Vector3& camPos);
     void RebuildNavRenderer();
 
     const BSPFile& GetBSP() const { return *m_bsp; }
@@ -85,6 +85,9 @@ public:
 
     bool GetShowConnections() const { return m_showConnections; }
     void SetShowConnections(bool show) { m_showConnections = show; }
+
+    bool GetShowWireframeOnSolid() const { return m_bspRenderer.GetShowWireframeOnSolid(); }
+    void SetShowWireframeOnSolid(bool show) { m_bspRenderer.SetShowWireframeOnSolid(show); }
 
 private:
     std::unique_ptr<BSPFile> m_bsp;

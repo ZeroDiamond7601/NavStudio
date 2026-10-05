@@ -28,11 +28,14 @@ public:
     bool BuildFromBSP(const BSPFile& bsp);
     void Clear();
 
-    void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, BSPRenderMode mode);
+    void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, BSPRenderMode mode, const Vector3& camPos);
 
     bool IsLoaded() const { return m_loaded; }
     size_t GetFaceCount() const { return m_faceCount; }
     size_t GetTriangleCount() const { return m_indexCount / 3; }
+
+    bool GetShowWireframeOnSolid() const { return m_showWireframeOnSolid; }
+    void SetShowWireframeOnSolid(bool show) { m_showWireframeOnSolid = show; }
 
 private:
     void GenerateBuffers(const std::vector<BSPVertex>& vertices, const std::vector<uint32_t>& indices);
@@ -49,6 +52,7 @@ private:
     GLsizei m_wireIndexCount;
 
     bool m_loaded;
+    bool m_showWireframeOnSolid;
     size_t m_faceCount;
 };
 

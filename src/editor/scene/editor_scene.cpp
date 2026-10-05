@@ -296,9 +296,9 @@ void EditorScene::RebuildNavRenderer() {
     }
 }
 
-void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp) {
+void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, const Vector3& camPos) {
     if (m_showBSP && m_bspRenderer.IsLoaded()) {
-        m_bspRenderer.Render(meshShader, lineShader, mvp, m_bspMode);
+        m_bspRenderer.Render(meshShader, lineShader, mvp, m_bspMode, camPos);
     }
 
     if (m_showNAV && m_navRenderer.IsLoaded()) {

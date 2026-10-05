@@ -214,6 +214,11 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                 scene.SetShowConnections(showConn);
             }
 
+            bool showWireOnSolid = scene.GetShowWireframeOnSolid();
+            if (ImGui::MenuItem("Show Brush Edge Outlines", nullptr, &showWireOnSolid)) {
+                scene.SetShowWireframeOnSolid(showWireOnSolid);
+            }
+
             ImGui::Separator();
             if (ImGui::BeginMenu("BSP Shading Mode")) {
                 if (ImGui::MenuItem("Solid / Shaded", nullptr, scene.GetBSPMode() == BSP_RENDER_SOLID)) {
@@ -340,6 +345,11 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         }
         if (ImGui::RadioButton("Ghost (X-Ray)", scene.GetBSPMode() == BSP_RENDER_GHOST)) {
             scene.SetBSPMode(BSP_RENDER_GHOST);
+        }
+
+        bool showWireOnSolid = scene.GetShowWireframeOnSolid();
+        if (ImGui::Checkbox("Brush Outlines", &showWireOnSolid)) {
+            scene.SetShowWireframeOnSolid(showWireOnSolid);
         }
     }
     ImGui::End();
