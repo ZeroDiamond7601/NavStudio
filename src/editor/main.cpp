@@ -29,6 +29,9 @@ static bool g_firstMouse = true;
 static void DropCallback(GLFWwindow* /*window*/, int count, const char** paths) {
     if (!g_activeScene || count <= 0 || !paths) return;
 
+    std::string bspPath;
+    std::string navPath;
+
     for (int i = 0; i < count; ++i) {
         if (!paths[i]) continue;
         std::string path = paths[i];
@@ -38,16 +41,23 @@ static void DropCallback(GLFWwindow* /*window*/, int count, const char** paths) 
         });
 
         if (lowerPath.length() >= 4 && lowerPath.compare(lowerPath.length() - 4, 4, ".bsp") == 0) {
-            std::printf("[DragDrop] Loading BSP map: %s\n", path.c_str());
-            g_activeScene->LoadBSP(path);
+            bspPath = path;
         } else if (lowerPath.length() >= 4 && lowerPath.compare(lowerPath.length() - 4, 4, ".nav") == 0) {
-            std::printf("[DragDrop] Loading NAV mesh: %s\n", path.c_str());
-            g_activeScene->LoadNAV(path);
-        } else {
-            std::printf("[DragDrop] Unsupported file format: %s\n", path.c_str());
+            navPath = path;
         }
     }
+
+    if (!bspPath.empty()) {
+        std::printf("[DragDrop] Loading BSP map: %s\n", bspPath.c_str());
+        g_activeScene->StartAsyncLoad(bspPath, navPath);
+    } else if (!navPath.empty()) {
+        std::printf("[DragDrop] Loading NAV mesh: %s\n", navPath.c_str());
+        g_activeScene->StartAsyncLoad(navPath);
+    } else {
+        std::printf("[DragDrop] Unsupported file format\n");
+    }
 }
+
 
 static void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
     ImGuiIO& io = ImGui::GetIO();
@@ -176,11 +186,7 @@ int main(int argc, char* argv[]) {
     // Load initial map if passed via arguments
     if (argc > 1) {
         std::string argPath = argv[1];
-        if (argPath.find(".bsp") != std::string::npos) {
-            scene.LoadBSP(argPath);
-        } else if (argPath.find(".nav") != std::string::npos) {
-            scene.LoadNAV(argPath);
-        }
+        scene.StartAsyncLoad(argPath);
     }
 
     glEnable(GL_DEPTH_TEST);
@@ -196,6 +202,9 @@ int main(int argc, char* argv[]) {
 
         glfwPollEvents();
         ProcessInput(window, deltaTime);
+
+        // Update background scene loading and stage progress
+        scene.UpdateAsyncLoading(deltaTime);
 
         int displayW = 0, displayH = 0;
         glfwGetFramebufferSize(window, &displayW, &displayH);

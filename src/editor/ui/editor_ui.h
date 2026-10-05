@@ -26,6 +26,8 @@ private:
     void RenderHelpModal();
     void RenderWelcomeOverlay(EditorScene& scene);
     void RenderOpenPathModal(EditorScene& scene);
+    void RenderLoadingModal(const EditorScene& scene);
+    void RenderLoadingErrorModal(EditorScene& scene);
 
     bool m_mouseOverUI;
     bool m_requestQuit;

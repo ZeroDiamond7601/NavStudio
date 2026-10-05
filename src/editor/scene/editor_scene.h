@@ -2,19 +2,57 @@
 #define EDITOR_SCENE_H
 
 #include <string>
+#include <memory>
+#include <atomic>
+#include <mutex>
+#include <thread>
 #include "bsp/bsp_file.h"
 #include "nav/nav_file.h"
 #include "editor/render/bsp_renderer.h"
 #include "editor/render/nav_renderer.h"
+
+struct AsyncLoadContext {
+    std::atomic<bool> inProgress{false};
+    std::atomic<bool> finished{false};
+    std::atomic<bool> success{false};
+    std::atomic<float> progress{0.0f};
+
+    std::string targetBspPath;
+    std::string targetNavPath;
+    std::string filename;
+    std::string statusText;
+    std::string errorMessage;
+
+    std::unique_ptr<BSPFile> loadedBsp;
+    std::unique_ptr<NavMesh> loadedNav;
+    std::mutex mutex;
+
+    float minDisplayTimer{0.0f};
+    float displayProgress{0.0f};
+};
 
 class EditorScene {
 public:
     EditorScene();
     ~EditorScene();
 
+    // Synchronous loading
     bool LoadBSP(const std::string& bspPath);
     bool LoadNAV(const std::string& navPath);
     bool SaveNAV(const std::string& navPath = "");
+
+    // Asynchronous loading with progress and stage tracking
+    void StartAsyncLoad(const std::string& bspOrNavPath, const std::string& explicitNavPath = "");
+    void UpdateAsyncLoading(float deltaTime);
+
+    bool IsLoading() const { return m_loadCtx.inProgress.load(); }
+    float GetLoadingProgress() const { return m_loadCtx.displayProgress; }
+    const std::string& GetLoadingFilename() const { return m_loadCtx.filename; }
+    const std::string& GetLoadingStatus() const { return m_loadCtx.statusText; }
+
+    bool HasLoadingError() const { return !m_errorMessage.empty(); }
+    const std::string& GetLoadingError() const { return m_errorMessage; }
+    void ClearLoadingError() { m_errorMessage.clear(); }
 
     void SelectArea(uint32_t id);
     void SetHoveredArea(uint32_t id);
@@ -24,17 +62,17 @@ public:
     void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp);
     void RebuildNavRenderer();
 
-    const BSPFile& GetBSP() const { return m_bsp; }
-    BSPFile& GetBSP() { return m_bsp; }
+    const BSPFile& GetBSP() const { return *m_bsp; }
+    BSPFile& GetBSP() { return *m_bsp; }
 
-    const NavMesh& GetNAV() const { return m_nav; }
-    NavMesh& GetNAV() { return m_nav; }
+    const NavMesh& GetNAV() const { return *m_nav; }
+    NavMesh& GetNAV() { return *m_nav; }
 
     const std::string& GetBSPPath() const { return m_bspPath; }
     const std::string& GetNAVPath() const { return m_navPath; }
 
-    bool HasBSP() const { return m_bsp.IsLoaded(); }
-    bool HasNAV() const { return m_nav.IsLoaded(); }
+    bool HasBSP() const { return m_bsp && m_bsp->IsLoaded(); }
+    bool HasNAV() const { return m_nav && m_nav->IsLoaded(); }
 
     BSPRenderMode GetBSPMode() const { return m_bspMode; }
     void SetBSPMode(BSPRenderMode mode) { m_bspMode = mode; }
@@ -49,13 +87,14 @@ public:
     void SetShowConnections(bool show) { m_showConnections = show; }
 
 private:
-    BSPFile m_bsp;
-    NavMesh m_nav;
+    std::unique_ptr<BSPFile> m_bsp;
+    std::unique_ptr<NavMesh> m_nav;
     BSPRenderer m_bspRenderer;
     NavRenderer m_navRenderer;
 
     std::string m_bspPath;
     std::string m_navPath;
+    std::string m_errorMessage;
 
     uint32_t m_selectedAreaId;
     uint32_t m_hoveredAreaId;
@@ -64,6 +103,9 @@ private:
     bool m_showBSP;
     bool m_showNAV;
     bool m_showConnections;
+
+    AsyncLoadContext m_loadCtx;
+    std::thread m_loadThread;
 };
 
 #endif // EDITOR_SCENE_H

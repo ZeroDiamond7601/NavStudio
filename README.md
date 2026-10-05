@@ -189,11 +189,13 @@ nav_editor.exe cstrike/maps/de_dust2.bsp
 ### Loading Maps and Navigation Meshes
 
 NavStudio supports multiple methods to open files:
-* **Drag and Drop:** Drag any `.bsp` or `.nav` file directly from Windows Explorer / file manager into the 3D viewport window.
+* **Drag and Drop:** Drag any `.bsp` or `.nav` file directly from Windows Explorer or your file manager into the 3D viewport window. A dedicated visual drop target highlights the zone, and real-time animated loading progress bars provide live feedback as geometry and navigation data are processed.
 * **Native File Dialog:** Select `File -> Open BSP Map...` (`Ctrl + O`) or `File -> Open NAV Mesh...` (`Ctrl + Shift + O`).
 * **Tool Palette Buttons:** Click `Open BSP Map...` or `Open NAV Mesh...` in the Tool Palette on the left sidebar.
 * **Direct Path Prompt:** Select `File -> Open File from Path...` to type or paste any file path directly.
 * **Automatic Pairing:** Loading a `.bsp` map automatically searches for and loads the matching `.nav` file in the same directory.
+* **Asynchronous Progress:** Map parsing and navigation extraction run in a dedicated background worker thread, ensuring responsive UI frame rates and smooth progress animations without freezing.
+
 
 ### Controls and Shortcuts
 
