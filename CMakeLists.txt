@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(NavMeshCore VERSION 1.3.1 LANGUAGES C CXX)
+project(NavMeshCore VERSION 1.3.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -156,7 +156,6 @@ if(BUILD_EDITOR)
         src/editor/render/bsp_renderer.cpp
         src/editor/render/texture_manager.cpp
         src/editor/render/nav_renderer.cpp
-        src/editor/render/grid_renderer.cpp
         src/editor/render/gizmo_renderer.cpp
         src/editor/render/entity_renderer.cpp
         src/editor/scene/editor_scene.cpp

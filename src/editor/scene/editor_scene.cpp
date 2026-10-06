@@ -97,34 +97,6 @@ void EditorScene::ToggleGridSnap() {
     m_gridSnap = !m_gridSnap;
 }
 
-void EditorScene::SetShowGroundGrid(bool show) {
-    m_showGroundGrid = show;
-}
-
-void EditorScene::SnapGridElevationToSelection() {
-    NavArea* sel = GetSelectedArea();
-    if (sel) {
-        m_gridElevation = sel->GetCenter().z;
-        return;
-    }
-    const EditorEntity* ent = GetSelectedEntity();
-    if (ent) {
-        m_gridElevation = ent->origin.z;
-        return;
-    }
-}
-
-void EditorScene::SnapGridElevationToFloorUnderCamera(const Vector3& camPos) {
-    if (m_bsp) {
-        Vector3 groundPos;
-        if (m_bsp->GetGround(camPos, &groundPos, 4096.0f)) {
-            m_gridElevation = groundPos.z;
-            return;
-        }
-    }
-    m_gridElevation = SnapValue(camPos.z);
-}
-
 float EditorScene::SnapValue(float val) const {
     if (!m_gridSnap || m_gridSize < 1.0f) return val;
     return std::round(val / m_gridSize) * m_gridSize;
@@ -148,22 +120,6 @@ bool EditorScene::LoadBSP(const std::string& bspPath) {
     m_entityRenderer.BuildFromBSP(*m_bsp);
     m_selectedEntityIndex = -1;
     AddRecentFile(bspPath);
-
-    // Set initial grid elevation to player spawn floor
-    for (const auto& ent : m_bsp->GetEntities()) {
-        if (ent.classname == "info_player_start" || ent.classname == "info_player_deathmatch") {
-            Vector3 entOrigin;
-            if (ent.GetOrigin(entOrigin)) {
-                Vector3 gPos;
-                if (m_bsp->GetGround(entOrigin, &gPos, 1024.0f)) {
-                    m_gridElevation = gPos.z;
-                } else {
-                    m_gridElevation = entOrigin.z;
-                }
-                break;
-            }
-        }
-    }
 
     // Auto-detect corresponding .nav file in the same directory
     std::string candidateNav = bspPath;
@@ -530,10 +486,6 @@ static bool ProjectRayToAxis(const Ray& ray, const Vector3& axisOrigin, const Ve
 void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, const Vector3& camPos) {
     if (m_showBSP && m_bspRenderer.IsLoaded()) {
         m_bspRenderer.Render(meshShader, lineShader, mvp, m_bspMode, camPos);
-    }
-
-    if (m_showGroundGrid) {
-        m_gridRenderer.Render(lineShader, mvp, camPos, m_gridSize, m_gridElevation);
     }
 
     if (m_entityRenderer.IsLoaded()) {

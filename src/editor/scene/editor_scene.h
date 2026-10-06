@@ -13,7 +13,6 @@
 #include "editor/render/nav_renderer.h"
 #include "editor/render/entity_renderer.h"
 #include "editor/render/texture_manager.h"
-#include "editor/render/grid_renderer.h"
 #include "editor/render/gizmo_renderer.h"
 
 #include "editor/scene/editor_handles.h"
@@ -126,7 +125,7 @@ public:
     void LoadRecentFiles();
     void SaveRecentFiles();
 
-    // Hammer-style Grid Management
+    // Grid Snapping Management
     float GetGridSize() const { return m_gridSize; }
     void SetGridSize(float size);
     void IncreaseGridSize();
@@ -134,13 +133,6 @@ public:
     bool GetGridSnap() const { return m_gridSnap; }
     void SetGridSnap(bool snap) { m_gridSnap = snap; }
     void ToggleGridSnap();
-    bool GetShowGroundGrid() const { return m_showGroundGrid; }
-    void SetShowGroundGrid(bool show);
-    float GetGridElevation() const { return m_gridElevation; }
-    void SetGridElevation(float elev) { m_gridElevation = elev; }
-    void AdjustGridElevation(float delta) { m_gridElevation += delta; }
-    void SnapGridElevationToSelection();
-    void SnapGridElevationToFloorUnderCamera(const Vector3& camPos);
     float SnapValue(float val) const;
     Vector3 SnapVector(const Vector3& v) const;
 
@@ -206,7 +198,6 @@ private:
     std::unique_ptr<NavMesh> m_nav;
     BSPRenderer m_bspRenderer;
     NavRenderer m_navRenderer;
-    GridRenderer m_gridRenderer;
     GizmoRenderer m_gizmoRenderer;
     EntityRenderer m_entityRenderer;
     TextureManager m_textureManager;
@@ -229,11 +220,9 @@ private:
     // Recent files
     std::vector<std::string> m_recentFiles;
 
-    // Hammer Grid
+    // Grid Snapping
     float m_gridSize{32.0f};
     bool m_gridSnap{true};
-    bool m_showGroundGrid{true};
-    float m_gridElevation{0.0f};
 
     // Handles
     SelectedHandleType m_hoveredHandle{HANDLE_NONE};
