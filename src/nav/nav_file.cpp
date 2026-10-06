@@ -438,3 +438,92 @@ void NavMesh::BuildLadders(const BSPFile* bsp) {
         m_ladders.push_back(ladder);
     }
 }
+
+NavArea* NavMesh::CreateArea(const NavExtent& extent, float neZ, float swZ) {
+    uint32_t newId = 1;
+    for (const NavArea* a : m_areas) {
+        if (a && a->GetID() >= newId) {
+            newId = a->GetID() + 1;
+        }
+    }
+    NavArea* area = new NavArea(newId);
+    area->SetExtent(extent);
+    area->SetCornerHeights(neZ, swZ);
+    m_areas.push_back(area);
+    m_grid.AddArea(area);
+    return area;
+}
+
+bool NavMesh::RemoveArea(uint32_t areaId) {
+    auto it = std::find_if(m_areas.begin(), m_areas.end(), [areaId](NavArea* a) {
+        return a && a->GetID() == areaId;
+    });
+    if (it == m_areas.end()) return false;
+    NavArea* area = *it;
+
+    for (NavArea* other : m_areas) {
+        if (other && other != area) {
+            other->Disconnect(area);
+        }
+    }
+
+    m_grid.RemoveArea(area);
+    m_areas.erase(it);
+    delete area;
+    return true;
+}
+
+NavArea* NavMesh::DuplicateArea(uint32_t sourceId, const Vector3& offset) {
+    NavArea* src = GetAreaByID(sourceId);
+    if (!src) return nullptr;
+
+    NavExtent ext = src->GetExtent();
+    ext.lo += offset;
+    ext.hi += offset;
+    float neZ = src->GetNEZ() + offset.z;
+    float swZ = src->GetSWZ() + offset.z;
+
+    NavArea* copy = CreateArea(ext, neZ, swZ);
+    copy->SetAttributes(src->GetAttributes());
+    copy->SetPlace(src->GetPlace());
+    copy->SetPlaceName(src->GetPlaceName());
+    return copy;
+}
+
+bool NavMesh::ConnectAreas(uint32_t fromId, uint32_t toId, bool bidirectional, int explicitDir) {
+    NavArea* from = GetAreaByID(fromId);
+    NavArea* to = GetAreaByID(toId);
+    if (!from || !to || from == to) return false;
+
+    NavDirType dirFrom;
+    if (explicitDir >= 0 && explicitDir < NUM_NAV_DIRECTIONS) {
+        dirFrom = static_cast<NavDirType>(explicitDir);
+    } else {
+        Vector3 delta = to->GetCenter() - from->GetCenter();
+        if (std::abs(delta.x) > std::abs(delta.y)) {
+            dirFrom = (delta.x > 0) ? NAV_DIR_EAST : NAV_DIR_WEST;
+        } else {
+            dirFrom = (delta.y > 0) ? NAV_DIR_NORTH : NAV_DIR_SOUTH;
+        }
+    }
+
+    from->ConnectTo(to, dirFrom);
+
+    if (bidirectional) {
+        NavDirType dirTo = static_cast<NavDirType>((dirFrom + 2) % 4);
+        to->ConnectTo(from, dirTo);
+    }
+    return true;
+}
+
+bool NavMesh::DisconnectAreas(uint32_t fromId, uint32_t toId, bool bidirectional) {
+    NavArea* from = GetAreaByID(fromId);
+    NavArea* to = GetAreaByID(toId);
+    if (!from || !to) return false;
+
+    from->Disconnect(to);
+    if (bidirectional) {
+        to->Disconnect(from);
+    }
+    return true;
+}

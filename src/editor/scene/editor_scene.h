@@ -89,6 +89,43 @@ public:
     bool GetShowWireframeOnSolid() const { return m_bspRenderer.GetShowWireframeOnSolid(); }
     void SetShowWireframeOnSolid(bool show) { m_bspRenderer.SetShowWireframeOnSolid(show); }
 
+    // Blender-style 3D Transform and Connection modes
+    enum EditorTransformMode {
+        TRANSFORM_NONE = 0,
+        TRANSFORM_TRANSLATE,  // Grab [G]
+        TRANSFORM_SCALE,      // Scale [S]
+        TRANSFORM_CONNECT     // Connect Mode [C]
+    };
+
+    enum EditorTransformAxis {
+        AXIS_NONE = 0,
+        AXIS_X = 1,
+        AXIS_Y = 2,
+        AXIS_Z = 3
+    };
+
+    EditorTransformMode GetTransformMode() const { return m_transformMode; }
+    EditorTransformAxis GetTransformAxis() const { return m_transformAxis; }
+
+    void StartGrab(const Vector3& initialHitPoint);
+    void StartScale(const Vector3& initialHitPoint);
+    void StartConnectMode();
+    void SetTransformAxis(EditorTransformAxis axis);
+    void ToggleTransformAxis(EditorTransformAxis axis);
+    void CancelTransform();
+    bool ConfirmTransform(class CommandManager& cmdMgr);
+
+    void UpdateTransform(const Vector3& currentHitPoint, float mouseDeltaY = 0.0f);
+    void SetConnectHoverArea(uint32_t areaId);
+    uint32_t GetConnectHoverArea() const { return m_connectHoverAreaId; }
+
+    void ConnectSelectedTo(uint32_t targetId, bool bidirectional, class CommandManager& cmdMgr);
+    void DisconnectSelectedFrom(uint32_t targetId, bool bidirectional, class CommandManager& cmdMgr);
+
+    void DuplicateSelectedArea(class CommandManager& cmdMgr);
+    void DeleteSelectedArea(class CommandManager& cmdMgr);
+    void RotateSelectedArea90(class CommandManager& cmdMgr);
+
 private:
     std::unique_ptr<BSPFile> m_bsp;
     std::unique_ptr<NavMesh> m_nav;
@@ -106,6 +143,14 @@ private:
     bool m_showBSP;
     bool m_showNAV;
     bool m_showConnections;
+
+    EditorTransformMode m_transformMode{TRANSFORM_NONE};
+    EditorTransformAxis m_transformAxis{AXIS_NONE};
+    uint32_t m_connectHoverAreaId{0};
+    NavExtent m_initialExtent;
+    float m_initialNeZ{0.0f};
+    float m_initialSwZ{0.0f};
+    Vector3 m_initialHitPoint{0.0f, 0.0f, 0.0f};
 
     AsyncLoadContext m_loadCtx;
     std::thread m_loadThread;

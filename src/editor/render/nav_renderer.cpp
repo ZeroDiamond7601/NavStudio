@@ -33,7 +33,8 @@ void NavRenderer::Clear() {
     m_areaCount = 0;
 }
 
-bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t hoveredId) {
+bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t hoveredId,
+                               uint32_t connectTargetId, int transformAxis) {
     Clear();
     if (!nav.IsLoaded()) return false;
 
@@ -126,9 +127,9 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
         lineIndices.push_back(baseLineVert + 3);
         lineIndices.push_back(baseLineVert + 0);
 
-        // Connection lines between area centroids
+        // Connection lines between area centroids with dual-lane offset & clear contrast
         Vector3 centerA = area->GetCenter();
-        centerA.z += (kZLift + 2.0f);
+        bool isSelArea = (area->GetID() == selectedId);
 
         for (int d = 0; d < NUM_NAV_DIRECTIONS; ++d) {
             const auto& connects = area->GetAdjacentList(static_cast<NavDirType>(d));
@@ -137,43 +138,165 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
                 if (!target) continue;
 
                 Vector3 centerB = target->GetCenter();
-                centerB.z += (kZLift + 2.0f);
+                Vector3 delta = centerB - centerA;
+                float dist = delta.Length();
+                if (dist < 1.0f) continue;
 
+                bool isTargetSelected = (target->GetID() == selectedId);
                 bool isTwoWay = target->IsConnected(area);
 
-                // Bright Cyan for two-way, Vivid Magenta for one-way
-                float cr = isTwoWay ? 0.15f : 1.0f;
-                float cg = isTwoWay ? 0.90f : 0.20f;
-                float cb = isTwoWay ? 1.0f : 0.85f;
+                Vector3 fwd = delta * (1.0f / dist);
+                Vector3 lateral(-fwd.y, fwd.x, 0.0f);
+                float laneOffset = isTwoWay ? 3.5f : 0.0f;
+
+                float zLiftTotal = kZLift + 2.0f;
+                float cr, cg, cb, ca;
+
+                if (isSelArea || isTargetSelected) {
+                    zLiftTotal += 2.0f; // Elevate active connections
+                    if (isTwoWay) {
+                        // Brilliant Electric Cyan for active two-way
+                        cr = 0.0f; cg = 0.96f; cb = 1.0f; ca = 1.0f;
+                    } else if (isSelArea) {
+                        // Luminous Amber / Gold for active outgoing
+                        cr = 1.0f; cg = 0.78f; cb = 0.0f; ca = 1.0f;
+                    } else {
+                        // Vibrant Spring Green for active incoming
+                        cr = 0.0f; cg = 1.0f; cb = 0.50f; ca = 1.0f;
+                    }
+                } else {
+                    if (isTwoWay) {
+                        // Clean Sky Blue for passive two-way
+                        cr = 0.25f; cg = 0.58f; cb = 0.96f; ca = 0.65f;
+                    } else {
+                        // Clean Coral Rose for passive one-way
+                        cr = 0.98f; cg = 0.40f; cb = 0.48f; ca = 0.75f;
+                    }
+                }
+
+                Vector3 start = centerA + lateral * laneOffset;
+                Vector3 end = centerB + lateral * laneOffset;
+                start.z += zLiftTotal;
+                end.z += zLiftTotal;
 
                 uint32_t cIdx = static_cast<uint32_t>(lineVertices.size());
-                lineVertices.push_back({ centerA.x, centerA.y, centerA.z, 0,0,1, 0,0, cr, cg, cb, 0.85f });
-                lineVertices.push_back({ centerB.x, centerB.y, centerB.z, 0,0,1, 0,0, cr, cg, cb, 0.85f });
+                lineVertices.push_back({ start.x, start.y, start.z, 0,0,1, 0,0, cr, cg, cb, ca });
+                lineVertices.push_back({ end.x, end.y, end.z, 0,0,1, 0,0, cr, cg, cb, ca });
 
                 lineIndices.push_back(cIdx);
                 lineIndices.push_back(cIdx + 1);
 
-                // Add directional arrowhead
-                Vector3 delta = centerB - centerA;
-                float dist = delta.Length();
-                if (dist > 24.0f) {
-                    Vector3 fwd = delta * (1.0f / dist);
-                    Vector3 side(-fwd.y, fwd.x, 0.0f);
-                    Vector3 tip = centerA + fwd * (dist * 0.72f);
-                    Vector3 leftBar = tip - fwd * 8.0f + side * 4.0f;
-                    Vector3 rightBar = tip - fwd * 8.0f - side * 4.0f;
+                // Add directional arrowhead along this lane
+                if (dist > 20.0f) {
+                    Vector3 tip = start + fwd * (dist * 0.75f);
+                    Vector3 leftBar = tip - fwd * 8.0f + lateral * 4.5f;
+                    Vector3 rightBar = tip - fwd * 8.0f - lateral * 4.5f;
 
                     uint32_t aIdx = static_cast<uint32_t>(lineVertices.size());
-                    lineVertices.push_back({ tip.x, tip.y, tip.z, 0,0,1, 0,0, cr, cg, cb, 0.95f });
-                    lineVertices.push_back({ leftBar.x, leftBar.y, leftBar.z, 0,0,1, 0,0, cr, cg, cb, 0.95f });
-                    lineVertices.push_back({ tip.x, tip.y, tip.z, 0,0,1, 0,0, cr, cg, cb, 0.95f });
-                    lineVertices.push_back({ rightBar.x, rightBar.y, rightBar.z, 0,0,1, 0,0, cr, cg, cb, 0.95f });
+                    lineVertices.push_back({ tip.x, tip.y, tip.z, 0,0,1, 0,0, cr, cg, cb, std::min(1.0f, ca + 0.15f) });
+                    lineVertices.push_back({ leftBar.x, leftBar.y, leftBar.z, 0,0,1, 0,0, cr, cg, cb, std::min(1.0f, ca + 0.15f) });
+                    lineVertices.push_back({ tip.x, tip.y, tip.z, 0,0,1, 0,0, cr, cg, cb, std::min(1.0f, ca + 0.15f) });
+                    lineVertices.push_back({ rightBar.x, rightBar.y, rightBar.z, 0,0,1, 0,0, cr, cg, cb, std::min(1.0f, ca + 0.15f) });
 
                     lineIndices.push_back(aIdx + 0);
                     lineIndices.push_back(aIdx + 1);
                     lineIndices.push_back(aIdx + 2);
                     lineIndices.push_back(aIdx + 3);
                 }
+            }
+        }
+    }
+
+    // Connect Mode interactive preview line between selected and candidate area
+    if (selectedId != 0 && connectTargetId != 0 && selectedId != connectTargetId) {
+        const NavArea* sel = nav.GetAreaByID(selectedId);
+        const NavArea* tgt = nav.GetAreaByID(connectTargetId);
+        if (sel && tgt) {
+            Vector3 pA = sel->GetCenter(); pA.z += (kZLift + 6.0f);
+            Vector3 pB = tgt->GetCenter(); pB.z += (kZLift + 6.0f);
+
+            uint32_t pIdx = static_cast<uint32_t>(lineVertices.size());
+            lineVertices.push_back({ pA.x, pA.y, pA.z, 0,0,1, 0,0, 1.0f, 0.95f, 0.2f, 1.0f });
+            lineVertices.push_back({ pB.x, pB.y, pB.z, 0,0,1, 0,0, 1.0f, 0.95f, 0.2f, 1.0f });
+            lineIndices.push_back(pIdx);
+            lineIndices.push_back(pIdx + 1);
+        }
+    }
+
+    // 3D Transform Gizmo and vertex handles for selected area (Blender-style)
+    if (selectedId != 0) {
+        const NavArea* sel = nav.GetAreaByID(selectedId);
+        if (sel) {
+            Vector3 c = sel->GetCenter();
+            c.z += (kZLift + 3.0f);
+            float gLen = 48.0f;
+
+            // X Axis: Red (+X East)
+            uint32_t gx = static_cast<uint32_t>(lineVertices.size());
+            lineVertices.push_back({ c.x, c.y, c.z, 0,0,1, 0,0, 0.95f, 0.2f, 0.2f, 1.0f });
+            lineVertices.push_back({ c.x + gLen, c.y, c.z, 0,0,1, 0,0, 0.95f, 0.2f, 0.2f, 1.0f });
+            lineVertices.push_back({ c.x + gLen, c.y, c.z, 0,0,1, 0,0, 0.95f, 0.2f, 0.2f, 1.0f });
+            lineVertices.push_back({ c.x + gLen - 8.0f, c.y + 4.0f, c.z, 0,0,1, 0,0, 0.95f, 0.2f, 0.2f, 1.0f });
+            lineVertices.push_back({ c.x + gLen, c.y, c.z, 0,0,1, 0,0, 0.95f, 0.2f, 0.2f, 1.0f });
+            lineVertices.push_back({ c.x + gLen - 8.0f, c.y - 4.0f, c.z, 0,0,1, 0,0, 0.95f, 0.2f, 0.2f, 1.0f });
+            lineIndices.push_back(gx + 0); lineIndices.push_back(gx + 1);
+            lineIndices.push_back(gx + 2); lineIndices.push_back(gx + 3);
+            lineIndices.push_back(gx + 4); lineIndices.push_back(gx + 5);
+
+            // Y Axis: Green (+Y North)
+            uint32_t gy = static_cast<uint32_t>(lineVertices.size());
+            lineVertices.push_back({ c.x, c.y, c.z, 0,0,1, 0,0, 0.2f, 0.95f, 0.3f, 1.0f });
+            lineVertices.push_back({ c.x, c.y + gLen, c.z, 0,0,1, 0,0, 0.2f, 0.95f, 0.3f, 1.0f });
+            lineVertices.push_back({ c.x, c.y + gLen, c.z, 0,0,1, 0,0, 0.2f, 0.95f, 0.3f, 1.0f });
+            lineVertices.push_back({ c.x + 4.0f, c.y + gLen - 8.0f, c.z, 0,0,1, 0,0, 0.2f, 0.95f, 0.3f, 1.0f });
+            lineVertices.push_back({ c.x, c.y + gLen, c.z, 0,0,1, 0,0, 0.2f, 0.95f, 0.3f, 1.0f });
+            lineVertices.push_back({ c.x - 4.0f, c.y + gLen - 8.0f, c.z, 0,0,1, 0,0, 0.2f, 0.95f, 0.3f, 1.0f });
+            lineIndices.push_back(gy + 0); lineIndices.push_back(gy + 1);
+            lineIndices.push_back(gy + 2); lineIndices.push_back(gy + 3);
+            lineIndices.push_back(gy + 4); lineIndices.push_back(gy + 5);
+
+            // Z Axis: Blue (+Z Up)
+            uint32_t gz = static_cast<uint32_t>(lineVertices.size());
+            lineVertices.push_back({ c.x, c.y, c.z, 0,0,1, 0,0, 0.2f, 0.55f, 1.0f, 1.0f });
+            lineVertices.push_back({ c.x, c.y, c.z + gLen, 0,0,1, 0,0, 0.2f, 0.55f, 1.0f, 1.0f });
+            lineVertices.push_back({ c.x, c.y, c.z + gLen, 0,0,1, 0,0, 0.2f, 0.55f, 1.0f, 1.0f });
+            lineVertices.push_back({ c.x + 4.0f, c.y, c.z + gLen - 8.0f, 0,0,1, 0,0, 0.2f, 0.55f, 1.0f, 1.0f });
+            lineVertices.push_back({ c.x, c.y, c.z + gLen, 0,0,1, 0,0, 0.2f, 0.55f, 1.0f, 1.0f });
+            lineVertices.push_back({ c.x - 4.0f, c.y, c.z + gLen - 8.0f, 0,0,1, 0,0, 0.2f, 0.55f, 1.0f, 1.0f });
+            lineIndices.push_back(gz + 0); lineIndices.push_back(gz + 1);
+            lineIndices.push_back(gz + 2); lineIndices.push_back(gz + 3);
+            lineIndices.push_back(gz + 4); lineIndices.push_back(gz + 5);
+
+            // 4 Corner vertex handles
+            for (int k = 0; k < 4; ++k) {
+                Vector3 cp = sel->GetCorner(static_cast<NavCornerType>(k));
+                cp.z += (kZLift + 1.0f);
+                float hSize = 5.0f;
+                uint32_t hIdx = static_cast<uint32_t>(lineVertices.size());
+                lineVertices.push_back({ cp.x - hSize, cp.y, cp.z, 0,0,1, 0,0, 1.0f, 0.85f, 0.2f, 1.0f });
+                lineVertices.push_back({ cp.x + hSize, cp.y, cp.z, 0,0,1, 0,0, 1.0f, 0.85f, 0.2f, 1.0f });
+                lineVertices.push_back({ cp.x, cp.y - hSize, cp.z, 0,0,1, 0,0, 1.0f, 0.85f, 0.2f, 1.0f });
+                lineVertices.push_back({ cp.x, cp.y + hSize, cp.z, 0,0,1, 0,0, 1.0f, 0.85f, 0.2f, 1.0f });
+                lineIndices.push_back(hIdx + 0); lineIndices.push_back(hIdx + 1);
+                lineIndices.push_back(hIdx + 2); lineIndices.push_back(hIdx + 3);
+            }
+
+            // Blender infinite axis guideline if axis constraint is active
+            if (transformAxis == 1) { // X axis
+                uint32_t ax = static_cast<uint32_t>(lineVertices.size());
+                lineVertices.push_back({ c.x - 4000.0f, c.y, c.z, 0,0,1, 0,0, 1.0f, 0.2f, 0.2f, 0.85f });
+                lineVertices.push_back({ c.x + 4000.0f, c.y, c.z, 0,0,1, 0,0, 1.0f, 0.2f, 0.2f, 0.85f });
+                lineIndices.push_back(ax); lineIndices.push_back(ax + 1);
+            } else if (transformAxis == 2) { // Y axis
+                uint32_t ay = static_cast<uint32_t>(lineVertices.size());
+                lineVertices.push_back({ c.x, c.y - 4000.0f, c.z, 0,0,1, 0,0, 0.2f, 1.0f, 0.3f, 0.85f });
+                lineVertices.push_back({ c.x, c.y + 4000.0f, c.z, 0,0,1, 0,0, 0.2f, 1.0f, 0.3f, 0.85f });
+                lineIndices.push_back(ay); lineIndices.push_back(ay + 1);
+            } else if (transformAxis == 3) { // Z axis
+                uint32_t az = static_cast<uint32_t>(lineVertices.size());
+                lineVertices.push_back({ c.x, c.y, c.z - 4000.0f, 0,0,1, 0,0, 0.2f, 0.6f, 1.0f, 0.85f });
+                lineVertices.push_back({ c.x, c.y, c.z + 4000.0f, 0,0,1, 0,0, 0.2f, 0.6f, 1.0f, 0.85f });
+                lineIndices.push_back(az); lineIndices.push_back(az + 1);
             }
         }
     }

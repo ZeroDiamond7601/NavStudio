@@ -178,4 +178,266 @@ private:
     bool m_wasConnected;
 };
 
+// Command: Connect Areas (Directed or Bidirectional)
+class CmdConnectAreas : public IEditCommand {
+public:
+    CmdConnectAreas(EditorScene* scene, uint32_t fromId, uint32_t toId, bool bidirectional = true, int explicitDir = -1)
+        : m_scene(scene), m_fromId(fromId), m_toId(toId), m_bidirectional(bidirectional), m_explicitDir(explicitDir) {}
+
+    void Execute() override {
+        m_scene->GetNAV().ConnectAreas(m_fromId, m_toId, m_bidirectional, m_explicitDir);
+        m_scene->RebuildNavRenderer();
+    }
+
+    void Undo() override {
+        m_scene->GetNAV().DisconnectAreas(m_fromId, m_toId, m_bidirectional);
+        m_scene->RebuildNavRenderer();
+    }
+
+    const char* GetName() const override { return "Connect Areas"; }
+
+private:
+    EditorScene* m_scene;
+    uint32_t m_fromId;
+    uint32_t m_toId;
+    bool m_bidirectional;
+    int m_explicitDir;
+};
+
+// Command: Disconnect Areas
+class CmdDisconnectAreas : public IEditCommand {
+public:
+    CmdDisconnectAreas(EditorScene* scene, uint32_t fromId, uint32_t toId, bool bidirectional = false)
+        : m_scene(scene), m_fromId(fromId), m_toId(toId), m_bidirectional(bidirectional) {
+        NavArea* from = scene->GetNAV().GetAreaByID(fromId);
+        NavArea* to = scene->GetNAV().GetAreaByID(toId);
+        if (from && to) {
+            for (int d = 0; d < 4; ++d) {
+                if (from->IsConnected(to, d)) {
+                    m_fromDir = d;
+                    break;
+                }
+            }
+            if (to->IsConnected(from)) {
+                for (int d = 0; d < 4; ++d) {
+                    if (to->IsConnected(from, d)) {
+                        m_toDir = d;
+                        m_bidirectional = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    void Execute() override {
+        m_scene->GetNAV().DisconnectAreas(m_fromId, m_toId, m_bidirectional);
+        m_scene->RebuildNavRenderer();
+    }
+
+    void Undo() override {
+        m_scene->GetNAV().ConnectAreas(m_fromId, m_toId, false, m_fromDir);
+        if (m_bidirectional && m_toDir >= 0) {
+            m_scene->GetNAV().ConnectAreas(m_toId, m_fromId, false, m_toDir);
+        }
+        m_scene->RebuildNavRenderer();
+    }
+
+    const char* GetName() const override { return "Disconnect Areas"; }
+
+private:
+    EditorScene* m_scene;
+    uint32_t m_fromId;
+    uint32_t m_toId;
+    bool m_bidirectional{false};
+    int m_fromDir{-1};
+    int m_toDir{-1};
+};
+
+// Command: 3D Transform Area (Grab / Move, Scale, Height Adjust)
+class CmdTransformArea : public IEditCommand {
+public:
+    CmdTransformArea(EditorScene* scene, uint32_t areaId,
+                     const NavExtent& oldExt, float oldNeZ, float oldSwZ,
+                     const NavExtent& newExt, float newNeZ, float newSwZ,
+                     const char* name = "Transform Area")
+        : m_scene(scene), m_areaId(areaId),
+          m_oldExt(oldExt), m_oldNeZ(oldNeZ), m_oldSwZ(oldSwZ),
+          m_newExt(newExt), m_newNeZ(newNeZ), m_newSwZ(newSwZ),
+          m_name(name) {}
+
+    void Execute() override {
+        NavArea* area = m_scene->GetNAV().GetAreaByID(m_areaId);
+        if (area) {
+            m_scene->GetNAV().GetGrid().RemoveArea(area);
+            area->SetExtent(m_newExt);
+            area->SetCornerHeights(m_newNeZ, m_newSwZ);
+            m_scene->GetNAV().GetGrid().AddArea(area);
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    void Undo() override {
+        NavArea* area = m_scene->GetNAV().GetAreaByID(m_areaId);
+        if (area) {
+            m_scene->GetNAV().GetGrid().RemoveArea(area);
+            area->SetExtent(m_oldExt);
+            area->SetCornerHeights(m_oldNeZ, m_oldSwZ);
+            m_scene->GetNAV().GetGrid().AddArea(area);
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    const char* GetName() const override { return m_name.c_str(); }
+
+private:
+    EditorScene* m_scene;
+    uint32_t m_areaId;
+    NavExtent m_oldExt;
+    NavExtent m_newExt;
+    float m_oldNeZ;
+    float m_oldSwZ;
+    float m_newNeZ;
+    float m_newSwZ;
+    std::string m_name;
+};
+
+// Command: Duplicate Area in 3D
+class CmdDuplicateArea : public IEditCommand {
+public:
+    CmdDuplicateArea(EditorScene* scene, uint32_t srcId, const Vector3& offset = Vector3(32.0f, 32.0f, 0.0f))
+        : m_scene(scene), m_srcId(srcId), m_offset(offset), m_createdId(0) {}
+
+    void Execute() override {
+        if (m_createdId == 0) {
+            NavArea* copy = m_scene->GetNAV().DuplicateArea(m_srcId, m_offset);
+            if (copy) {
+                m_createdId = copy->GetID();
+                m_scene->SelectArea(m_createdId);
+                m_scene->RebuildNavRenderer();
+            }
+        } else {
+            NavArea* src = m_scene->GetNAV().GetAreaByID(m_srcId);
+            if (src) {
+                NavExtent ext = src->GetExtent();
+                ext.lo += m_offset;
+                ext.hi += m_offset;
+                NavArea* area = m_scene->GetNAV().CreateArea(ext, src->GetNEZ() + m_offset.z, src->GetSWZ() + m_offset.z);
+                if (area) {
+                    m_createdId = area->GetID();
+                    m_scene->SelectArea(m_createdId);
+                    m_scene->RebuildNavRenderer();
+                }
+            }
+        }
+    }
+
+    void Undo() override {
+        if (m_createdId != 0) {
+            m_scene->GetNAV().RemoveArea(m_createdId);
+            if (m_scene->GetSelectedAreaID() == m_createdId) {
+                m_scene->SelectArea(m_srcId);
+            }
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    uint32_t GetCreatedID() const { return m_createdId; }
+    const char* GetName() const override { return "Duplicate Area"; }
+
+private:
+    EditorScene* m_scene;
+    uint32_t m_srcId;
+    Vector3 m_offset;
+    uint32_t m_createdId;
+};
+
+// Command: Delete Area with full connection restore
+class CmdDeleteArea : public IEditCommand {
+public:
+    CmdDeleteArea(EditorScene* scene, uint32_t areaId)
+        : m_scene(scene), m_areaId(areaId), m_valid(false) {
+        NavArea* area = m_scene->GetNAV().GetAreaByID(areaId);
+        if (!area) return;
+
+        m_extent = area->GetExtent();
+        m_neZ = area->GetNEZ();
+        m_swZ = area->GetSWZ();
+        m_attributes = area->GetAttributes();
+        m_place = area->GetPlace();
+        m_placeName = area->GetPlaceName();
+
+        for (int d = 0; d < 4; ++d) {
+            for (const auto& conn : area->GetAdjacentList(static_cast<NavDirType>(d))) {
+                if (conn.area) {
+                    m_outgoing.push_back({ conn.area->GetID(), static_cast<NavDirType>(d) });
+                }
+            }
+        }
+
+        for (const NavArea* other : m_scene->GetNAV().GetAreas()) {
+            if (other && other->GetID() != areaId) {
+                for (int d = 0; d < 4; ++d) {
+                    if (other->IsConnected(area, d)) {
+                        m_incoming.push_back({ other->GetID(), static_cast<NavDirType>(d) });
+                    }
+                }
+            }
+        }
+        m_valid = true;
+    }
+
+    void Execute() override {
+        if (!m_valid) return;
+        m_scene->GetNAV().RemoveArea(m_areaId);
+        if (m_scene->GetSelectedAreaID() == m_areaId) {
+            m_scene->SelectArea(0);
+        }
+        m_scene->RebuildNavRenderer();
+    }
+
+    void Undo() override {
+        if (!m_valid) return;
+        NavArea* area = m_scene->GetNAV().CreateArea(m_extent, m_neZ, m_swZ);
+        if (area) {
+            m_scene->GetNAV().GetGrid().RemoveArea(area);
+            area->SetID(m_areaId);
+            m_scene->GetNAV().GetGrid().AddArea(area);
+            area->SetAttributes(m_attributes);
+            area->SetPlace(m_place);
+            area->SetPlaceName(m_placeName);
+
+            for (const auto& out : m_outgoing) {
+                m_scene->GetNAV().ConnectAreas(m_areaId, out.targetId, false, out.dir);
+            }
+            for (const auto& in : m_incoming) {
+                m_scene->GetNAV().ConnectAreas(in.targetId, m_areaId, false, in.dir);
+            }
+
+            m_scene->SelectArea(m_areaId);
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    const char* GetName() const override { return "Delete Area"; }
+
+private:
+    struct SavedConn {
+        uint32_t targetId;
+        NavDirType dir;
+    };
+
+    EditorScene* m_scene;
+    uint32_t m_areaId;
+    NavExtent m_extent;
+    float m_neZ{0.0f};
+    float m_swZ{0.0f};
+    uint8_t m_attributes{0};
+    uint16_t m_place{0};
+    std::string m_placeName;
+    std::vector<SavedConn> m_outgoing;
+    std::vector<SavedConn> m_incoming;
+    bool m_valid;
+};
+
 #endif // NAV_COMMANDS_H

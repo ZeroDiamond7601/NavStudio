@@ -41,12 +41,20 @@
 ### NavStudio: 3D BSP Visualizer & NavMesh Editor
 * **Hardware-Accelerated 3D Viewport:** OpenGL 3.3 Core rendering with Dear ImGui docking interface.
 * **Multiple Shading Modes:** Solid clay shading with GoldSrc Z-Up hemisphere lighting, distance depth cueing, overlay brush edge outlines, wireframe edge display, and Ghost / X-Ray mode (translucent BSP walls to view navigation meshes through floors and ceilings).
-* **High-Visibility NavMesh Inspection:** Color-coded area quads (Normal, Crouch, Jump, Blocked) with polygon offset to eliminate Z-fighting against BSP floors, directional connection lines with arrowheads (cyan for two-way, magenta for one-way), and ladder rungs.
-* **Interactive Editing Tools:**
-  * **Floor Snapping:** Casts downward rays to the BSP collision hull to ground floating area corner vertices.
-  * **Attribute Flag Editor:** Toggle `NAV_ATTR_CROUCH`, `NAV_ATTR_JUMP`, `NAV_ATTR_PRECISE`, and `NAV_ATTR_NO_JUMP`.
-  * **Place Name Manager:** Search, filter, and assign designated map locations.
-  * **Area Connections:** View, link, and toggle area traversability.
+* **High-Visibility NavMesh Inspection & Clean Connections:** Color-coded area quads with polygon offset to eliminate Z-fighting against BSP floors, dual-lane highway lateral offset for overlapping bidirectional links, distinct color coding (Electric Cyan for active bidirectional, Golden Amber for active outgoing, Spring Green for active incoming, Sky Blue for passive two-way, Coral Rose for passive one-way), prominent chevron arrowheads, and ladder rungs.
+* **Blender-Style 3D Object Controls:**
+  * **Grab / Translate (`G`):** Move areas in 3D with mouse. Press `X`, `Y`, or `Z` to constrain movement strictly to an axis with real-time infinite axis guidelines. `Left-Click`/`Enter` confirms, `Right-Click`/`Esc` cancels.
+  * **Scale (`S`):** Scale area dimensions with mouse, with optional `X` or `Y` width/length axis constraints.
+  * **Rotate (`R`):** Rotate area bounding orientation 90 degrees around center.
+  * **Duplicate (`Shift+D`):** Clones selected area with a unique ID and immediately enters Grab mode.
+  * **Delete (`X` / `Delete`):** Deletes area with lossless graph connection restoration via Undo.
+  * **3D Transform Gizmo:** Center axis arrows (+X Red, +Y Green, +Z Blue) and 4 corner vertex handles.
+* **Interactive Connection Manager & Connect Mode (`C`):**
+  * **Connect Mode (`C`):** Click any target area in the 3D viewport to link (Left-Click for Two-Way, Shift+Click for One-Way) with live connecting beam preview.
+  * **Inspector Manager:** One-click `[2-Way]` / `[1-Way]` reciprocity toggle buttons, jump buttons, disconnect buttons, and manual Area ID connection forms.
+* **Floor Snapping (`Space` / `S`):** Casts downward rays to the BSP collision hull to ground floating area corner vertices.
+* **Attribute Flag Editor:** Toggle `NAV_ATTR_CROUCH`, `NAV_ATTR_JUMP`, `NAV_ATTR_PRECISE`, and `NAV_ATTR_NO_JUMP`.
+* **Place Name Manager:** Search, filter, and assign designated map locations.
 * **Undo / Redo System:** Command-pattern history stack (`Ctrl+Z` / `Ctrl+Y`) for non-destructive mesh authoring.
 * **Area Hierarchy Search:** Filterable tree view of all areas with instant camera focus (`F` key).
 

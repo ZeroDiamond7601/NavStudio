@@ -1,4 +1,5 @@
 #include "editor/scene/editor_scene.h"
+#include "editor/commands/nav_commands.h"
 #include <cstdio>
 #include <fstream>
 #include <algorithm>
@@ -292,7 +293,10 @@ NavArea* EditorScene::GetSelectedArea() {
 
 void EditorScene::RebuildNavRenderer() {
     if (m_nav && m_nav->IsLoaded()) {
-        m_navRenderer.BuildFromNav(*m_nav, m_selectedAreaId, m_hoveredAreaId);
+        int axis = static_cast<int>(m_transformAxis);
+        m_navRenderer.BuildFromNav(*m_nav, m_selectedAreaId, m_hoveredAreaId,
+                                   (m_transformMode == TRANSFORM_CONNECT) ? m_connectHoverAreaId : 0,
+                                   axis);
     }
 }
 
@@ -304,4 +308,181 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
     if (m_showNAV && m_navRenderer.IsLoaded()) {
         m_navRenderer.Render(meshShader, lineShader, mvp);
     }
+}
+
+void EditorScene::StartGrab(const Vector3& initialHitPoint) {
+    NavArea* area = GetSelectedArea();
+    if (!area) return;
+    m_transformMode = TRANSFORM_TRANSLATE;
+    m_transformAxis = AXIS_NONE;
+    m_initialExtent = area->GetExtent();
+    m_initialNeZ = area->GetNEZ();
+    m_initialSwZ = area->GetSWZ();
+    m_initialHitPoint = initialHitPoint;
+    RebuildNavRenderer();
+}
+
+void EditorScene::StartScale(const Vector3& initialHitPoint) {
+    NavArea* area = GetSelectedArea();
+    if (!area) return;
+    m_transformMode = TRANSFORM_SCALE;
+    m_transformAxis = AXIS_NONE;
+    m_initialExtent = area->GetExtent();
+    m_initialNeZ = area->GetNEZ();
+    m_initialSwZ = area->GetSWZ();
+    m_initialHitPoint = initialHitPoint;
+    RebuildNavRenderer();
+}
+
+void EditorScene::StartConnectMode() {
+    if (m_selectedAreaId == 0) return;
+    m_transformMode = TRANSFORM_CONNECT;
+    m_transformAxis = AXIS_NONE;
+    m_connectHoverAreaId = 0;
+    RebuildNavRenderer();
+}
+
+void EditorScene::SetTransformAxis(EditorTransformAxis axis) {
+    m_transformAxis = axis;
+    RebuildNavRenderer();
+}
+
+void EditorScene::ToggleTransformAxis(EditorTransformAxis axis) {
+    if (m_transformAxis == axis) {
+        m_transformAxis = AXIS_NONE;
+    } else {
+        m_transformAxis = axis;
+    }
+    RebuildNavRenderer();
+}
+
+void EditorScene::CancelTransform() {
+    NavArea* area = GetSelectedArea();
+    if (area && (m_transformMode == TRANSFORM_TRANSLATE || m_transformMode == TRANSFORM_SCALE)) {
+        if (m_nav && m_nav->IsLoaded()) {
+            m_nav->GetGrid().RemoveArea(area);
+            area->SetExtent(m_initialExtent);
+            area->SetCornerHeights(m_initialNeZ, m_initialSwZ);
+            m_nav->GetGrid().AddArea(area);
+        }
+    }
+    m_transformMode = TRANSFORM_NONE;
+    m_transformAxis = AXIS_NONE;
+    m_connectHoverAreaId = 0;
+    RebuildNavRenderer();
+}
+
+bool EditorScene::ConfirmTransform(CommandManager& cmdMgr) {
+    NavArea* area = GetSelectedArea();
+    if (!area || (m_transformMode != TRANSFORM_TRANSLATE && m_transformMode != TRANSFORM_SCALE)) {
+        m_transformMode = TRANSFORM_NONE;
+        m_transformAxis = AXIS_NONE;
+        return false;
+    }
+
+    NavExtent curExt = area->GetExtent();
+    float curNeZ = area->GetNEZ();
+    float curSwZ = area->GetSWZ();
+
+    area->SetExtent(m_initialExtent);
+    area->SetCornerHeights(m_initialNeZ, m_initialSwZ);
+
+    const char* cmdName = (m_transformMode == TRANSFORM_SCALE) ? "Scale Area" : "Move Area";
+    cmdMgr.ExecuteCommand(std::make_unique<CmdTransformArea>(this, area->GetID(),
+        m_initialExtent, m_initialNeZ, m_initialSwZ,
+        curExt, curNeZ, curSwZ, cmdName));
+
+    m_transformMode = TRANSFORM_NONE;
+    m_transformAxis = AXIS_NONE;
+    return true;
+}
+
+void EditorScene::UpdateTransform(const Vector3& currentHitPoint, float mouseDeltaY) {
+    NavArea* area = GetSelectedArea();
+    if (!area) return;
+
+    if (m_transformMode == TRANSFORM_TRANSLATE) {
+        Vector3 delta = currentHitPoint - m_initialHitPoint;
+        if (m_transformAxis == AXIS_X) {
+            delta.y = 0.0f; delta.z = 0.0f;
+        } else if (m_transformAxis == AXIS_Y) {
+            delta.x = 0.0f; delta.z = 0.0f;
+        } else if (m_transformAxis == AXIS_Z) {
+            delta = Vector3(0.0f, 0.0f, -mouseDeltaY * 0.8f);
+        }
+
+        NavExtent newExt;
+        newExt.lo = m_initialExtent.lo + delta;
+        newExt.hi = m_initialExtent.hi + delta;
+        area->SetExtent(newExt);
+        area->SetCornerHeights(m_initialNeZ + delta.z, m_initialSwZ + delta.z);
+        RebuildNavRenderer();
+    } else if (m_transformMode == TRANSFORM_SCALE) {
+        Vector3 center = (m_initialExtent.lo + m_initialExtent.hi) * 0.5f;
+        float initDist = (m_initialHitPoint - center).Length();
+        float curDist = (currentHitPoint - center).Length();
+        float scale = (initDist > 1.0f) ? (curDist / initDist) : 1.0f;
+        scale = std::max(0.1f, std::min(10.0f, scale));
+
+        float halfW = (m_initialExtent.hi.x - m_initialExtent.lo.x) * 0.5f;
+        float halfL = (m_initialExtent.hi.y - m_initialExtent.lo.y) * 0.5f;
+        float sx = (m_transformAxis == AXIS_Y) ? 1.0f : scale;
+        float sy = (m_transformAxis == AXIS_X) ? 1.0f : scale;
+
+        NavExtent newExt;
+        newExt.lo = Vector3(center.x - halfW * sx, center.y - halfL * sy, m_initialExtent.lo.z);
+        newExt.hi = Vector3(center.x + halfW * sx, center.y + halfL * sy, m_initialExtent.hi.z);
+        area->SetExtent(newExt);
+        RebuildNavRenderer();
+    }
+}
+
+void EditorScene::SetConnectHoverArea(uint32_t areaId) {
+    if (m_connectHoverAreaId == areaId) return;
+    m_connectHoverAreaId = areaId;
+    RebuildNavRenderer();
+}
+
+void EditorScene::ConnectSelectedTo(uint32_t targetId, bool bidirectional, CommandManager& cmdMgr) {
+    NavArea* area = GetSelectedArea();
+    if (!area || targetId == 0 || targetId == area->GetID()) return;
+    cmdMgr.ExecuteCommand(std::make_unique<CmdConnectAreas>(this, area->GetID(), targetId, bidirectional));
+}
+
+void EditorScene::DisconnectSelectedFrom(uint32_t targetId, bool bidirectional, CommandManager& cmdMgr) {
+    NavArea* area = GetSelectedArea();
+    if (!area || targetId == 0) return;
+    cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(this, area->GetID(), targetId, bidirectional));
+}
+
+void EditorScene::DuplicateSelectedArea(CommandManager& cmdMgr) {
+    NavArea* area = GetSelectedArea();
+    if (!area) return;
+    auto dupCmd = std::make_unique<CmdDuplicateArea>(this, area->GetID());
+    cmdMgr.ExecuteCommand(std::move(dupCmd));
+    NavArea* newArea = GetSelectedArea();
+    if (newArea) {
+        StartGrab(newArea->GetCenter());
+    }
+}
+
+void EditorScene::DeleteSelectedArea(CommandManager& cmdMgr) {
+    NavArea* area = GetSelectedArea();
+    if (!area) return;
+    cmdMgr.ExecuteCommand(std::make_unique<CmdDeleteArea>(this, area->GetID()));
+}
+
+void EditorScene::RotateSelectedArea90(CommandManager& cmdMgr) {
+    NavArea* area = GetSelectedArea();
+    if (!area) return;
+    NavExtent oldExt = area->GetExtent();
+    Vector3 center = (oldExt.lo + oldExt.hi) * 0.5f;
+    float halfW = (oldExt.hi.x - oldExt.lo.x) * 0.5f;
+    float halfL = (oldExt.hi.y - oldExt.lo.y) * 0.5f;
+    NavExtent newExt;
+    newExt.lo = Vector3(center.x - halfL, center.y - halfW, oldExt.lo.z);
+    newExt.hi = Vector3(center.x + halfL, center.y + halfW, oldExt.hi.z);
+    cmdMgr.ExecuteCommand(std::make_unique<CmdTransformArea>(this, area->GetID(),
+        oldExt, area->GetNEZ(), area->GetSWZ(),
+        newExt, area->GetNEZ(), area->GetSWZ(), "Rotate Area 90°"));
 }

@@ -108,6 +108,7 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     RenderHierarchy(scene, camera);
     RenderInspector(scene, camera, cmdMgr);
     RenderStatusBar(scene, camera);
+    RenderTransformHUD(scene, cmdMgr);
 
     if (scene.IsLoading()) {
         RenderLoadingModal(scene);
@@ -312,11 +313,35 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::Text("Edit Tools:");
+        ImGui::Text("Blender 3D Tools:");
         NavArea* sel = scene.GetSelectedArea();
+        bool hasSel = (sel != nullptr);
 
-        if (ImGui::Button("Select [V]", ImVec2(-1, 26))) {
-            // Select mode
+        if (ImGui::Button("Grab / Move [G]", ImVec2(-1, 26))) {
+            if (hasSel) scene.StartGrab(sel->GetCenter());
+        }
+
+        if (ImGui::Button("Scale [S]", ImVec2(-1, 26))) {
+            if (hasSel) scene.StartScale(sel->GetCenter());
+        }
+
+        if (ImGui::Button("Rotate 90° [R]", ImVec2(-1, 26))) {
+            if (hasSel) scene.RotateSelectedArea90(cmdMgr);
+        }
+
+        if (ImGui::Button("Connect Mode [C]", ImVec2(-1, 26))) {
+            if (hasSel) {
+                if (scene.GetTransformMode() == EditorScene::TRANSFORM_CONNECT) scene.CancelTransform();
+                else scene.StartConnectMode();
+            }
+        }
+
+        if (ImGui::Button("Duplicate [Shift+D]", ImVec2(-1, 26))) {
+            if (hasSel) scene.DuplicateSelectedArea(cmdMgr);
+        }
+
+        if (ImGui::Button("Delete Area [X]", ImVec2(-1, 26))) {
+            if (hasSel) scene.DeleteSelectedArea(cmdMgr);
         }
 
         if (ImGui::Button("Snap to Floor [S]", ImVec2(-1, 26))) {
@@ -468,19 +493,68 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
 
         ImGui::Spacing();
         ImGui::Separator();
-        ImGui::Text("Coordinates & Dimensions:");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Text("3D Transform & Geometry:");
 
         const NavExtent& extent = area->GetExtent();
+        Vector3 center = area->GetCenter();
         float width = extent.hi.x - extent.lo.x;
         float length = extent.hi.y - extent.lo.y;
 
-        ImGui::BulletText("X: [%.1f, %.1f] (W: %.1f)", extent.lo.x, extent.hi.x, width);
-        ImGui::BulletText("Y: [%.1f, %.1f] (L: %.1f)", extent.lo.y, extent.hi.y, length);
-        ImGui::BulletText("Z (NE): %.1f", area->GetNEZ());
-        ImGui::BulletText("Z (SW): %.1f", area->GetSWZ());
-        ImGui::BulletText("Center: (%.1f, %.1f, %.1f)", area->GetCenter().x, area->GetCenter().y, area->GetCenter().z);
+        float pos[3] = { center.x, center.y, center.z };
+        if (ImGui::DragFloat3("Position (X,Y,Z)", pos, 1.0f, -65536.0f, 65536.0f, "%.1f")) {
+            Vector3 delta(pos[0] - center.x, pos[1] - center.y, pos[2] - center.z);
+            NavExtent newExt;
+            newExt.lo = extent.lo + delta;
+            newExt.hi = extent.hi + delta;
+            scene.GetNAV().GetGrid().RemoveArea(area);
+            area->SetExtent(newExt);
+            area->SetCornerHeights(area->GetNEZ() + delta.z, area->GetSWZ() + delta.z);
+            scene.GetNAV().GetGrid().AddArea(area);
+            scene.RebuildNavRenderer();
+        }
+
+        float size[2] = { width, length };
+        if (ImGui::DragFloat2("Size (W, L)", size, 1.0f, 8.0f, 8192.0f, "%.1f")) {
+            float hw = std::max(4.0f, size[0] * 0.5f);
+            float hl = std::max(4.0f, size[1] * 0.5f);
+            NavExtent newExt;
+            newExt.lo = Vector3(center.x - hw, center.y - hl, extent.lo.z);
+            newExt.hi = Vector3(center.x + hw, center.y + hl, extent.hi.z);
+            scene.GetNAV().GetGrid().RemoveArea(area);
+            area->SetExtent(newExt);
+            scene.GetNAV().GetGrid().AddArea(area);
+            scene.RebuildNavRenderer();
+        }
+
+        float corners[2] = { area->GetNEZ(), area->GetSWZ() };
+        if (ImGui::DragFloat2("Heights (NE, SW)", corners, 0.5f, -65536.0f, 65536.0f, "%.1f")) {
+            area->SetCornerHeights(corners[0], corners[1]);
+            scene.RebuildNavRenderer();
+        }
 
         ImGui::Spacing();
+        if (ImGui::Button("Grab [G]", ImVec2(75, 24))) {
+            scene.StartGrab(center);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Scale [S]", ImVec2(75, 24))) {
+            scene.StartScale(center);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Rotate [R]", ImVec2(75, 24))) {
+            scene.RotateSelectedArea90(cmdMgr);
+        }
+
+        if (ImGui::Button("Duplicate [Shift+D]", ImVec2(120, 24))) {
+            scene.DuplicateSelectedArea(cmdMgr);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Delete [X]", ImVec2(-1, 24))) {
+            scene.DeleteSelectedArea(cmdMgr);
+        }
+
         if (ImGui::Button("Snap to Floor [S]", ImVec2(-1, 26))) {
             if (scene.HasBSP()) {
                 cmdMgr.ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(&scene, id));
@@ -493,26 +567,76 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
 
         ImGui::Spacing();
         ImGui::Separator();
-        ImGui::Text("Connections:");
+        ImGui::Text("Connections (Clean Colors):");
+
+        bool inConnectMode = (scene.GetTransformMode() == EditorScene::TRANSFORM_CONNECT);
+        if (ImGui::Button(inConnectMode ? "Exit Connect Mode [C]" : "Enter Connect Mode [C]", ImVec2(-1, 26))) {
+            if (inConnectMode) {
+                scene.CancelTransform();
+            } else {
+                scene.StartConnectMode();
+            }
+        }
+
+        // Add Connection Sub-panel
+        ImGui::Spacing();
+        ImGui::Text("Add Connection:");
+        ImGui::SetNextItemWidth(90.0f);
+        ImGui::InputInt("##TargetID", &m_connectTargetInputId, 0, 0);
+        ImGui::SameLine();
+        const char* dirOptions[] = { "Auto-Dir", "North", "East", "South", "West" };
+        ImGui::SetNextItemWidth(85.0f);
+        ImGui::Combo("##DirCombo", &m_connectDirSelection, dirOptions, 5);
+        ImGui::Checkbox("Two-Way", &m_connectBidirectional);
+        ImGui::SameLine();
+        if (ImGui::Button("+ Connect", ImVec2(-1, 22))) {
+            if (m_connectTargetInputId > 0 && static_cast<uint32_t>(m_connectTargetInputId) != id) {
+                int explicitDir = (m_connectDirSelection > 0) ? (m_connectDirSelection - 1) : -1;
+                cmdMgr.ExecuteCommand(std::make_unique<CmdConnectAreas>(&scene, id, static_cast<uint32_t>(m_connectTargetInputId), m_connectBidirectional, explicitDir));
+            }
+        }
+
+        ImGui::Separator();
+        ImGui::Text("Active Connections:");
 
         static const char* dirNames[] = { "North", "East", "South", "West" };
         for (int d = 0; d < 4; ++d) {
             const auto& conns = area->GetAdjacentList(static_cast<NavDirType>(d));
-            if (conns.empty()) continue;
-
-            ImGui::BulletText("%s (%zu):", dirNames[d], conns.size());
             for (const auto& conn : conns) {
                 if (!conn.area) continue;
                 uint32_t targetId = conn.area->GetID();
                 bool twoWay = conn.area->IsConnected(area);
 
-                ImGui::Indent();
-                char connLabel[64];
-                std::snprintf(connLabel, sizeof(connLabel), "-> Area #%u (%s)", targetId, twoWay ? "2-Way" : "1-Way");
-                if (ImGui::SmallButton(connLabel)) {
+                ImGui::PushID(static_cast<int>(targetId * 10 + d));
+                ImGui::BulletText("[%s] Area #%u", dirNames[d], targetId);
+                ImGui::SameLine();
+
+                if (twoWay) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.6f, 0.7f, 0.8f));
+                    if (ImGui::SmallButton("2-Way")) {
+                        cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(&scene, targetId, id, false));
+                    }
+                    ImGui::PopStyleColor();
+                } else {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.4f, 0.0f, 0.8f));
+                    if (ImGui::SmallButton("1-Way")) {
+                        cmdMgr.ExecuteCommand(std::make_unique<CmdConnectAreas>(&scene, targetId, id, false));
+                    }
+                    ImGui::PopStyleColor();
+                }
+
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Jump")) {
                     scene.SelectArea(targetId);
                 }
-                ImGui::Unindent();
+
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.15f, 0.15f, 0.8f));
+                if (ImGui::SmallButton("X")) {
+                    cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(&scene, id, targetId, twoWay));
+                }
+                ImGui::PopStyleColor();
+                ImGui::PopID();
             }
         }
     }
@@ -566,11 +690,19 @@ void EditorUI::RenderHelpModal() {
 
         ImGui::Spacing();
         ImGui::Separator();
-        ImGui::Text("Editing Shortcuts:");
-        ImGui::BulletText("Left-Click: Select NavArea in 3D viewport");
-        ImGui::BulletText("Double-Click Hierarchy: Focus camera on area");
-        ImGui::BulletText("S: Snap selected area elevation to floor");
-        ImGui::BulletText("Ctrl+Z / Ctrl+Y: Undo / Redo");
+        ImGui::Text("Blender 3D & Editing Shortcuts:");
+        ImGui::BulletText("Left-Click: Select area in 3D viewport / confirm modal transform");
+        ImGui::BulletText("Right-Click: Mouse look flycam / cancel active modal transform");
+        ImGui::BulletText("G: Grab / Move selected area in 3D");
+        ImGui::BulletText("S: Scale selected area dimensions");
+        ImGui::BulletText("X / Y / Z: Constrain Grab/Scale strictly along X, Y, or Z axis");
+        ImGui::BulletText("R: Rotate area orientation 90 degrees");
+        ImGui::BulletText("C: Connect Mode (Click target area: Left=2-Way, Shift=1-Way)");
+        ImGui::BulletText("Shift+D: Duplicate selected area (enters Grab mode)");
+        ImGui::BulletText("X / Delete: Delete selected area");
+        ImGui::BulletText("Space: Snap selected area elevation to BSP floor");
+        ImGui::BulletText("F: Focus viewport camera on selected area");
+        ImGui::BulletText("Ctrl+Z / Ctrl+Y: Undo / Redo history");
         ImGui::BulletText("Ctrl+S: Save current navigation mesh");
 
         ImGui::Spacing();
@@ -754,6 +886,51 @@ void EditorUI::RenderLoadingErrorModal(EditorScene& scene) {
 
         if (ImGui::Button("Dismiss", ImVec2(120, 28))) {
             scene.ClearLoadingError();
+        }
+    }
+    ImGui::End();
+}
+
+void EditorUI::RenderTransformHUD(EditorScene& scene, CommandManager& /*cmdMgr*/) {
+    auto mode = scene.GetTransformMode();
+    if (mode == EditorScene::TRANSFORM_NONE) return;
+
+    ImGuiIO& io = ImGui::GetIO();
+    ImVec2 centerPos(io.DisplaySize.x * 0.5f, io.DisplaySize.y - 70.0f);
+    ImGui::SetNextWindowPos(centerPos, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowBgAlpha(0.88f);
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                            ImGuiWindowFlags_NoNav;
+
+    if (ImGui::Begin("TransformStatusHUD", nullptr, flags)) {
+        if (mode == EditorScene::TRANSFORM_TRANSLATE) {
+            const char* axisStr = "FREE";
+            if (scene.GetTransformAxis() == EditorScene::AXIS_X) axisStr = "X-AXIS (EAST/WEST)";
+            else if (scene.GetTransformAxis() == EditorScene::AXIS_Y) axisStr = "Y-AXIS (NORTH/SOUTH)";
+            else if (scene.GetTransformAxis() == EditorScene::AXIS_Z) axisStr = "Z-AXIS (ELEVATION)";
+
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "GRAB / MOVE: [%s]", axisStr);
+            ImGui::SameLine();
+            ImGui::TextDisabled("| Keys: [X][Y][Z] Constrain | [L-Click / Enter] Confirm | [R-Click / Esc] Cancel");
+        } else if (mode == EditorScene::TRANSFORM_SCALE) {
+            const char* axisStr = "UNIFORM";
+            if (scene.GetTransformAxis() == EditorScene::AXIS_X) axisStr = "X (WIDTH)";
+            else if (scene.GetTransformAxis() == EditorScene::AXIS_Y) axisStr = "Y (LENGTH)";
+
+            ImGui::TextColored(ImVec4(0.2f, 0.95f, 0.4f, 1.0f), "SCALE: [%s]", axisStr);
+            ImGui::SameLine();
+            ImGui::TextDisabled("| Keys: [X][Y] Constrain | [L-Click / Enter] Confirm | [R-Click / Esc] Cancel");
+        } else if (mode == EditorScene::TRANSFORM_CONNECT) {
+            uint32_t hover = scene.GetConnectHoverArea();
+            if (hover != 0) {
+                ImGui::TextColored(ImVec4(0.0f, 0.95f, 1.0f, 1.0f), "CONNECT MODE -> Hovering Area #%u", hover);
+            } else {
+                ImGui::TextColored(ImVec4(0.0f, 0.95f, 1.0f, 1.0f), "CONNECT MODE: Click target area in 3D");
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("| [Left-Click: 2-Way | Shift+Click: 1-Way] | [C / Esc: Exit]");
         }
     }
     ImGui::End();

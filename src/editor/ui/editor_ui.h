@@ -28,6 +28,7 @@ private:
     void RenderOpenPathModal(EditorScene& scene);
     void RenderLoadingModal(const EditorScene& scene);
     void RenderLoadingErrorModal(EditorScene& scene);
+    void RenderTransformHUD(EditorScene& scene, CommandManager& cmdMgr);
 
     bool m_mouseOverUI;
     bool m_requestQuit;
@@ -38,6 +39,10 @@ private:
     char m_openPathBuffer[512];
     int m_openPathType; // 0 = BSP, 1 = NAV
     std::string m_openPathStatusMessage;
+
+    int m_connectTargetInputId{0};
+    int m_connectDirSelection{0};
+    bool m_connectBidirectional{true};
 };
 
 #endif // EDITOR_UI_H

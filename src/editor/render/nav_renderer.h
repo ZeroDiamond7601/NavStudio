@@ -20,7 +20,8 @@ public:
     NavRenderer();
     ~NavRenderer();
 
-    bool BuildFromNav(const NavMesh& nav, uint32_t selectedId = 0, uint32_t hoveredId = 0);
+    bool BuildFromNav(const NavMesh& nav, uint32_t selectedId = 0, uint32_t hoveredId = 0,
+                      uint32_t connectTargetId = 0, int transformAxis = 0);
     void Clear();
 
     void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp);
