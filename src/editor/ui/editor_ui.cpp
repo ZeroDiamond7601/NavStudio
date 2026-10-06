@@ -145,6 +145,28 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                 }
             }
 
+            if (ImGui::BeginMenu("Open Recent")) {
+                const auto& recents = scene.GetRecentFiles();
+                if (recents.empty()) {
+                    ImGui::MenuItem("No Recent Files", nullptr, false, false);
+                } else {
+                    for (const auto& rPath : recents) {
+                        std::string label = rPath;
+                        size_t lastSlash = label.find_last_of("/\\");
+                        std::string nameOnly = (lastSlash != std::string::npos) ? label.substr(lastSlash + 1) : label;
+                        std::string itemText = nameOnly + "  (" + label + ")";
+                        if (ImGui::MenuItem(itemText.c_str())) {
+                            scene.StartAsyncLoad(rPath);
+                        }
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Clear Recent Files")) {
+                        scene.ClearRecentFiles();
+                    }
+                }
+                ImGui::EndMenu();
+            }
+
             if (ImGui::MenuItem("Open File from Path...", nullptr)) {
                 m_showOpenPathModal = true;
                 m_openPathBuffer[0] = '\0';
@@ -174,7 +196,6 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             ImGui::EndMenu();
         }
 
-
         if (ImGui::BeginMenu("Edit")) {
             std::string undoLabel = "Undo";
             if (cmdMgr.CanUndo()) {
@@ -190,6 +211,18 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
             if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y", false, cmdMgr.CanRedo())) {
                 cmdMgr.Redo();
+            }
+
+            ImGui::Separator();
+            NavArea* sel = scene.GetSelectedArea();
+            if (ImGui::MenuItem("Extrude Selected Edge", "E", false, sel != nullptr)) {
+                scene.ExtrudeSelectedEdge(cmdMgr);
+            }
+            if (ImGui::MenuItem("Split Selected Area", "Shift+X", false, sel != nullptr)) {
+                scene.SplitSelectedArea(cmdMgr);
+            }
+            if (ImGui::MenuItem("Merge with Adjacent Area", "Shift+M", false, sel != nullptr)) {
+                scene.MergeSelectedArea(cmdMgr);
             }
 
             ImGui::Separator();
@@ -218,6 +251,35 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             bool showWireOnSolid = scene.GetShowWireframeOnSolid();
             if (ImGui::MenuItem("Show Brush Edge Outlines", nullptr, &showWireOnSolid)) {
                 scene.SetShowWireframeOnSolid(showWireOnSolid);
+            }
+
+            ImGui::Separator();
+            bool showGroundGrid = scene.GetShowGroundGrid();
+            if (ImGui::MenuItem("Show 3D Ground Grid", nullptr, &showGroundGrid)) {
+                scene.SetShowGroundGrid(showGroundGrid);
+            }
+            bool gridSnap = scene.GetGridSnap();
+            if (ImGui::MenuItem("Snap to Grid", "Shift+W", &gridSnap)) {
+                scene.SetGridSnap(gridSnap);
+            }
+
+            if (ImGui::BeginMenu("Grid Size")) {
+                float sizes[] = { 4.0f, 8.0f, 16.0f, 32.0f, 64.0f, 128.0f, 256.0f };
+                for (float s : sizes) {
+                    char label[32];
+                    std::snprintf(label, sizeof(label), "%.0f units", s);
+                    if (ImGui::MenuItem(label, nullptr, std::abs(scene.GetGridSize() - s) < 0.1f)) {
+                        scene.SetGridSize(s);
+                    }
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Decrease Grid Size", "[")) {
+                    scene.DecreaseGridSize();
+                }
+                if (ImGui::MenuItem("Increase Grid Size", "]")) {
+                    scene.IncreaseGridSize();
+                }
+                ImGui::EndMenu();
             }
 
             ImGui::Separator();
@@ -258,7 +320,17 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 
         if (ImGui::BeginMenu("Tools")) {
             NavArea* sel = scene.GetSelectedArea();
-            if (ImGui::MenuItem("Snap Selected Area to Floor", "S", false, sel != nullptr && scene.HasBSP())) {
+            if (ImGui::MenuItem("Extrude Selected Edge", "E", false, sel != nullptr)) {
+                scene.ExtrudeSelectedEdge(cmdMgr);
+            }
+            if (ImGui::MenuItem("Split Selected Area", "Shift+X", false, sel != nullptr)) {
+                scene.SplitSelectedArea(cmdMgr);
+            }
+            if (ImGui::MenuItem("Merge Adjacent Area", "Shift+M", false, sel != nullptr)) {
+                scene.MergeSelectedArea(cmdMgr);
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Snap Selected Area to Floor", "Space", false, sel != nullptr && scene.HasBSP())) {
                 cmdMgr.ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(&scene, sel->GetID()));
             }
 
@@ -281,7 +353,7 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 }
 
 void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
-    ImGui::SetNextWindowSize(ImVec2(180, 340), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(190, 420), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Tool Palette")) {
         ImGui::Text("File Actions:");
         if (ImGui::Button("Open BSP Map...", ImVec2(-1, 26))) {
@@ -313,16 +385,53 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::Text("Blender 3D Tools:");
+        ImGui::Text("Hammer Grid:");
+        float curGrid = scene.GetGridSize();
+        if (ImGui::Button("[-]##decgrid", ImVec2(28, 22))) {
+            scene.DecreaseGridSize();
+        }
+        ImGui::SameLine();
+        ImGui::Text("Grid: %.0f", curGrid);
+        ImGui::SameLine();
+        if (ImGui::Button("[+]##incgrid", ImVec2(28, 22))) {
+            scene.IncreaseGridSize();
+        }
+
+        bool gridSnap = scene.GetGridSnap();
+        if (ImGui::Checkbox("Snap to Grid", &gridSnap)) {
+            scene.SetGridSnap(gridSnap);
+        }
+        bool showGrid = scene.GetShowGroundGrid();
+        if (ImGui::Checkbox("Ground Grid", &showGrid)) {
+            scene.SetShowGroundGrid(showGrid);
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::Text("3D Transform Tools:");
         NavArea* sel = scene.GetSelectedArea();
         bool hasSel = (sel != nullptr);
 
-        if (ImGui::Button("Grab / Move [G]", ImVec2(-1, 26))) {
+        if (ImGui::Button("Move / Grab [G]", ImVec2(-1, 26))) {
             if (hasSel) scene.StartGrab(sel->GetCenter());
         }
 
         if (ImGui::Button("Scale [S]", ImVec2(-1, 26))) {
             if (hasSel) scene.StartScale(sel->GetCenter());
+        }
+
+        if (ImGui::Button("Extrude Edge [E]", ImVec2(-1, 26))) {
+            if (hasSel) scene.ExtrudeSelectedEdge(cmdMgr);
+        }
+
+        if (ImGui::Button("Split Area [Shift+X]", ImVec2(-1, 26))) {
+            if (hasSel) scene.SplitSelectedArea(cmdMgr);
+        }
+
+        if (ImGui::Button("Merge Areas [Shift+M]", ImVec2(-1, 26))) {
+            if (hasSel) scene.MergeSelectedArea(cmdMgr);
         }
 
         if (ImGui::Button("Rotate 90° [R]", ImVec2(-1, 26))) {
@@ -344,7 +453,7 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
             if (hasSel) scene.DeleteSelectedArea(cmdMgr);
         }
 
-        if (ImGui::Button("Snap to Floor [S]", ImVec2(-1, 26))) {
+        if (ImGui::Button("Snap to Floor [Space]", ImVec2(-1, 26))) {
             if (sel && scene.HasBSP()) {
                 cmdMgr.ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(&scene, sel->GetID()));
             }
@@ -497,6 +606,10 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
         ImGui::Separator();
         ImGui::Text("3D Transform & Geometry:");
 
+        SelectedHandleType curH = scene.GetSelectedHandle();
+        if (curH == HANDLE_NONE) curH = scene.GetHoveredHandle();
+        ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "Handle: %s", GetHandleName(curH));
+
         const NavExtent& extent = area->GetExtent();
         Vector3 center = area->GetCenter();
         float width = extent.hi.x - extent.lo.x;
@@ -547,6 +660,18 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
             scene.RotateSelectedArea90(cmdMgr);
         }
 
+        if (ImGui::Button("Extrude [E]", ImVec2(80, 24))) {
+            scene.ExtrudeSelectedEdge(cmdMgr);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Split [Shift+X]", ImVec2(100, 24))) {
+            scene.SplitSelectedArea(cmdMgr);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Merge [Shift+M]", ImVec2(-1, 24))) {
+            scene.MergeSelectedArea(cmdMgr);
+        }
+
         if (ImGui::Button("Duplicate [Shift+D]", ImVec2(120, 24))) {
             scene.DuplicateSelectedArea(cmdMgr);
         }
@@ -555,7 +680,7 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
             scene.DeleteSelectedArea(cmdMgr);
         }
 
-        if (ImGui::Button("Snap to Floor [S]", ImVec2(-1, 26))) {
+        if (ImGui::Button("Snap to Floor [Space]", ImVec2(-1, 26))) {
             if (scene.HasBSP()) {
                 cmdMgr.ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(&scene, id));
             }
@@ -653,18 +778,28 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
 
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.10f, 0.10f, 0.12f, 1.0f));
     if (ImGui::Begin("StatusBar", nullptr, flags)) {
-        const char* bspName = scene.HasBSP() ? scene.GetBSP().GetMapName().c_str() : "No Map Loaded";
+        const char* bspName = scene.HasBSP() ? scene.GetBSP().GetMapName().c_str() : "No Map";
         size_t areaCount = scene.HasNAV() ? scene.GetNAV().GetAreaCount() : 0;
         uint32_t selId = scene.GetSelectedAreaID();
+        float grid = scene.GetGridSize();
+        bool snap = scene.GetGridSnap();
 
-        Vector3 camPos = camera.GetPosition();
+        if (selId != 0 && scene.HasNAV()) {
+            const NavArea* sel = scene.GetNAV().GetAreaByID(selId);
+            if (sel) {
+                Vector3 c = sel->GetCenter();
+                float w = sel->GetExtent().hi.x - sel->GetExtent().lo.x;
+                float l = sel->GetExtent().hi.y - sel->GetExtent().lo.y;
+                SelectedHandleType h = scene.GetSelectedHandle();
+                if (h == HANDLE_NONE) h = scene.GetHoveredHandle();
+                const char* hName = (h != HANDLE_NONE) ? GetHandleName(h) : "None";
 
-        if (selId != 0) {
-            ImGui::Text("Map: %s | NavAreas: %zu | Selected: #%u | Camera: (%.1f, %.1f, %.1f) | Speed: %.0f",
-                bspName, areaCount, selId, camPos.x, camPos.y, camPos.z, camera.GetSpeed());
+                ImGui::Text("Map: %s | Nav: %zu | Area #%u [W: %.0f, L: %.0f @ (%.0f, %.0f, %.0f)] | Handle: %s | Grid: %.0f [%s]",
+                    bspName, areaCount, selId, w, l, c.x, c.y, c.z, hName, grid, snap ? "SNAP" : "FREE");
+            }
         } else {
-            ImGui::Text("Map: %s | NavAreas: %zu | No Selection | Camera: (%.1f, %.1f, %.1f) | Speed: %.0f",
-                bspName, areaCount, camPos.x, camPos.y, camPos.z, camera.GetSpeed());
+            ImGui::Text("Map: %s | NavAreas: %zu | No Selection | Grid: %.0f [%s] | Cam: (%.0f, %.0f, %.0f)",
+                bspName, areaCount, grid, snap ? "SNAP" : "FREE", camera.GetPosition().x, camera.GetPosition().y, camera.GetPosition().z);
         }
     }
     ImGui::End();
@@ -676,13 +811,13 @@ void EditorUI::RenderHelpModal() {
 
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(480, 360));
+    ImGui::SetNextWindowSize(ImVec2(500, 420));
 
     if (ImGui::BeginPopupModal("Controls and Shortcuts", &m_showHelpModal, ImGuiWindowFlags_NoResize)) {
         ImGui::Text("Camera Navigation:");
         ImGui::BulletText("W / A / S / D: Fly forward / backward / left / right");
         ImGui::BulletText("E / Q: Fly up / down");
-        ImGui::BulletText("Right-Click + Drag: Look around");
+        ImGui::BulletText("Right-Click + Drag: First-person camera look");
         ImGui::BulletText("Mouse Wheel (Hold Right-Click): Change camera speed");
         ImGui::BulletText("Alt + Left-Click + Drag: Orbit selected area");
         ImGui::BulletText("F: Focus camera on selected area");
@@ -690,18 +825,22 @@ void EditorUI::RenderHelpModal() {
 
         ImGui::Spacing();
         ImGui::Separator();
-        ImGui::Text("Blender 3D & Editing Shortcuts:");
-        ImGui::BulletText("Left-Click: Select area in 3D viewport / confirm modal transform");
-        ImGui::BulletText("Right-Click: Mouse look flycam / cancel active modal transform");
-        ImGui::BulletText("G: Grab / Move selected area in 3D");
+        ImGui::Text("3D View & Hammer Shortcuts:");
+        ImGui::BulletText("Left-Click: Select area in 3D viewport / Drag Gizmo arrows or edges");
+        ImGui::BulletText("G: Move / Grab selected area (smoothly follows cursor in 3D)");
         ImGui::BulletText("S: Scale selected area dimensions");
-        ImGui::BulletText("X / Y / Z: Constrain Grab/Scale strictly along X, Y, or Z axis");
+        ImGui::BulletText("X / Y / Z: Constrain Move/Scale strictly along X, Y, or Z axis");
+        ImGui::BulletText("E: Extrude selected area edge (creates connected adjacent area)");
+        ImGui::BulletText("Shift + Left-Drag Edge: Extrude edge interactively");
+        ImGui::BulletText("Shift + X: Split selected area into two connected halves");
+        ImGui::BulletText("Shift + M: Merge selected area with adjacent collinear area");
+        ImGui::BulletText("[ / ]: Decrease / Increase Hammer grid size (1 to 512)");
+        ImGui::BulletText("Shift + W: Toggle Grid Snapping");
         ImGui::BulletText("R: Rotate area orientation 90 degrees");
-        ImGui::BulletText("C: Connect Mode (Click target area: Left=2-Way, Shift=1-Way)");
-        ImGui::BulletText("Shift+D: Duplicate selected area (enters Grab mode)");
+        ImGui::BulletText("C: Connect Mode (Left-Click target: 2-Way, Shift+Click: 1-Way)");
+        ImGui::BulletText("Shift + D: Duplicate selected area");
         ImGui::BulletText("X / Delete: Delete selected area");
         ImGui::BulletText("Space: Snap selected area elevation to BSP floor");
-        ImGui::BulletText("F: Focus viewport camera on selected area");
         ImGui::BulletText("Ctrl+Z / Ctrl+Y: Undo / Redo history");
         ImGui::BulletText("Ctrl+S: Save current navigation mesh");
 

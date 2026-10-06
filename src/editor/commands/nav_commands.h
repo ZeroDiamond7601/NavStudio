@@ -3,6 +3,7 @@
 
 #include "editor/commands/command.h"
 #include "editor/scene/editor_scene.h"
+#include "editor/scene/editor_handles.h"
 #include "nav/nav_area.h"
 #include <vector>
 
@@ -438,6 +439,304 @@ private:
     std::vector<SavedConn> m_outgoing;
     std::vector<SavedConn> m_incoming;
     bool m_valid;
+};
+
+// Command: Extrude Edge (Hammer-style Shift+Drag / Extrude)
+class CmdExtrudeArea : public IEditCommand {
+public:
+    CmdExtrudeArea(EditorScene* scene, uint32_t srcId, SelectedHandleType edgeHandle, float length = 64.0f)
+        : m_scene(scene), m_srcId(srcId), m_edge(edgeHandle), m_length(length), m_createdId(0) {}
+
+    void Execute() override {
+        NavArea* src = m_scene->GetNAV().GetAreaByID(m_srcId);
+        if (!src) return;
+
+        NavExtent srcExt = src->GetExtent();
+        NavExtent newExt;
+        NavDirType dirFromSrc = NAV_DIR_NORTH;
+
+        if (m_edge == HANDLE_EDGE_NORTH) {
+            newExt.lo = Vector3(srcExt.lo.x, srcExt.hi.y, srcExt.lo.z);
+            newExt.hi = Vector3(srcExt.hi.x, srcExt.hi.y + m_length, srcExt.hi.z);
+            dirFromSrc = NAV_DIR_NORTH;
+        } else if (m_edge == HANDLE_EDGE_SOUTH) {
+            newExt.lo = Vector3(srcExt.lo.x, srcExt.lo.y - m_length, srcExt.lo.z);
+            newExt.hi = Vector3(srcExt.hi.x, srcExt.lo.y, srcExt.hi.z);
+            dirFromSrc = NAV_DIR_SOUTH;
+        } else if (m_edge == HANDLE_EDGE_EAST) {
+            newExt.lo = Vector3(srcExt.hi.x, srcExt.lo.y, srcExt.lo.z);
+            newExt.hi = Vector3(srcExt.hi.x + m_length, srcExt.hi.y, srcExt.hi.z);
+            dirFromSrc = NAV_DIR_EAST;
+        } else if (m_edge == HANDLE_EDGE_WEST) {
+            newExt.lo = Vector3(srcExt.lo.x - m_length, srcExt.lo.y, srcExt.lo.z);
+            newExt.hi = Vector3(srcExt.lo.x, srcExt.hi.y, srcExt.hi.z);
+            dirFromSrc = NAV_DIR_WEST;
+        } else {
+            return;
+        }
+
+        NavArea* created = m_scene->GetNAV().CreateArea(newExt, src->GetNEZ(), src->GetSWZ());
+        if (created) {
+            m_createdId = created->GetID();
+            created->SetAttributes(src->GetAttributes());
+            created->SetPlace(src->GetPlace());
+            created->SetPlaceName(src->GetPlaceName());
+
+            m_scene->GetNAV().ConnectAreas(m_srcId, m_createdId, true, dirFromSrc);
+            m_scene->SelectArea(m_createdId);
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    void Undo() override {
+        if (m_createdId != 0) {
+            m_scene->GetNAV().RemoveArea(m_createdId);
+            m_scene->SelectArea(m_srcId);
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    uint32_t GetCreatedID() const { return m_createdId; }
+    const char* GetName() const override { return "Extrude Edge"; }
+
+private:
+    EditorScene* m_scene;
+    uint32_t m_srcId;
+    SelectedHandleType m_edge;
+    float m_length;
+    uint32_t m_createdId;
+};
+
+// Command: Split / Slice Area (Hammer Clipping Tool Shift+X)
+class CmdSplitArea : public IEditCommand {
+public:
+    CmdSplitArea(EditorScene* scene, uint32_t areaId, bool splitAlongY)
+        : m_scene(scene), m_areaId(areaId), m_splitAlongY(splitAlongY), m_createdId(0), m_valid(false) {
+        NavArea* area = m_scene->GetNAV().GetAreaByID(areaId);
+        if (!area) return;
+
+        m_oldExt = area->GetExtent();
+        m_neZ = area->GetNEZ();
+        m_swZ = area->GetSWZ();
+        m_attributes = area->GetAttributes();
+        m_place = area->GetPlace();
+        m_placeName = area->GetPlaceName();
+
+        for (int d = 0; d < 4; ++d) {
+            for (const auto& conn : area->GetAdjacentList(static_cast<NavDirType>(d))) {
+                if (conn.area) {
+                    m_outgoing.push_back({ conn.area->GetID(), static_cast<NavDirType>(d) });
+                }
+            }
+        }
+        for (const NavArea* other : m_scene->GetNAV().GetAreas()) {
+            if (other && other->GetID() != areaId) {
+                for (int d = 0; d < 4; ++d) {
+                    if (other->IsConnected(area, d)) {
+                        m_incoming.push_back({ other->GetID(), static_cast<NavDirType>(d) });
+                    }
+                }
+            }
+        }
+        m_valid = true;
+    }
+
+    void Execute() override {
+        if (!m_valid) return;
+        NavArea* area1 = m_scene->GetNAV().GetAreaByID(m_areaId);
+        if (!area1) return;
+
+        NavExtent ext1 = m_oldExt;
+        NavExtent ext2 = m_oldExt;
+
+        if (m_splitAlongY) {
+            float midY = (m_oldExt.lo.y + m_oldExt.hi.y) * 0.5f;
+            ext1.hi.y = midY;
+            ext2.lo.y = midY;
+        } else {
+            float midX = (m_oldExt.lo.x + m_oldExt.hi.x) * 0.5f;
+            ext1.hi.x = midX;
+            ext2.lo.x = midX;
+        }
+
+        m_scene->GetNAV().GetGrid().RemoveArea(area1);
+        area1->SetExtent(ext1);
+        m_scene->GetNAV().GetGrid().AddArea(area1);
+
+        NavArea* area2 = m_scene->GetNAV().CreateArea(ext2, m_neZ, m_swZ);
+        if (area2) {
+            m_createdId = area2->GetID();
+            area2->SetAttributes(m_attributes);
+            area2->SetPlace(m_place);
+            area2->SetPlaceName(m_placeName);
+
+            if (m_splitAlongY) {
+                m_scene->GetNAV().ConnectAreas(m_areaId, m_createdId, true, NAV_DIR_NORTH);
+            } else {
+                m_scene->GetNAV().ConnectAreas(m_areaId, m_createdId, true, NAV_DIR_EAST);
+            }
+
+            for (const auto& out : m_outgoing) {
+                m_scene->GetNAV().ConnectAreas(m_areaId, out.targetId, false, out.dir);
+                m_scene->GetNAV().ConnectAreas(m_createdId, out.targetId, false, out.dir);
+            }
+            for (const auto& in : m_incoming) {
+                m_scene->GetNAV().ConnectAreas(in.targetId, m_areaId, false, in.dir);
+                m_scene->GetNAV().ConnectAreas(in.targetId, m_createdId, false, in.dir);
+            }
+
+            m_scene->SelectArea(m_areaId);
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    void Undo() override {
+        if (!m_valid || m_createdId == 0) return;
+        m_scene->GetNAV().RemoveArea(m_createdId);
+
+        NavArea* area1 = m_scene->GetNAV().GetAreaByID(m_areaId);
+        if (area1) {
+            m_scene->GetNAV().GetGrid().RemoveArea(area1);
+            area1->SetExtent(m_oldExt);
+            m_scene->GetNAV().GetGrid().AddArea(area1);
+
+            for (const auto& out : m_outgoing) {
+                m_scene->GetNAV().ConnectAreas(m_areaId, out.targetId, false, out.dir);
+            }
+            for (const auto& in : m_incoming) {
+                m_scene->GetNAV().ConnectAreas(in.targetId, m_areaId, false, in.dir);
+            }
+            m_scene->SelectArea(m_areaId);
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    const char* GetName() const override { return "Split Area"; }
+
+private:
+    struct SavedConn { uint32_t targetId; NavDirType dir; };
+    EditorScene* m_scene;
+    uint32_t m_areaId;
+    bool m_splitAlongY;
+    uint32_t m_createdId;
+    NavExtent m_oldExt;
+    float m_neZ{0.0f}, m_swZ{0.0f};
+    uint8_t m_attributes{0};
+    uint16_t m_place{0};
+    std::string m_placeName;
+    std::vector<SavedConn> m_outgoing;
+    std::vector<SavedConn> m_incoming;
+    bool m_valid{false};
+};
+
+// Command: Merge Adjacent Areas (Hammer Join Tool)
+class CmdMergeAreas : public IEditCommand {
+public:
+    CmdMergeAreas(EditorScene* scene, uint32_t keepId, uint32_t removeId)
+        : m_scene(scene), m_keepId(keepId), m_removeId(removeId), m_valid(false) {
+        NavArea* a1 = m_scene->GetNAV().GetAreaByID(keepId);
+        NavArea* a2 = m_scene->GetNAV().GetAreaByID(removeId);
+        if (!a1 || !a2) return;
+
+        m_oldExt1 = a1->GetExtent();
+        m_oldExt2 = a2->GetExtent();
+        m_oldNeZ1 = a1->GetNEZ(); m_oldSwZ1 = a1->GetSWZ();
+        m_oldNeZ2 = a2->GetNEZ(); m_oldSwZ2 = a2->GetSWZ();
+        m_attr2 = a2->GetAttributes();
+        m_place2 = a2->GetPlace();
+        m_placeName2 = a2->GetPlaceName();
+
+        m_mergedExt.lo.x = std::min(m_oldExt1.lo.x, m_oldExt2.lo.x);
+        m_mergedExt.lo.y = std::min(m_oldExt1.lo.y, m_oldExt2.lo.y);
+        m_mergedExt.lo.z = std::min(m_oldExt1.lo.z, m_oldExt2.lo.z);
+        m_mergedExt.hi.x = std::max(m_oldExt1.hi.x, m_oldExt2.hi.x);
+        m_mergedExt.hi.y = std::max(m_oldExt1.hi.y, m_oldExt2.hi.y);
+        m_mergedExt.hi.z = std::max(m_oldExt1.hi.z, m_oldExt2.hi.z);
+
+        for (int d = 0; d < 4; ++d) {
+            for (const auto& conn : a2->GetAdjacentList(static_cast<NavDirType>(d))) {
+                if (conn.area && conn.area->GetID() != keepId) {
+                    m_outgoing2.push_back({ conn.area->GetID(), static_cast<NavDirType>(d) });
+                }
+            }
+        }
+        for (const NavArea* other : m_scene->GetNAV().GetAreas()) {
+            if (other && other->GetID() != removeId && other->GetID() != keepId) {
+                for (int d = 0; d < 4; ++d) {
+                    if (other->IsConnected(a2, d)) {
+                        m_incoming2.push_back({ other->GetID(), static_cast<NavDirType>(d) });
+                    }
+                }
+            }
+        }
+        m_valid = true;
+    }
+
+    void Execute() override {
+        if (!m_valid) return;
+        NavArea* a1 = m_scene->GetNAV().GetAreaByID(m_keepId);
+        if (!a1) return;
+
+        m_scene->GetNAV().GetGrid().RemoveArea(a1);
+        a1->SetExtent(m_mergedExt);
+        m_scene->GetNAV().GetGrid().AddArea(a1);
+
+        m_scene->GetNAV().RemoveArea(m_removeId);
+
+        for (const auto& out : m_outgoing2) {
+            m_scene->GetNAV().ConnectAreas(m_keepId, out.targetId, false, out.dir);
+        }
+        for (const auto& in : m_incoming2) {
+            m_scene->GetNAV().ConnectAreas(in.targetId, m_keepId, false, in.dir);
+        }
+
+        m_scene->SelectArea(m_keepId);
+        m_scene->RebuildNavRenderer();
+    }
+
+    void Undo() override {
+        if (!m_valid) return;
+        NavArea* a1 = m_scene->GetNAV().GetAreaByID(m_keepId);
+        if (a1) {
+            m_scene->GetNAV().GetGrid().RemoveArea(a1);
+            a1->SetExtent(m_oldExt1);
+            m_scene->GetNAV().GetGrid().AddArea(a1);
+        }
+
+        NavArea* a2 = m_scene->GetNAV().CreateArea(m_oldExt2, m_oldNeZ2, m_oldSwZ2);
+        if (a2) {
+            m_scene->GetNAV().GetGrid().RemoveArea(a2);
+            a2->SetID(m_removeId);
+            m_scene->GetNAV().GetGrid().AddArea(a2);
+            a2->SetAttributes(m_attr2);
+            a2->SetPlace(m_place2);
+            a2->SetPlaceName(m_placeName2);
+
+            for (const auto& out : m_outgoing2) {
+                m_scene->GetNAV().ConnectAreas(m_removeId, out.targetId, false, out.dir);
+            }
+            for (const auto& in : m_incoming2) {
+                m_scene->GetNAV().ConnectAreas(in.targetId, m_removeId, false, in.dir);
+            }
+        }
+        m_scene->SelectArea(m_keepId);
+        m_scene->RebuildNavRenderer();
+    }
+
+    const char* GetName() const override { return "Merge Areas"; }
+
+private:
+    struct SavedConn { uint32_t targetId; NavDirType dir; };
+    EditorScene* m_scene;
+    uint32_t m_keepId, m_removeId;
+    NavExtent m_oldExt1, m_oldExt2, m_mergedExt;
+    float m_oldNeZ1{0.0f}, m_oldSwZ1{0.0f}, m_oldNeZ2{0.0f}, m_oldSwZ2{0.0f};
+    uint8_t m_attr2{0};
+    uint16_t m_place2{0};
+    std::string m_placeName2;
+    std::vector<SavedConn> m_outgoing2;
+    std::vector<SavedConn> m_incoming2;
+    bool m_valid{false};
 };
 
 #endif // NAV_COMMANDS_H

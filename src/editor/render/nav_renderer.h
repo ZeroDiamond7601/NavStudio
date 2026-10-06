@@ -8,6 +8,8 @@
 #include "editor/render/shader.h"
 #include "editor/math/matrix4.h"
 
+#include "editor/scene/editor_handles.h"
+
 struct NavVertex {
     float x, y, z;
     float nx, ny, nz;
@@ -21,7 +23,11 @@ public:
     ~NavRenderer();
 
     bool BuildFromNav(const NavMesh& nav, uint32_t selectedId = 0, uint32_t hoveredId = 0,
-                      uint32_t connectTargetId = 0, int transformAxis = 0);
+                      uint32_t connectTargetId = 0, int transformAxis = 0,
+                      SelectedHandleType hoveredHandle = HANDLE_NONE,
+                      SelectedHandleType selectedHandle = HANDLE_NONE,
+                      bool showGroundGrid = false, float gridSize = 32.0f,
+                      float gridElevation = 0.0f);
     void Clear();
 
     void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp);

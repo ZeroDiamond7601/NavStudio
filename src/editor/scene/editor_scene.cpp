@@ -15,12 +15,87 @@ EditorScene::EditorScene()
     , m_showNAV(true)
     , m_showConnections(true)
 {
+    LoadRecentFiles();
 }
 
 EditorScene::~EditorScene() {
     if (m_loadThread.joinable()) {
         m_loadThread.join();
     }
+}
+
+void EditorScene::LoadRecentFiles() {
+    m_recentFiles.clear();
+    std::ifstream file("navstudio_recent.txt");
+    if (!file.is_open()) return;
+    std::string line;
+    while (std::getline(file, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) {
+            line.pop_back();
+        }
+        if (!line.empty()) {
+            m_recentFiles.push_back(line);
+        }
+    }
+}
+
+void EditorScene::SaveRecentFiles() {
+    std::ofstream file("navstudio_recent.txt");
+    if (!file.is_open()) return;
+    for (const auto& path : m_recentFiles) {
+        file << path << "\n";
+    }
+}
+
+void EditorScene::AddRecentFile(const std::string& path) {
+    if (path.empty()) return;
+    auto it = std::find(m_recentFiles.begin(), m_recentFiles.end(), path);
+    if (it != m_recentFiles.end()) {
+        m_recentFiles.erase(it);
+    }
+    m_recentFiles.insert(m_recentFiles.begin(), path);
+    if (m_recentFiles.size() > 10) {
+        m_recentFiles.resize(10);
+    }
+    SaveRecentFiles();
+}
+
+void EditorScene::ClearRecentFiles() {
+    m_recentFiles.clear();
+    SaveRecentFiles();
+}
+
+void EditorScene::SetGridSize(float size) {
+    m_gridSize = std::max(1.0f, std::min(512.0f, size));
+    RebuildNavRenderer();
+}
+
+void EditorScene::IncreaseGridSize() {
+    m_gridSize = std::min(512.0f, m_gridSize * 2.0f);
+    RebuildNavRenderer();
+}
+
+void EditorScene::DecreaseGridSize() {
+    m_gridSize = std::max(1.0f, m_gridSize * 0.5f);
+    RebuildNavRenderer();
+}
+
+void EditorScene::ToggleGridSnap() {
+    m_gridSnap = !m_gridSnap;
+}
+
+void EditorScene::SetShowGroundGrid(bool show) {
+    m_showGroundGrid = show;
+    RebuildNavRenderer();
+}
+
+float EditorScene::SnapValue(float val) const {
+    if (!m_gridSnap || m_gridSize < 1.0f) return val;
+    return std::round(val / m_gridSize) * m_gridSize;
+}
+
+Vector3 EditorScene::SnapVector(const Vector3& v) const {
+    return Vector3(SnapValue(v.x), SnapValue(v.y), SnapValue(v.z));
 }
 
 bool EditorScene::LoadBSP(const std::string& bspPath) {
@@ -33,6 +108,7 @@ bool EditorScene::LoadBSP(const std::string& bspPath) {
     m_bsp = std::move(newBsp);
     m_bspPath = bspPath;
     m_bspRenderer.BuildFromBSP(*m_bsp);
+    AddRecentFile(bspPath);
 
     // Auto-detect corresponding .nav file in the same directory
     std::string candidateNav = bspPath;
@@ -56,7 +132,8 @@ bool EditorScene::LoadNAV(const std::string& navPath) {
     m_navPath = navPath;
     m_selectedAreaId = 0;
     m_hoveredAreaId = 0;
-    m_navRenderer.BuildFromNav(*m_nav, m_selectedAreaId, m_hoveredAreaId);
+    AddRecentFile(navPath);
+    RebuildNavRenderer();
     return true;
 }
 
@@ -254,6 +331,7 @@ void EditorScene::UpdateAsyncLoading(float deltaTime) {
                 m_bsp = std::move(m_loadCtx.loadedBsp);
                 m_bspPath = m_loadCtx.targetBspPath;
                 m_bspRenderer.BuildFromBSP(*m_bsp);
+                AddRecentFile(m_bspPath);
             }
 
             if (m_loadCtx.loadedNav) {
@@ -261,7 +339,8 @@ void EditorScene::UpdateAsyncLoading(float deltaTime) {
                 m_navPath = m_loadCtx.targetNavPath;
                 m_selectedAreaId = 0;
                 m_hoveredAreaId = 0;
-                m_navRenderer.BuildFromNav(*m_nav, 0, 0);
+                AddRecentFile(m_navPath);
+                RebuildNavRenderer();
             }
 
             m_errorMessage.clear();
@@ -277,12 +356,26 @@ void EditorScene::UpdateAsyncLoading(float deltaTime) {
 void EditorScene::SelectArea(uint32_t id) {
     if (m_selectedAreaId == id) return;
     m_selectedAreaId = id;
+    m_selectedHandle = HANDLE_NONE;
+    m_hoveredHandle = HANDLE_NONE;
     RebuildNavRenderer();
 }
 
 void EditorScene::SetHoveredArea(uint32_t id) {
     if (m_hoveredAreaId == id) return;
     m_hoveredAreaId = id;
+    RebuildNavRenderer();
+}
+
+void EditorScene::SetHoveredHandle(SelectedHandleType h) {
+    if (m_hoveredHandle == h) return;
+    m_hoveredHandle = h;
+    RebuildNavRenderer();
+}
+
+void EditorScene::SetSelectedHandle(SelectedHandleType h) {
+    if (m_selectedHandle == h) return;
+    m_selectedHandle = h;
     RebuildNavRenderer();
 }
 
@@ -294,9 +387,23 @@ NavArea* EditorScene::GetSelectedArea() {
 void EditorScene::RebuildNavRenderer() {
     if (m_nav && m_nav->IsLoaded()) {
         int axis = static_cast<int>(m_transformAxis);
-        m_navRenderer.BuildFromNav(*m_nav, m_selectedAreaId, m_hoveredAreaId,
-                                   (m_transformMode == TRANSFORM_CONNECT) ? m_connectHoverAreaId : 0,
-                                   axis);
+        float elev = 0.0f;
+        NavArea* sel = GetSelectedArea();
+        if (sel) {
+            elev = sel->GetCenter().z;
+        }
+        m_navRenderer.BuildFromNav(
+            *m_nav,
+            m_selectedAreaId,
+            m_hoveredAreaId,
+            (m_transformMode == TRANSFORM_CONNECT) ? m_connectHoverAreaId : 0,
+            axis,
+            m_hoveredHandle,
+            (m_isDraggingHandle ? m_draggedHandle : m_selectedHandle),
+            m_showGroundGrid,
+            m_gridSize,
+            elev
+        );
     }
 }
 
@@ -310,6 +417,157 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
     }
 }
 
+void EditorScene::StartDragHandle(SelectedHandleType handle, float screenX, float screenY, const Ray& ray) {
+    NavArea* area = GetSelectedArea();
+    if (!area || handle == HANDLE_NONE) return;
+
+    m_isDraggingHandle = true;
+    m_draggedHandle = handle;
+    m_selectedHandle = handle;
+    m_dragStartExtent = area->GetExtent();
+    m_dragStartNeZ = area->GetNEZ();
+    m_dragStartSwZ = area->GetSWZ();
+    m_dragStartScreenX = screenX;
+    m_dragStartScreenY = screenY;
+
+    float areaZ = area->GetCenter().z;
+    if (std::abs(ray.direction.z) > 1e-4f) {
+        float t = (areaZ - ray.origin.z) / ray.direction.z;
+        m_dragStartGroundHit = ray.origin + ray.direction * t;
+    } else {
+        m_dragStartGroundHit = area->GetCenter();
+    }
+
+    RebuildNavRenderer();
+}
+
+void EditorScene::UpdateDragHandle(float /*screenX*/, float /*screenY*/, const Ray& ray, float deltaY) {
+    NavArea* area = GetSelectedArea();
+    if (!area || !m_isDraggingHandle) return;
+
+    Vector3 curGroundHit = m_dragStartGroundHit;
+    float areaZ = (m_dragStartExtent.lo.z + m_dragStartExtent.hi.z) * 0.5f;
+    if (std::abs(ray.direction.z) > 1e-4f) {
+        float t = (areaZ - ray.origin.z) / ray.direction.z;
+        curGroundHit = ray.origin + ray.direction * t;
+    }
+
+    Vector3 groundDelta = curGroundHit - m_dragStartGroundHit;
+
+    if (m_draggedHandle == HANDLE_GIZMO_X) {
+        float origCenterX = (m_dragStartExtent.lo.x + m_dragStartExtent.hi.x) * 0.5f;
+        float targetCenterX = SnapValue(origCenterX + groundDelta.x);
+        float shiftX = targetCenterX - origCenterX;
+        NavExtent nextExt = m_dragStartExtent;
+        nextExt.lo.x += shiftX;
+        nextExt.hi.x += shiftX;
+        area->SetExtent(nextExt);
+    } else if (m_draggedHandle == HANDLE_GIZMO_Y) {
+        float origCenterY = (m_dragStartExtent.lo.y + m_dragStartExtent.hi.y) * 0.5f;
+        float targetCenterY = SnapValue(origCenterY + groundDelta.y);
+        float shiftY = targetCenterY - origCenterY;
+        NavExtent nextExt = m_dragStartExtent;
+        nextExt.lo.y += shiftY;
+        nextExt.hi.y += shiftY;
+        area->SetExtent(nextExt);
+    } else if (m_draggedHandle == HANDLE_GIZMO_Z) {
+        float origZ = (m_dragStartNeZ + m_dragStartSwZ) * 0.5f;
+        float targetZ = SnapValue(origZ - deltaY * 0.8f);
+        float shiftZ = targetZ - origZ;
+        area->SetCornerHeights(m_dragStartNeZ + shiftZ, m_dragStartSwZ + shiftZ);
+    } else if (m_draggedHandle == HANDLE_GIZMO_CENTER) {
+        float origCenterX = (m_dragStartExtent.lo.x + m_dragStartExtent.hi.x) * 0.5f;
+        float origCenterY = (m_dragStartExtent.lo.y + m_dragStartExtent.hi.y) * 0.5f;
+        float targetCenterX = SnapValue(origCenterX + groundDelta.x);
+        float targetCenterY = SnapValue(origCenterY + groundDelta.y);
+        float shiftX = targetCenterX - origCenterX;
+        float shiftY = targetCenterY - origCenterY;
+        NavExtent nextExt = m_dragStartExtent;
+        nextExt.lo.x += shiftX; nextExt.hi.x += shiftX;
+        nextExt.lo.y += shiftY; nextExt.hi.y += shiftY;
+        area->SetExtent(nextExt);
+    } else if (m_draggedHandle == HANDLE_EDGE_NORTH) {
+        float targetHiY = SnapValue(m_dragStartExtent.hi.y + groundDelta.y);
+        targetHiY = std::max(m_dragStartExtent.lo.y + 8.0f, targetHiY);
+        NavExtent nextExt = m_dragStartExtent;
+        nextExt.hi.y = targetHiY;
+        area->SetExtent(nextExt);
+    } else if (m_draggedHandle == HANDLE_EDGE_SOUTH) {
+        float targetLoY = SnapValue(m_dragStartExtent.lo.y + groundDelta.y);
+        targetLoY = std::min(m_dragStartExtent.hi.y - 8.0f, targetLoY);
+        NavExtent nextExt = m_dragStartExtent;
+        nextExt.lo.y = targetLoY;
+        area->SetExtent(nextExt);
+    } else if (m_draggedHandle == HANDLE_EDGE_EAST) {
+        float targetHiX = SnapValue(m_dragStartExtent.hi.x + groundDelta.x);
+        targetHiX = std::max(m_dragStartExtent.lo.x + 8.0f, targetHiX);
+        NavExtent nextExt = m_dragStartExtent;
+        nextExt.hi.x = targetHiX;
+        area->SetExtent(nextExt);
+    } else if (m_draggedHandle == HANDLE_EDGE_WEST) {
+        float targetLoX = SnapValue(m_dragStartExtent.lo.x + groundDelta.x);
+        targetLoX = std::min(m_dragStartExtent.hi.x - 8.0f, targetLoX);
+        NavExtent nextExt = m_dragStartExtent;
+        nextExt.lo.x = targetLoX;
+        area->SetExtent(nextExt);
+    } else if (m_draggedHandle == HANDLE_CORNER_NW) {
+        float targetLoX = std::min(m_dragStartExtent.hi.x - 8.0f, SnapValue(m_dragStartExtent.lo.x + groundDelta.x));
+        float targetHiY = std::max(m_dragStartExtent.lo.y + 8.0f, SnapValue(m_dragStartExtent.hi.y + groundDelta.y));
+        NavExtent nextExt = m_dragStartExtent;
+        nextExt.lo.x = targetLoX;
+        nextExt.hi.y = targetHiY;
+        area->SetExtent(nextExt);
+    } else if (m_draggedHandle == HANDLE_CORNER_NE) {
+        float targetHiX = std::max(m_dragStartExtent.lo.x + 8.0f, SnapValue(m_dragStartExtent.hi.x + groundDelta.x));
+        float targetHiY = std::max(m_dragStartExtent.lo.y + 8.0f, SnapValue(m_dragStartExtent.hi.y + groundDelta.y));
+        NavExtent nextExt = m_dragStartExtent;
+        nextExt.hi.x = targetHiX;
+        nextExt.hi.y = targetHiY;
+        area->SetExtent(nextExt);
+    } else if (m_draggedHandle == HANDLE_CORNER_SE) {
+        float targetHiX = std::max(m_dragStartExtent.lo.x + 8.0f, SnapValue(m_dragStartExtent.hi.x + groundDelta.x));
+        float targetLoY = std::min(m_dragStartExtent.hi.y - 8.0f, SnapValue(m_dragStartExtent.lo.y + groundDelta.y));
+        NavExtent nextExt = m_dragStartExtent;
+        nextExt.hi.x = targetHiX;
+        nextExt.lo.y = targetLoY;
+        area->SetExtent(nextExt);
+    } else if (m_draggedHandle == HANDLE_CORNER_SW) {
+        float targetLoX = std::min(m_dragStartExtent.hi.x - 8.0f, SnapValue(m_dragStartExtent.lo.x + groundDelta.x));
+        float targetLoY = std::min(m_dragStartExtent.hi.y - 8.0f, SnapValue(m_dragStartExtent.lo.y + groundDelta.y));
+        NavExtent nextExt = m_dragStartExtent;
+        nextExt.lo.x = targetLoX;
+        nextExt.lo.y = targetLoY;
+        area->SetExtent(nextExt);
+    }
+
+    RebuildNavRenderer();
+}
+
+bool EditorScene::EndDragHandle(CommandManager& cmdMgr) {
+    NavArea* area = GetSelectedArea();
+    if (!area || !m_isDraggingHandle) {
+        m_isDraggingHandle = false;
+        m_draggedHandle = HANDLE_NONE;
+        return false;
+    }
+
+    NavExtent newExt = area->GetExtent();
+    float newNeZ = area->GetNEZ();
+    float newSwZ = area->GetSWZ();
+
+    area->SetExtent(m_dragStartExtent);
+    area->SetCornerHeights(m_dragStartNeZ, m_dragStartSwZ);
+
+    const char* cmdName = GetHandleName(m_draggedHandle);
+    cmdMgr.ExecuteCommand(std::make_unique<CmdTransformArea>(this, area->GetID(),
+        m_dragStartExtent, m_dragStartNeZ, m_dragStartSwZ,
+        newExt, newNeZ, newSwZ, cmdName));
+
+    m_isDraggingHandle = false;
+    m_draggedHandle = HANDLE_NONE;
+    return true;
+}
+
 void EditorScene::StartGrab(const Vector3& initialHitPoint) {
     NavArea* area = GetSelectedArea();
     if (!area) return;
@@ -319,6 +577,26 @@ void EditorScene::StartGrab(const Vector3& initialHitPoint) {
     m_initialNeZ = area->GetNEZ();
     m_initialSwZ = area->GetSWZ();
     m_initialHitPoint = initialHitPoint;
+    m_grabOffset = Vector3(0.0f, 0.0f, 0.0f);
+    RebuildNavRenderer();
+}
+
+void EditorScene::StartGrabWithRay(const Ray& ray) {
+    NavArea* area = GetSelectedArea();
+    if (!area) return;
+    m_transformMode = TRANSFORM_TRANSLATE;
+    m_transformAxis = AXIS_NONE;
+    m_initialExtent = area->GetExtent();
+    m_initialNeZ = area->GetNEZ();
+    m_initialSwZ = area->GetSWZ();
+    Vector3 center = area->GetCenter();
+    if (std::abs(ray.direction.z) > 1e-4f) {
+        float t = (center.z - ray.origin.z) / ray.direction.z;
+        Vector3 hitPoint = ray.origin + ray.direction * t;
+        m_grabOffset = hitPoint - center;
+    } else {
+        m_grabOffset = Vector3(0.0f, 0.0f, 0.0f);
+    }
     RebuildNavRenderer();
 }
 
@@ -331,6 +609,34 @@ void EditorScene::StartScale(const Vector3& initialHitPoint) {
     m_initialNeZ = area->GetNEZ();
     m_initialSwZ = area->GetSWZ();
     m_initialHitPoint = initialHitPoint;
+    m_scaleStartDist = 50.0f;
+    RebuildNavRenderer();
+}
+
+void EditorScene::StartScaleWithScreen(float screenX, float screenY, float viewportW, float viewportH, const Matrix4& viewProj) {
+    NavArea* area = GetSelectedArea();
+    if (!area) return;
+    m_transformMode = TRANSFORM_SCALE;
+    m_transformAxis = AXIS_NONE;
+    m_initialExtent = area->GetExtent();
+    m_initialNeZ = area->GetNEZ();
+    m_initialSwZ = area->GetSWZ();
+
+    Vector3 center = area->GetCenter();
+    Vector4 clip = viewProj * Vector4(center.x, center.y, center.z, 1.0f);
+    if (clip.w > 0.001f) {
+        float ndcX = clip.x / clip.w;
+        float ndcY = clip.y / clip.w;
+        m_scaleCenterScreenX = (ndcX * 0.5f + 0.5f) * viewportW;
+        m_scaleCenterScreenY = (1.0f - (ndcY * 0.5f + 0.5f)) * viewportH;
+    } else {
+        m_scaleCenterScreenX = viewportW * 0.5f;
+        m_scaleCenterScreenY = viewportH * 0.5f;
+    }
+
+    m_scaleStartDist = std::hypot(screenX - m_scaleCenterScreenX, screenY - m_scaleCenterScreenY);
+    if (m_scaleStartDist < 25.0f) m_scaleStartDist = 50.0f;
+
     RebuildNavRenderer();
 }
 
@@ -437,6 +743,64 @@ void EditorScene::UpdateTransform(const Vector3& currentHitPoint, float mouseDel
     }
 }
 
+void EditorScene::UpdateTransformWithRay(const Ray& ray, float mouseX, float mouseY, float deltaY) {
+    NavArea* area = GetSelectedArea();
+    if (!area) return;
+
+    if (m_transformMode == TRANSFORM_TRANSLATE) {
+        Vector3 origCenter = (m_initialExtent.lo + m_initialExtent.hi) * 0.5f;
+        if (m_transformAxis == AXIS_Z) {
+            float zDelta = -deltaY * 0.8f;
+            float newZ = SnapValue(m_initialNeZ + zDelta);
+            area->SetCornerHeights(newZ, newZ);
+        } else {
+            Vector3 hitPoint;
+            if (std::abs(ray.direction.z) > 1e-4f) {
+                float t = (origCenter.z - ray.origin.z) / ray.direction.z;
+                hitPoint = ray.origin + ray.direction * t;
+            } else {
+                hitPoint = origCenter;
+            }
+
+            Vector3 targetCenter = hitPoint - m_grabOffset;
+            if (m_transformAxis == AXIS_X) {
+                targetCenter.y = origCenter.y;
+            } else if (m_transformAxis == AXIS_Y) {
+                targetCenter.x = origCenter.x;
+            }
+
+            targetCenter = SnapVector(targetCenter);
+            Vector3 moveDelta = targetCenter - origCenter;
+
+            NavExtent newExt;
+            newExt.lo = m_initialExtent.lo + moveDelta;
+            newExt.hi = m_initialExtent.hi + moveDelta;
+            area->SetExtent(newExt);
+            area->SetCornerHeights(m_initialNeZ + moveDelta.z, m_initialSwZ + moveDelta.z);
+        }
+        RebuildNavRenderer();
+    } else if (m_transformMode == TRANSFORM_SCALE) {
+        float curDist = std::hypot(mouseX - m_scaleCenterScreenX, mouseY - m_scaleCenterScreenY);
+        float scale = (m_scaleStartDist > 1.0f) ? (curDist / m_scaleStartDist) : 1.0f;
+        scale = std::max(0.1f, std::min(10.0f, scale));
+
+        Vector3 center = (m_initialExtent.lo + m_initialExtent.hi) * 0.5f;
+        float initW = m_initialExtent.hi.x - m_initialExtent.lo.x;
+        float initL = m_initialExtent.hi.y - m_initialExtent.lo.y;
+
+        float newW = (m_transformAxis == AXIS_Y) ? initW : SnapValue(initW * scale);
+        float newL = (m_transformAxis == AXIS_X) ? initL : SnapValue(initL * scale);
+        newW = std::max(8.0f, newW);
+        newL = std::max(8.0f, newL);
+
+        NavExtent newExt;
+        newExt.lo = Vector3(center.x - newW * 0.5f, center.y - newL * 0.5f, m_initialExtent.lo.z);
+        newExt.hi = Vector3(center.x + newW * 0.5f, center.y + newL * 0.5f, m_initialExtent.hi.z);
+        area->SetExtent(newExt);
+        RebuildNavRenderer();
+    }
+}
+
 void EditorScene::SetConnectHoverArea(uint32_t areaId) {
     if (m_connectHoverAreaId == areaId) return;
     m_connectHoverAreaId = areaId;
@@ -485,4 +849,52 @@ void EditorScene::RotateSelectedArea90(CommandManager& cmdMgr) {
     cmdMgr.ExecuteCommand(std::make_unique<CmdTransformArea>(this, area->GetID(),
         oldExt, area->GetNEZ(), area->GetSWZ(),
         newExt, area->GetNEZ(), area->GetSWZ(), "Rotate Area 90°"));
+}
+
+void EditorScene::ExtrudeSelectedEdge(CommandManager& cmdMgr, float length) {
+    NavArea* area = GetSelectedArea();
+    if (!area) return;
+
+    SelectedHandleType edge = m_selectedHandle;
+    if (edge < HANDLE_EDGE_NORTH || edge > HANDLE_EDGE_WEST) {
+        edge = HANDLE_EDGE_NORTH;
+    }
+
+    if (length <= 0.0f) {
+        length = (m_gridSize >= 4.0f) ? m_gridSize : 64.0f;
+    }
+
+    cmdMgr.ExecuteCommand(std::make_unique<CmdExtrudeArea>(this, area->GetID(), edge, length));
+}
+
+void EditorScene::SplitSelectedArea(CommandManager& cmdMgr) {
+    NavArea* area = GetSelectedArea();
+    if (!area) return;
+
+    float width = area->GetExtent().hi.x - area->GetExtent().lo.x;
+    float length = area->GetExtent().hi.y - area->GetExtent().lo.y;
+    bool splitAlongY = (length >= width);
+
+    cmdMgr.ExecuteCommand(std::make_unique<CmdSplitArea>(this, area->GetID(), splitAlongY));
+}
+
+void EditorScene::MergeSelectedArea(CommandManager& cmdMgr) {
+    NavArea* area = GetSelectedArea();
+    if (!area) return;
+
+    uint32_t targetId = 0;
+    for (int d = 0; d < 4; ++d) {
+        const auto& conns = area->GetAdjacentList(static_cast<NavDirType>(d));
+        for (const auto& c : conns) {
+            if (c.area && c.area->GetID() != area->GetID()) {
+                targetId = c.area->GetID();
+                break;
+            }
+        }
+        if (targetId != 0) break;
+    }
+
+    if (targetId != 0) {
+        cmdMgr.ExecuteCommand(std::make_unique<CmdMergeAreas>(this, area->GetID(), targetId));
+    }
 }

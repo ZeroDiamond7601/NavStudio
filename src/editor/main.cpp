@@ -67,7 +67,7 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
     if (button == GLFW_MOUSE_BUTTON_RIGHT) {
         if (action == GLFW_PRESS) {
             if (g_activeScene && g_activeScene->GetTransformMode() != EditorScene::TRANSFORM_NONE) {
-                // Right-click cancels active Blender transform!
+                // Right-click cancels active modal transform
                 g_activeScene->CancelTransform();
                 return;
             }
@@ -78,41 +78,68 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
             g_isRightMouseDown = false;
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         }
-    } else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+    } else if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (!g_activeScene || !g_cmdMgr) return;
 
-        int displayW = 0, displayH = 0;
-        glfwGetFramebufferSize(window, &displayW, &displayH);
-        float aspect = (displayH > 0) ? (static_cast<float>(displayW) / static_cast<float>(displayH)) : 1.0f;
-        double mouseX, mouseY;
-        glfwGetCursorPos(window, &mouseX, &mouseY);
+        if (action == GLFW_PRESS) {
+            int displayW = 0, displayH = 0;
+            glfwGetFramebufferSize(window, &displayW, &displayH);
+            float aspect = (displayH > 0) ? (static_cast<float>(displayW) / static_cast<float>(displayH)) : 1.0f;
+            double mouseX, mouseY;
+            glfwGetCursorPos(window, &mouseX, &mouseY);
 
-        Ray ray = ScenePicker::ScreenPointToRay(
-            static_cast<float>(mouseX), static_cast<float>(mouseY),
-            static_cast<float>(displayW), static_cast<float>(displayH),
-            g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
-        );
+            Ray ray = ScenePicker::ScreenPointToRay(
+                static_cast<float>(mouseX), static_cast<float>(mouseY),
+                static_cast<float>(displayW), static_cast<float>(displayH),
+                g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
+            );
 
-        auto mode = g_activeScene->GetTransformMode();
-        if (mode == EditorScene::TRANSFORM_TRANSLATE || mode == EditorScene::TRANSFORM_SCALE) {
-            // Left-click confirms Blender transform!
-            g_activeScene->ConfirmTransform(*g_cmdMgr);
-        } else if (mode == EditorScene::TRANSFORM_CONNECT) {
-            uint32_t hitArea = ScenePicker::PickNavArea(*g_activeScene, ray);
-            if (hitArea != 0 && hitArea != g_activeScene->GetSelectedAreaID()) {
-                bool shiftPressed = (mods & GLFW_MOD_SHIFT) != 0;
-                g_activeScene->ConnectSelectedTo(hitArea, !shiftPressed, *g_cmdMgr);
+            auto mode = g_activeScene->GetTransformMode();
+            if (mode == EditorScene::TRANSFORM_TRANSLATE || mode == EditorScene::TRANSFORM_SCALE) {
+                // Left-click confirms active modal transform
+                g_activeScene->ConfirmTransform(*g_cmdMgr);
+            } else if (mode == EditorScene::TRANSFORM_CONNECT) {
+                uint32_t hitArea = ScenePicker::PickNavArea(*g_activeScene, ray);
+                if (hitArea != 0 && hitArea != g_activeScene->GetSelectedAreaID()) {
+                    bool shiftPressed = (mods & GLFW_MOD_SHIFT) != 0;
+                    g_activeScene->ConnectSelectedTo(hitArea, !shiftPressed, *g_cmdMgr);
+                }
+            } else {
+                // Test area gizmo handles, edges, and corners first
+                SelectedHandleType handle = ScenePicker::PickAreaHandles(
+                    *g_activeScene,
+                    static_cast<float>(mouseX), static_cast<float>(mouseY),
+                    static_cast<float>(displayW), static_cast<float>(displayH),
+                    g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
+                );
+
+                if (handle != HANDLE_NONE) {
+                    bool shiftPressed = (mods & GLFW_MOD_SHIFT) != 0;
+                    if (shiftPressed && (handle >= HANDLE_EDGE_NORTH && handle <= HANDLE_EDGE_WEST)) {
+                        // Hammer Shift+Drag Edge Extrude: create new adjacent area & drag it
+                        g_activeScene->SetSelectedHandle(handle);
+                        g_activeScene->ExtrudeSelectedEdge(*g_cmdMgr);
+                        g_activeScene->StartDragHandle(handle, static_cast<float>(mouseX), static_cast<float>(mouseY), ray);
+                    } else {
+                        g_activeScene->StartDragHandle(handle, static_cast<float>(mouseX), static_cast<float>(mouseY), ray);
+                    }
+                    return;
+                }
+
+                uint32_t hitArea = ScenePicker::PickNavArea(*g_activeScene, ray);
+                g_activeScene->SelectArea(hitArea);
             }
-        } else {
-            uint32_t hitArea = ScenePicker::PickNavArea(*g_activeScene, ray);
-            g_activeScene->SelectArea(hitArea);
+        } else if (action == GLFW_RELEASE) {
+            if (g_activeScene->IsDraggingHandle()) {
+                g_activeScene->EndDragHandle(*g_cmdMgr);
+            }
         }
     }
 
     g_isAltDown = (mods & GLFW_MOD_ALT) != 0;
 }
 
-static void KeyCallback(GLFWwindow* /*window*/, int key, int /*scancode*/, int action, int mods) {
+static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int action, int mods) {
     ImGuiIO& io = ImGui::GetIO();
     if (io.WantTextInput) return;
     if (!g_activeScene || !g_cmdMgr) return;
@@ -137,20 +164,55 @@ static void KeyCallback(GLFWwindow* /*window*/, int key, int /*scancode*/, int a
                 g_activeScene->CancelTransform();
             }
         } else {
-            // Normal Selection Mode Hotkeys (Blender-style)
+            // Hammer Grid Shortcuts
+            if (key == GLFW_KEY_LEFT_BRACKET) { // '[': Decrease grid
+                g_activeScene->DecreaseGridSize();
+            } else if (key == GLFW_KEY_RIGHT_BRACKET) { // ']': Increase grid
+                g_activeScene->IncreaseGridSize();
+            } else if (key == GLFW_KEY_W && (mods & GLFW_MOD_SHIFT) != 0) { // Shift+W: Toggle snap
+                g_activeScene->ToggleGridSnap();
+            }
+
+            // Normal Selection Mode Hotkeys
             if (g_activeScene->GetSelectedAreaID() != 0) {
                 NavArea* sel = g_activeScene->GetSelectedArea();
+
+                int displayW = 0, displayH = 0;
+                glfwGetFramebufferSize(window, &displayW, &displayH);
+                float aspect = (displayH > 0) ? (static_cast<float>(displayW) / static_cast<float>(displayH)) : 1.0f;
+                double mouseX, mouseY;
+                glfwGetCursorPos(window, &mouseX, &mouseY);
+
+                Ray ray = ScenePicker::ScreenPointToRay(
+                    static_cast<float>(mouseX), static_cast<float>(mouseY),
+                    static_cast<float>(displayW), static_cast<float>(displayH),
+                    g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
+                );
+
                 if (key == GLFW_KEY_G) {
-                    if (sel) g_activeScene->StartGrab(sel->GetCenter());
+                    if (sel) g_activeScene->StartGrabWithRay(ray);
                 } else if (key == GLFW_KEY_S && (mods & GLFW_MOD_CONTROL) == 0) {
-                    if (sel) g_activeScene->StartScale(sel->GetCenter());
+                    if (sel) {
+                        Matrix4 viewProj = g_camera.GetProjectionMatrix(aspect) * g_camera.GetViewMatrix();
+                        g_activeScene->StartScaleWithScreen(
+                            static_cast<float>(mouseX), static_cast<float>(mouseY),
+                            static_cast<float>(displayW), static_cast<float>(displayH),
+                            viewProj
+                        );
+                    }
+                } else if (key == GLFW_KEY_E && (mods & GLFW_MOD_CONTROL) == 0) { // Hammer Edge Extrude
+                    g_activeScene->ExtrudeSelectedEdge(*g_cmdMgr);
+                } else if (key == GLFW_KEY_X && (mods & GLFW_MOD_SHIFT) != 0) { // Hammer Shift+X Split Area
+                    g_activeScene->SplitSelectedArea(*g_cmdMgr);
+                } else if (key == GLFW_KEY_M && (mods & GLFW_MOD_SHIFT) != 0) { // Hammer Shift+M Merge
+                    g_activeScene->MergeSelectedArea(*g_cmdMgr);
                 } else if (key == GLFW_KEY_R) {
                     g_activeScene->RotateSelectedArea90(*g_cmdMgr);
                 } else if (key == GLFW_KEY_C) {
                     g_activeScene->StartConnectMode();
                 } else if (key == GLFW_KEY_D && (mods & GLFW_MOD_SHIFT) != 0) {
                     g_activeScene->DuplicateSelectedArea(*g_cmdMgr);
-                } else if (key == GLFW_KEY_X || key == GLFW_KEY_DELETE) {
+                } else if ((key == GLFW_KEY_X && (mods & GLFW_MOD_SHIFT) == 0) || key == GLFW_KEY_DELETE) {
                     g_activeScene->DeleteSelectedArea(*g_cmdMgr);
                 } else if (key == GLFW_KEY_F) {
                     if (sel) g_camera.FocusOn(sel->GetCenter());
@@ -200,25 +262,38 @@ static void CursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
             g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
         );
 
-        auto mode = g_activeScene->GetTransformMode();
-        if (mode == EditorScene::TRANSFORM_TRANSLATE || mode == EditorScene::TRANSFORM_SCALE) {
-            NavArea* sel = g_activeScene->GetSelectedArea();
-            if (sel) {
-                Vector3 c = sel->GetCenter();
-                if (std::abs(ray.direction.z) > 1e-4f) {
-                    float t = (c.z - ray.origin.z) / ray.direction.z;
-                    Vector3 hitPoint = ray.origin + ray.direction * t;
-                    g_activeScene->UpdateTransform(hitPoint, static_cast<float>(ypos - g_lastMouseY));
-                }
-            }
-        } else if (mode == EditorScene::TRANSFORM_CONNECT) {
-            uint32_t hoverArea = ScenePicker::PickNavArea(*g_activeScene, ray);
-            g_activeScene->SetConnectHoverArea(hoverArea);
+        if (g_activeScene->IsDraggingHandle()) {
+            g_activeScene->UpdateDragHandle(
+                static_cast<float>(xpos), static_cast<float>(ypos),
+                ray, static_cast<float>(ypos - g_lastMouseY)
+            );
         } else {
-            ImGuiIO& io = ImGui::GetIO();
-            if (!io.WantCaptureMouse) {
+            auto mode = g_activeScene->GetTransformMode();
+            if (mode == EditorScene::TRANSFORM_TRANSLATE || mode == EditorScene::TRANSFORM_SCALE) {
+                g_activeScene->UpdateTransformWithRay(
+                    ray, static_cast<float>(xpos), static_cast<float>(ypos),
+                    static_cast<float>(ypos - g_lastMouseY)
+                );
+            } else if (mode == EditorScene::TRANSFORM_CONNECT) {
                 uint32_t hoverArea = ScenePicker::PickNavArea(*g_activeScene, ray);
-                g_activeScene->SetHoveredArea(hoverArea);
+                g_activeScene->SetConnectHoverArea(hoverArea);
+            } else {
+                ImGuiIO& io = ImGui::GetIO();
+                if (!io.WantCaptureMouse) {
+                    SelectedHandleType hoverHandle = ScenePicker::PickAreaHandles(
+                        *g_activeScene,
+                        static_cast<float>(xpos), static_cast<float>(ypos),
+                        static_cast<float>(displayW), static_cast<float>(displayH),
+                        g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
+                    );
+                    g_activeScene->SetHoveredHandle(hoverHandle);
+                    if (hoverHandle == HANDLE_NONE) {
+                        uint32_t hoverArea = ScenePicker::PickNavArea(*g_activeScene, ray);
+                        g_activeScene->SetHoveredArea(hoverArea);
+                    } else {
+                        g_activeScene->SetHoveredArea(0);
+                    }
+                }
             }
         }
     }

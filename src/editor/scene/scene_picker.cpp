@@ -122,3 +122,128 @@ bool ScenePicker::PickBSPFloor(const EditorScene& scene, const Ray& ray, Vector3
 
     return false;
 }
+
+struct ScreenPoint2D {
+    float x;
+    float y;
+    bool valid;
+};
+
+static ScreenPoint2D ProjectToScreen(const Vector3& worldPos, const Matrix4& viewProj, float width, float height) {
+    Vector4 clip = viewProj * Vector4(worldPos.x, worldPos.y, worldPos.z, 1.0f);
+    if (clip.w <= 0.001f) return { 0.0f, 0.0f, false };
+    float ndcX = clip.x / clip.w;
+    float ndcY = clip.y / clip.w;
+    float sx = (ndcX * 0.5f + 0.5f) * width;
+    float sy = (1.0f - (ndcY * 0.5f + 0.5f)) * height;
+    return { sx, sy, true };
+}
+
+static float DistToSegment2D(float px, float py, float x1, float y1, float x2, float y2) {
+    float dx = x2 - x1;
+    float dy = y2 - y1;
+    float lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-4f) {
+        float ex = px - x1, ey = py - y1;
+        return std::sqrt(ex * ex + ey * ey);
+    }
+    float t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = std::max(0.0f, std::min(1.0f, t));
+    float projX = x1 + t * dx;
+    float projY = y1 + t * dy;
+    float ex = px - projX, ey = py - projY;
+    return std::sqrt(ex * ex + ey * ey);
+}
+
+SelectedHandleType ScenePicker::PickAreaHandles(
+    const EditorScene& scene,
+    float screenX, float screenY,
+    float viewportWidth, float viewportHeight,
+    const Matrix4& viewMatrix,
+    const Matrix4& projMatrix,
+    float maxPixelDist
+) {
+    if (!scene.HasNAV() || scene.GetSelectedAreaID() == 0) return HANDLE_NONE;
+    const NavArea* sel = scene.GetSelectedArea();
+    if (!sel) return HANDLE_NONE;
+
+    Matrix4 viewProj = projMatrix * viewMatrix;
+
+    Vector3 c = sel->GetCenter();
+    c.z += 4.0f;
+    ScreenPoint2D sCenter = ProjectToScreen(c, viewProj, viewportWidth, viewportHeight);
+
+    // 1. Center Handle (priority: directly around gizmo origin)
+    if (sCenter.valid) {
+        float dCenter = std::hypot(screenX - sCenter.x, screenY - sCenter.y);
+        if (dCenter <= 14.0f) {
+            return HANDLE_GIZMO_CENTER;
+        }
+
+        // 2. Gizmo Axis Arrows
+        float gLen = 48.0f;
+        ScreenPoint2D sX = ProjectToScreen(c + Vector3(gLen, 0.0f, 0.0f), viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D sY = ProjectToScreen(c + Vector3(0.0f, gLen, 0.0f), viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D sZ = ProjectToScreen(c + Vector3(0.0f, 0.0f, gLen), viewProj, viewportWidth, viewportHeight);
+
+        float bestGizmoDist = maxPixelDist;
+        SelectedHandleType bestGizmo = HANDLE_NONE;
+
+        if (sX.valid) {
+            float d = DistToSegment2D(screenX, screenY, sCenter.x, sCenter.y, sX.x, sX.y);
+            if (d < bestGizmoDist) { bestGizmoDist = d; bestGizmo = HANDLE_GIZMO_X; }
+        }
+        if (sY.valid) {
+            float d = DistToSegment2D(screenX, screenY, sCenter.x, sCenter.y, sY.x, sY.y);
+            if (d < bestGizmoDist) { bestGizmoDist = d; bestGizmo = HANDLE_GIZMO_Y; }
+        }
+        if (sZ.valid) {
+            float d = DistToSegment2D(screenX, screenY, sCenter.x, sCenter.y, sZ.x, sZ.y);
+            if (d < bestGizmoDist) { bestGizmoDist = d; bestGizmo = HANDLE_GIZMO_Z; }
+        }
+
+        if (bestGizmo != HANDLE_NONE) {
+            return bestGizmo;
+        }
+    }
+
+    // 3. Corner Handles
+    Vector3 cNW = sel->GetCorner(NAV_CORNER_NORTH_WEST); cNW.z += 2.0f;
+    Vector3 cNE = sel->GetCorner(NAV_CORNER_NORTH_EAST); cNE.z += 2.0f;
+    Vector3 cSE = sel->GetCorner(NAV_CORNER_SOUTH_EAST); cSE.z += 2.0f;
+    Vector3 cSW = sel->GetCorner(NAV_CORNER_SOUTH_WEST); cSW.z += 2.0f;
+
+    ScreenPoint2D sNW = ProjectToScreen(cNW, viewProj, viewportWidth, viewportHeight);
+    ScreenPoint2D sNE = ProjectToScreen(cNE, viewProj, viewportWidth, viewportHeight);
+    ScreenPoint2D sSE = ProjectToScreen(cSE, viewProj, viewportWidth, viewportHeight);
+    ScreenPoint2D sSW = ProjectToScreen(cSW, viewProj, viewportWidth, viewportHeight);
+
+    if (sNW.valid && std::hypot(screenX - sNW.x, screenY - sNW.y) <= 12.0f) return HANDLE_CORNER_NW;
+    if (sNE.valid && std::hypot(screenX - sNE.x, screenY - sNE.y) <= 12.0f) return HANDLE_CORNER_NE;
+    if (sSE.valid && std::hypot(screenX - sSE.x, screenY - sSE.y) <= 12.0f) return HANDLE_CORNER_SE;
+    if (sSW.valid && std::hypot(screenX - sSW.x, screenY - sSW.y) <= 12.0f) return HANDLE_CORNER_SW;
+
+    // 4. Edges (North, East, South, West)
+    float edgeTolerance = 10.0f;
+    float bestEdgeDist = edgeTolerance;
+    SelectedHandleType bestEdge = HANDLE_NONE;
+
+    if (sNW.valid && sNE.valid) {
+        float d = DistToSegment2D(screenX, screenY, sNW.x, sNW.y, sNE.x, sNE.y);
+        if (d < bestEdgeDist) { bestEdgeDist = d; bestEdge = HANDLE_EDGE_NORTH; }
+    }
+    if (sNE.valid && sSE.valid) {
+        float d = DistToSegment2D(screenX, screenY, sNE.x, sNE.y, sSE.x, sSE.y);
+        if (d < bestEdgeDist) { bestEdgeDist = d; bestEdge = HANDLE_EDGE_EAST; }
+    }
+    if (sSW.valid && sSE.valid) {
+        float d = DistToSegment2D(screenX, screenY, sSW.x, sSW.y, sSE.x, sSE.y);
+        if (d < bestEdgeDist) { bestEdgeDist = d; bestEdge = HANDLE_EDGE_SOUTH; }
+    }
+    if (sNW.valid && sSW.valid) {
+        float d = DistToSegment2D(screenX, screenY, sNW.x, sNW.y, sSW.x, sSW.y);
+        if (d < bestEdgeDist) { bestEdgeDist = d; bestEdge = HANDLE_EDGE_WEST; }
+    }
+
+    return bestEdge;
+}

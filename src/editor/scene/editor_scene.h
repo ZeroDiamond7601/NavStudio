@@ -11,6 +11,9 @@
 #include "editor/render/bsp_renderer.h"
 #include "editor/render/nav_renderer.h"
 
+#include "editor/scene/editor_handles.h"
+#include <vector>
+
 struct AsyncLoadContext {
     std::atomic<bool> inProgress{false};
     std::atomic<bool> finished{false};
@@ -89,10 +92,42 @@ public:
     bool GetShowWireframeOnSolid() const { return m_bspRenderer.GetShowWireframeOnSolid(); }
     void SetShowWireframeOnSolid(bool show) { m_bspRenderer.SetShowWireframeOnSolid(show); }
 
-    // Blender-style 3D Transform and Connection modes
+    // Recent Files Management
+    const std::vector<std::string>& GetRecentFiles() const { return m_recentFiles; }
+    void AddRecentFile(const std::string& path);
+    void ClearRecentFiles();
+    void LoadRecentFiles();
+    void SaveRecentFiles();
+
+    // Hammer-style Grid Management
+    float GetGridSize() const { return m_gridSize; }
+    void SetGridSize(float size);
+    void IncreaseGridSize();
+    void DecreaseGridSize();
+    bool GetGridSnap() const { return m_gridSnap; }
+    void SetGridSnap(bool snap) { m_gridSnap = snap; }
+    void ToggleGridSnap();
+    bool GetShowGroundGrid() const { return m_showGroundGrid; }
+    void SetShowGroundGrid(bool show);
+    float SnapValue(float val) const;
+    Vector3 SnapVector(const Vector3& v) const;
+
+    // Interactive Handles (Gizmo Arrows, Edges, Corners)
+    SelectedHandleType GetHoveredHandle() const { return m_hoveredHandle; }
+    void SetHoveredHandle(SelectedHandleType h);
+    SelectedHandleType GetSelectedHandle() const { return m_selectedHandle; }
+    void SetSelectedHandle(SelectedHandleType h);
+
+    bool IsDraggingHandle() const { return m_isDraggingHandle; }
+    SelectedHandleType GetDraggedHandle() const { return m_draggedHandle; }
+    void StartDragHandle(SelectedHandleType handle, float screenX, float screenY, const Ray& ray);
+    void UpdateDragHandle(float screenX, float screenY, const Ray& ray, float deltaY = 0.0f);
+    bool EndDragHandle(class CommandManager& cmdMgr);
+
+    // 3D Transform and Connection modes
     enum EditorTransformMode {
         TRANSFORM_NONE = 0,
-        TRANSFORM_TRANSLATE,  // Grab [G]
+        TRANSFORM_TRANSLATE,  // Move [G]
         TRANSFORM_SCALE,      // Scale [S]
         TRANSFORM_CONNECT     // Connect Mode [C]
     };
@@ -108,7 +143,9 @@ public:
     EditorTransformAxis GetTransformAxis() const { return m_transformAxis; }
 
     void StartGrab(const Vector3& initialHitPoint);
+    void StartGrabWithRay(const Ray& ray);
     void StartScale(const Vector3& initialHitPoint);
+    void StartScaleWithScreen(float screenX, float screenY, float viewportW, float viewportH, const Matrix4& viewProj);
     void StartConnectMode();
     void SetTransformAxis(EditorTransformAxis axis);
     void ToggleTransformAxis(EditorTransformAxis axis);
@@ -116,6 +153,7 @@ public:
     bool ConfirmTransform(class CommandManager& cmdMgr);
 
     void UpdateTransform(const Vector3& currentHitPoint, float mouseDeltaY = 0.0f);
+    void UpdateTransformWithRay(const Ray& ray, float mouseX, float mouseY, float deltaY = 0.0f);
     void SetConnectHoverArea(uint32_t areaId);
     uint32_t GetConnectHoverArea() const { return m_connectHoverAreaId; }
 
@@ -125,6 +163,11 @@ public:
     void DuplicateSelectedArea(class CommandManager& cmdMgr);
     void DeleteSelectedArea(class CommandManager& cmdMgr);
     void RotateSelectedArea90(class CommandManager& cmdMgr);
+
+    // Hammer-style editing tools
+    void ExtrudeSelectedEdge(class CommandManager& cmdMgr, float length = 0.0f);
+    void SplitSelectedArea(class CommandManager& cmdMgr);
+    void MergeSelectedArea(class CommandManager& cmdMgr);
 
 private:
     std::unique_ptr<BSPFile> m_bsp;
@@ -144,6 +187,29 @@ private:
     bool m_showNAV;
     bool m_showConnections;
 
+    // Recent files
+    std::vector<std::string> m_recentFiles;
+
+    // Hammer Grid
+    float m_gridSize{32.0f};
+    bool m_gridSnap{true};
+    bool m_showGroundGrid{true};
+
+    // Handles
+    SelectedHandleType m_hoveredHandle{HANDLE_NONE};
+    SelectedHandleType m_selectedHandle{HANDLE_NONE};
+    SelectedHandleType m_draggedHandle{HANDLE_NONE};
+    bool m_isDraggingHandle{false};
+
+    // Handle Drag Initial State
+    NavExtent m_dragStartExtent;
+    float m_dragStartNeZ{0.0f};
+    float m_dragStartSwZ{0.0f};
+    Vector3 m_dragStartGroundHit{0.0f, 0.0f, 0.0f};
+    float m_dragStartScreenX{0.0f};
+    float m_dragStartScreenY{0.0f};
+
+    // Modal Transform Initial State
     EditorTransformMode m_transformMode{TRANSFORM_NONE};
     EditorTransformAxis m_transformAxis{AXIS_NONE};
     uint32_t m_connectHoverAreaId{0};
@@ -151,6 +217,10 @@ private:
     float m_initialNeZ{0.0f};
     float m_initialSwZ{0.0f};
     Vector3 m_initialHitPoint{0.0f, 0.0f, 0.0f};
+    Vector3 m_grabOffset{0.0f, 0.0f, 0.0f};
+    float m_scaleStartDist{50.0f};
+    float m_scaleCenterScreenX{0.0f};
+    float m_scaleCenterScreenY{0.0f};
 
     AsyncLoadContext m_loadCtx;
     std::thread m_loadThread;

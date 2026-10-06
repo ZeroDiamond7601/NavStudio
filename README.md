@@ -41,12 +41,19 @@
 ### NavStudio: 3D BSP Visualizer & NavMesh Editor
 * **Hardware-Accelerated 3D Viewport:** OpenGL 3.3 Core rendering with Dear ImGui docking interface.
 * **Multiple Shading Modes:** Solid clay shading with GoldSrc Z-Up hemisphere lighting, distance depth cueing, overlay brush edge outlines, wireframe edge display, and Ghost / X-Ray mode (translucent BSP walls to view navigation meshes through floors and ceilings).
-* **High-Visibility NavMesh Inspection & Clean Connections:** Color-coded area quads with polygon offset to eliminate Z-fighting against BSP floors, dual-lane highway lateral offset for overlapping bidirectional links, distinct color coding (Electric Cyan for active bidirectional, Golden Amber for active outgoing, Spring Green for active incoming, Sky Blue for passive two-way, Coral Rose for passive one-way), prominent chevron arrowheads, and ladder rungs.
-* **Blender-Style 3D Object Controls:**
-  * **Grab / Translate (`G`):** Move areas in 3D with mouse. Press `X`, `Y`, or `Z` to constrain movement strictly to an axis with real-time infinite axis guidelines. `Left-Click`/`Enter` confirms, `Right-Click`/`Esc` cancels.
-  * **Scale (`S`):** Scale area dimensions with mouse, with optional `X` or `Y` width/length axis constraints.
+* **Interactive 3D Controls & Hammer Editor Tools:**
+  * **3D Position Gizmo & Arrows:** Interactive Red (+X East), Green (+Y North), and Blue (+Z Up) axis arrows and center box handle for precise dragging and elevation control.
+  * **Move / Grab (`G`):** Areas smoothly glide and track the 3D mouse cursor position on the ground plane, with optional `X`, `Y`, `Z` axis constraints.
+  * **Radial Scale Tool (`S`):** Screen-space radial scaling tool to resize area dimensions smoothly, with optional `X` or `Y` width/length constraints.
+  * **Individual Edge Manipulation:** Click and drag any of the 4 perimeter edges (North, East, South, West) to resize area bounds, just like Hammer brush faces.
+  * **Hammer Edge Extrude (`E` / Shift+Drag Edge):** Extrude any edge outward to spawn a new adjacent area automatically linked bidirectionally.
+  * **Hammer Split / Clipping Tool (`Shift+X`):** Slice any area into two connected halves along its length or width while preserving external connections.
+  * **Hammer Merge Tool (`Shift+M`):** Merge adjacent collinear areas into a single unified area quad.
+  * **Hammer 3D Ground Grid:** Viewport reference grid with configurable grid sizes from 1 to 512 units (`[` to decrease, `]` to increase), snapping toggle (`Shift+W`), and visual minor/major grid lines.
+  * **Open Recent Files:** Persistent recent file list under `File -> Open Recent` for quick access to recently edited maps and meshes.
+  * **Connect Mode (`C`):** Interactive raycast linking between areas in 3D (Left-Click for bidirectional, Shift+Click for one-way).
   * **Rotate (`R`):** Rotate area bounding orientation 90 degrees around center.
-  * **Duplicate (`Shift+D`):** Clones selected area with a unique ID and immediately enters Grab mode.
+  * **Duplicate (`Shift+D`):** Clones selected area with a unique ID and immediately enters Move mode.
   * **Delete (`X` / `Delete`):** Deletes area with lossless graph connection restoration via Undo.
   * **3D Transform Gizmo:** Center axis arrows (+X Red, +Y Green, +Z Blue) and 4 corner vertex handles.
 * **Interactive Connection Manager & Connect Mode (`C`):**
@@ -207,23 +214,35 @@ NavStudio supports multiple methods to open files:
 
 ### Controls and Shortcuts
 
-| Action | Shortcut |
-| :--- | :--- |
-| **Move Camera (Flycam)** | `W / A / S / D` |
-| **Elevate Camera Up / Down** | `E / Q` |
-| **Look Around** | Right-Click + Drag |
-| **Adjust Camera Speed** | Mouse Wheel (while holding Right-Click) |
-| **Orbit Selected Area** | `Alt` + Left-Click + Drag |
-| **Focus Camera on Selection** | `F` |
-| **Reset Camera** | `Home` |
-| **Select NavArea** | Left-Click (in 3D Viewport or Hierarchy) |
-| **Snap Area to Floor** | `S` |
-| **Undo** | `Ctrl + Z` |
-| **Redo** | `Ctrl + Y` |
-| **Open BSP Map** | `Ctrl + O` |
-| **Open NAV Mesh** | `Ctrl + Shift + O` |
-| **Save Navigation Mesh** | `Ctrl + S` |
-| **Save NAV Mesh As** | `Ctrl + Shift + S` |
+| Action | Shortcut | Description |
+| :--- | :--- | :--- |
+| **Move Camera (Flycam)** | `W / A / S / D` | Fly forward, backward, strafe left and right |
+| **Elevate Camera Up / Down** | `E / Q` | Fly vertically up and down |
+| **Look Around** | Right-Click + Drag | First-person camera freelook |
+| **Adjust Camera Speed** | Mouse Wheel | Speed up or slow down flycam (holding Right-Click) |
+| **Orbit Selected Area** | `Alt` + Left-Click + Drag | Orbit around the selected area centroid |
+| **Focus Camera on Selection** | `F` | Smoothly centers camera view on selected area |
+| **Reset Camera** | `Home` | Restores camera position and orientation to defaults |
+| **Select NavArea / Drag Handle**| Left-Click | Selects area or grabs gizmo arrows / edges / corners |
+| **Move / Grab Area** | `G` | Area smoothly follows mouse cursor in 3D ground plane |
+| **Radial Scale Area** | `S` | Smooth screen-space radial scaling |
+| **Constrain Axis** | `X` / `Y` / `Z` | Constrain Move or Scale strictly to X, Y, or Z axis |
+| **Extrude Selected Edge** | `E` or `Shift` + Drag Edge | Extrudes edge outward creating connected adjacent area |
+| **Split / Slice Area** | `Shift + X` | Slices area in half along width/length (Hammer clipping) |
+| **Merge Adjacent Areas** | `Shift + M` | Combines adjacent collinear areas into single quad |
+| **Decrease / Increase Grid** | `[` / `]` | Halves or doubles Hammer grid size (1 to 512 units) |
+| **Toggle Grid Snapping** | `Shift + W` | Toggles grid snapping on or off |
+| **Connect Mode** | `C` | Click candidate area (Left=2-Way, Shift+Left=1-Way) |
+| **Rotate Area 90°** | `R` | Rotates area 90 degrees around center |
+| **Duplicate Area** | `Shift + D` | Duplicates selected area and enters Move mode |
+| **Delete Area** | `X` / `Delete` | Deletes selected area with lossless connection undo |
+| **Snap Area to Floor** | `Space` | Snaps area elevation corners to underlying BSP floor |
+| **Undo / Redo** | `Ctrl + Z` / `Ctrl + Y` | Full multi-step undo and redo history |
+| **Open Recent File** | Menu `File -> Open Recent` | Quickly load recently opened `.bsp` and `.nav` files |
+| **Open BSP Map** | `Ctrl + O` | Opens native file dialog for GoldSrc maps |
+| **Open NAV Mesh** | `Ctrl + Shift + O` | Opens native file dialog for `.nav` files |
+| **Save Navigation Mesh** | `Ctrl + S` | Overwrites active `.nav` file |
+| **Save NAV Mesh As** | `Ctrl + Shift + S` | Saves navigation mesh to new target file |
 
 
 ---

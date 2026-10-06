@@ -5,6 +5,7 @@
 #include "editor/math/matrix4.h"
 #include "nav/nav_area.h"
 #include "editor/scene/editor_scene.h"
+#include "editor/scene/editor_handles.h"
 
 struct Ray {
     Vector3 origin;
@@ -25,6 +26,16 @@ public:
 
     // Tests ray against BSP world geometry and returns exact collision point
     static bool PickBSPFloor(const EditorScene& scene, const Ray& ray, Vector3* outHitPoint);
+
+    // Tests screen point against handles of selected area (gizmo arrows, edges, corners)
+    static SelectedHandleType PickAreaHandles(
+        const EditorScene& scene,
+        float screenX, float screenY,
+        float viewportWidth, float viewportHeight,
+        const Matrix4& viewMatrix,
+        const Matrix4& projMatrix,
+        float maxPixelDist = 12.0f
+    );
 
 private:
     static bool RayIntersectsTriangle(

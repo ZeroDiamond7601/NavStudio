@@ -34,7 +34,11 @@ void NavRenderer::Clear() {
 }
 
 bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t hoveredId,
-                               uint32_t connectTargetId, int transformAxis) {
+                               uint32_t connectTargetId, int transformAxis,
+                               SelectedHandleType hoveredHandle,
+                               SelectedHandleType selectedHandle,
+                               bool showGroundGrid, float gridSize,
+                               float gridElevation) {
     Clear();
     if (!nav.IsLoaded()) return false;
 
@@ -49,6 +53,46 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
     std::vector<uint32_t> lineIndices;
 
     const float kZLift = 2.0f; // Elevate above floor to prevent surface overlap
+
+    // Hammer-style 3D Ground Reference Grid
+    if (showGroundGrid && gridSize >= 4.0f) {
+        float gridRange = std::max(2048.0f, gridSize * 48.0f);
+        gridRange = std::min(4096.0f, gridRange);
+        int numLines = static_cast<int>(gridRange / gridSize);
+        numLines = std::min(64, numLines);
+
+        for (int i = -numLines; i <= numLines; ++i) {
+            float coord = static_cast<float>(i) * gridSize;
+            bool isMajor = (i % 8 == 0);
+            bool isOrigin = (i == 0);
+
+            // X-parallel line (sweeps along X, constant Y = coord)
+            float gr = 0.20f, gg = 0.25f, gb = 0.30f, ga = 0.35f;
+            if (isOrigin) {
+                gr = 0.85f; gg = 0.25f; gb = 0.25f; ga = 0.75f; // Origin X-axis: Red
+            } else if (isMajor) {
+                gr = 0.32f; gg = 0.40f; gb = 0.48f; ga = 0.50f;
+            }
+
+            uint32_t lx = static_cast<uint32_t>(lineVertices.size());
+            lineVertices.push_back({ -gridRange, coord, gridElevation, 0,0,1, 0,0, gr, gg, gb, ga });
+            lineVertices.push_back({  gridRange, coord, gridElevation, 0,0,1, 0,0, gr, gg, gb, ga });
+            lineIndices.push_back(lx + 0); lineIndices.push_back(lx + 1);
+
+            // Y-parallel line (sweeps along Y, constant X = coord)
+            gr = 0.20f; gg = 0.25f; gb = 0.30f; ga = 0.35f;
+            if (isOrigin) {
+                gr = 0.25f; gg = 0.85f; gb = 0.35f; ga = 0.75f; // Origin Y-axis: Green
+            } else if (isMajor) {
+                gr = 0.32f; gg = 0.40f; gb = 0.48f; ga = 0.50f;
+            }
+
+            uint32_t ly = static_cast<uint32_t>(lineVertices.size());
+            lineVertices.push_back({ coord, -gridRange, gridElevation, 0,0,1, 0,0, gr, gg, gb, ga });
+            lineVertices.push_back({ coord,  gridRange, gridElevation, 0,0,1, 0,0, gr, gg, gb, ga });
+            lineIndices.push_back(ly + 0); lineIndices.push_back(ly + 1);
+        }
+    }
 
     for (const NavArea* area : areas) {
         if (!area) continue;
@@ -118,14 +162,54 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
         lineVertices.push_back({ cSE.x, cSE.y, cSE.z + lineLift, 0,0,1, 0,0, lr, lg, lb, la });
         lineVertices.push_back({ cSW.x, cSW.y, cSW.z + lineLift, 0,0,1, 0,0, lr, lg, lb, la });
 
+        // Edge 0: North (NW -> NE)
         lineIndices.push_back(baseLineVert + 0);
         lineIndices.push_back(baseLineVert + 1);
+        // Edge 1: East (NE -> SE)
         lineIndices.push_back(baseLineVert + 1);
         lineIndices.push_back(baseLineVert + 2);
+        // Edge 2: South (SE -> SW)
         lineIndices.push_back(baseLineVert + 2);
         lineIndices.push_back(baseLineVert + 3);
+        // Edge 3: West (SW -> NW)
         lineIndices.push_back(baseLineVert + 3);
         lineIndices.push_back(baseLineVert + 0);
+
+        // Specific Edge Highlight for Selected Area (Hammer style)
+        if (isSelected) {
+            auto AddEdgeHighlight = [&](const Vector3& p1, const Vector3& p2) {
+                float hlLift = lineLift + 0.8f;
+                uint32_t hEdgeIdx = static_cast<uint32_t>(lineVertices.size());
+                lineVertices.push_back({ p1.x, p1.y, p1.z + hlLift, 0,0,1, 0,0, 1.0f, 0.92f, 0.15f, 1.0f });
+                lineVertices.push_back({ p2.x, p2.y, p2.z + hlLift, 0,0,1, 0,0, 1.0f, 0.92f, 0.15f, 1.0f });
+                lineIndices.push_back(hEdgeIdx + 0); lineIndices.push_back(hEdgeIdx + 1);
+
+                // Midpoint marker notch
+                Vector3 mid = (p1 + p2) * 0.5f;
+                Vector3 perp(-(p2.y - p1.y), p2.x - p1.x, 0.0f);
+                float pLen = perp.Length();
+                if (pLen > 1e-3f) {
+                    perp = perp * (6.0f / pLen);
+                    uint32_t notchIdx = static_cast<uint32_t>(lineVertices.size());
+                    lineVertices.push_back({ mid.x - perp.x, mid.y - perp.y, mid.z + hlLift, 0,0,1, 0,0, 1.0f, 0.95f, 0.2f, 1.0f });
+                    lineVertices.push_back({ mid.x + perp.x, mid.y + perp.y, mid.z + hlLift, 0,0,1, 0,0, 1.0f, 0.95f, 0.2f, 1.0f });
+                    lineIndices.push_back(notchIdx + 0); lineIndices.push_back(notchIdx + 1);
+                }
+            };
+
+            if (hoveredHandle == HANDLE_EDGE_NORTH || selectedHandle == HANDLE_EDGE_NORTH) {
+                AddEdgeHighlight(cNW, cNE);
+            }
+            if (hoveredHandle == HANDLE_EDGE_EAST || selectedHandle == HANDLE_EDGE_EAST) {
+                AddEdgeHighlight(cNE, cSE);
+            }
+            if (hoveredHandle == HANDLE_EDGE_SOUTH || selectedHandle == HANDLE_EDGE_SOUTH) {
+                AddEdgeHighlight(cSW, cSE);
+            }
+            if (hoveredHandle == HANDLE_EDGE_WEST || selectedHandle == HANDLE_EDGE_WEST) {
+                AddEdgeHighlight(cNW, cSW);
+            }
+        }
 
         // Connection lines between area centroids with dual-lane offset & clear contrast
         Vector3 centerA = area->GetCenter();
@@ -223,7 +307,7 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
         }
     }
 
-    // 3D Transform Gizmo and vertex handles for selected area (Blender-style)
+    // 3D Transform Gizmo, Center box, and vertex handles for selected area
     if (selectedId != 0) {
         const NavArea* sel = nav.GetAreaByID(selectedId);
         if (sel) {
@@ -231,57 +315,101 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
             c.z += (kZLift + 3.0f);
             float gLen = 48.0f;
 
-            // X Axis: Red (+X East)
+            // Center Position Handle: Small diamond box
+            bool isCenterActive = (hoveredHandle == HANDLE_GIZMO_CENTER || selectedHandle == HANDLE_GIZMO_CENTER);
+            float cbR = isCenterActive ? 1.0f : 0.85f;
+            float cbG = isCenterActive ? 0.95f : 0.85f;
+            float cbB = isCenterActive ? 0.20f : 0.85f;
+            float cbSize = isCenterActive ? 5.5f : 4.0f;
+            uint32_t cbIdx = static_cast<uint32_t>(lineVertices.size());
+            lineVertices.push_back({ c.x - cbSize, c.y, c.z, 0,0,1, 0,0, cbR, cbG, cbB, 1.0f });
+            lineVertices.push_back({ c.x, c.y + cbSize, c.z, 0,0,1, 0,0, cbR, cbG, cbB, 1.0f });
+            lineVertices.push_back({ c.x + cbSize, c.y, c.z, 0,0,1, 0,0, cbR, cbG, cbB, 1.0f });
+            lineVertices.push_back({ c.x, c.y - cbSize, c.z, 0,0,1, 0,0, cbR, cbG, cbB, 1.0f });
+            lineIndices.push_back(cbIdx + 0); lineIndices.push_back(cbIdx + 1);
+            lineIndices.push_back(cbIdx + 1); lineIndices.push_back(cbIdx + 2);
+            lineIndices.push_back(cbIdx + 2); lineIndices.push_back(cbIdx + 3);
+            lineIndices.push_back(cbIdx + 3); lineIndices.push_back(cbIdx + 0);
+
+            // X Axis: Red (+X East) - Highlighted if active
+            bool isXActive = (hoveredHandle == HANDLE_GIZMO_X || selectedHandle == HANDLE_GIZMO_X);
+            float xR = isXActive ? 1.0f : 0.95f;
+            float xG = isXActive ? 0.90f : 0.20f;
+            float xB = isXActive ? 0.20f : 0.20f;
+            float xLen = isXActive ? (gLen + 6.0f) : gLen;
             uint32_t gx = static_cast<uint32_t>(lineVertices.size());
-            lineVertices.push_back({ c.x, c.y, c.z, 0,0,1, 0,0, 0.95f, 0.2f, 0.2f, 1.0f });
-            lineVertices.push_back({ c.x + gLen, c.y, c.z, 0,0,1, 0,0, 0.95f, 0.2f, 0.2f, 1.0f });
-            lineVertices.push_back({ c.x + gLen, c.y, c.z, 0,0,1, 0,0, 0.95f, 0.2f, 0.2f, 1.0f });
-            lineVertices.push_back({ c.x + gLen - 8.0f, c.y + 4.0f, c.z, 0,0,1, 0,0, 0.95f, 0.2f, 0.2f, 1.0f });
-            lineVertices.push_back({ c.x + gLen, c.y, c.z, 0,0,1, 0,0, 0.95f, 0.2f, 0.2f, 1.0f });
-            lineVertices.push_back({ c.x + gLen - 8.0f, c.y - 4.0f, c.z, 0,0,1, 0,0, 0.95f, 0.2f, 0.2f, 1.0f });
+            lineVertices.push_back({ c.x, c.y, c.z, 0,0,1, 0,0, xR, xG, xB, 1.0f });
+            lineVertices.push_back({ c.x + xLen, c.y, c.z, 0,0,1, 0,0, xR, xG, xB, 1.0f });
+            lineVertices.push_back({ c.x + xLen, c.y, c.z, 0,0,1, 0,0, xR, xG, xB, 1.0f });
+            lineVertices.push_back({ c.x + xLen - 8.0f, c.y + 4.5f, c.z, 0,0,1, 0,0, xR, xG, xB, 1.0f });
+            lineVertices.push_back({ c.x + xLen, c.y, c.z, 0,0,1, 0,0, xR, xG, xB, 1.0f });
+            lineVertices.push_back({ c.x + xLen - 8.0f, c.y - 4.5f, c.z, 0,0,1, 0,0, xR, xG, xB, 1.0f });
             lineIndices.push_back(gx + 0); lineIndices.push_back(gx + 1);
             lineIndices.push_back(gx + 2); lineIndices.push_back(gx + 3);
             lineIndices.push_back(gx + 4); lineIndices.push_back(gx + 5);
 
-            // Y Axis: Green (+Y North)
+            // Y Axis: Green (+Y North) - Highlighted if active
+            bool isYActive = (hoveredHandle == HANDLE_GIZMO_Y || selectedHandle == HANDLE_GIZMO_Y);
+            float yR = isYActive ? 0.35f : 0.20f;
+            float yG = isYActive ? 1.0f : 0.95f;
+            float yB = isYActive ? 0.90f : 0.30f;
+            float yLen = isYActive ? (gLen + 6.0f) : gLen;
             uint32_t gy = static_cast<uint32_t>(lineVertices.size());
-            lineVertices.push_back({ c.x, c.y, c.z, 0,0,1, 0,0, 0.2f, 0.95f, 0.3f, 1.0f });
-            lineVertices.push_back({ c.x, c.y + gLen, c.z, 0,0,1, 0,0, 0.2f, 0.95f, 0.3f, 1.0f });
-            lineVertices.push_back({ c.x, c.y + gLen, c.z, 0,0,1, 0,0, 0.2f, 0.95f, 0.3f, 1.0f });
-            lineVertices.push_back({ c.x + 4.0f, c.y + gLen - 8.0f, c.z, 0,0,1, 0,0, 0.2f, 0.95f, 0.3f, 1.0f });
-            lineVertices.push_back({ c.x, c.y + gLen, c.z, 0,0,1, 0,0, 0.2f, 0.95f, 0.3f, 1.0f });
-            lineVertices.push_back({ c.x - 4.0f, c.y + gLen - 8.0f, c.z, 0,0,1, 0,0, 0.2f, 0.95f, 0.3f, 1.0f });
+            lineVertices.push_back({ c.x, c.y, c.z, 0,0,1, 0,0, yR, yG, yB, 1.0f });
+            lineVertices.push_back({ c.x, c.y + yLen, c.z, 0,0,1, 0,0, yR, yG, yB, 1.0f });
+            lineVertices.push_back({ c.x, c.y + yLen, c.z, 0,0,1, 0,0, yR, yG, yB, 1.0f });
+            lineVertices.push_back({ c.x + 4.5f, c.y + yLen - 8.0f, c.z, 0,0,1, 0,0, yR, yG, yB, 1.0f });
+            lineVertices.push_back({ c.x, c.y + yLen, c.z, 0,0,1, 0,0, yR, yG, yB, 1.0f });
+            lineVertices.push_back({ c.x - 4.5f, c.y + yLen - 8.0f, c.z, 0,0,1, 0,0, yR, yG, yB, 1.0f });
             lineIndices.push_back(gy + 0); lineIndices.push_back(gy + 1);
             lineIndices.push_back(gy + 2); lineIndices.push_back(gy + 3);
             lineIndices.push_back(gy + 4); lineIndices.push_back(gy + 5);
 
-            // Z Axis: Blue (+Z Up)
+            // Z Axis: Blue (+Z Up) - Highlighted if active
+            bool isZActive = (hoveredHandle == HANDLE_GIZMO_Z || selectedHandle == HANDLE_GIZMO_Z);
+            float zR = isZActive ? 0.40f : 0.20f;
+            float zG = isZActive ? 0.90f : 0.55f;
+            float zB = isZActive ? 1.0f : 1.0f;
+            float zLen = isZActive ? (gLen + 6.0f) : gLen;
             uint32_t gz = static_cast<uint32_t>(lineVertices.size());
-            lineVertices.push_back({ c.x, c.y, c.z, 0,0,1, 0,0, 0.2f, 0.55f, 1.0f, 1.0f });
-            lineVertices.push_back({ c.x, c.y, c.z + gLen, 0,0,1, 0,0, 0.2f, 0.55f, 1.0f, 1.0f });
-            lineVertices.push_back({ c.x, c.y, c.z + gLen, 0,0,1, 0,0, 0.2f, 0.55f, 1.0f, 1.0f });
-            lineVertices.push_back({ c.x + 4.0f, c.y, c.z + gLen - 8.0f, 0,0,1, 0,0, 0.2f, 0.55f, 1.0f, 1.0f });
-            lineVertices.push_back({ c.x, c.y, c.z + gLen, 0,0,1, 0,0, 0.2f, 0.55f, 1.0f, 1.0f });
-            lineVertices.push_back({ c.x - 4.0f, c.y, c.z + gLen - 8.0f, 0,0,1, 0,0, 0.2f, 0.55f, 1.0f, 1.0f });
+            lineVertices.push_back({ c.x, c.y, c.z, 0,0,1, 0,0, zR, zG, zB, 1.0f });
+            lineVertices.push_back({ c.x, c.y, c.z + zLen, 0,0,1, 0,0, zR, zG, zB, 1.0f });
+            lineVertices.push_back({ c.x, c.y, c.z + zLen, 0,0,1, 0,0, zR, zG, zB, 1.0f });
+            lineVertices.push_back({ c.x + 4.5f, c.y, c.z + zLen - 8.0f, 0,0,1, 0,0, zR, zG, zB, 1.0f });
+            lineVertices.push_back({ c.x, c.y, c.z + zLen, 0,0,1, 0,0, zR, zG, zB, 1.0f });
+            lineVertices.push_back({ c.x - 4.5f, c.y, c.z + zLen - 8.0f, 0,0,1, 0,0, zR, zG, zB, 1.0f });
             lineIndices.push_back(gz + 0); lineIndices.push_back(gz + 1);
             lineIndices.push_back(gz + 2); lineIndices.push_back(gz + 3);
             lineIndices.push_back(gz + 4); lineIndices.push_back(gz + 5);
 
             // 4 Corner vertex handles
+            SelectedHandleType cornerHandles[4] = {
+                HANDLE_CORNER_NORTH_WEST, // mapped from enum
+                HANDLE_CORNER_NE,
+                HANDLE_CORNER_SE,
+                HANDLE_CORNER_SW
+            };
+            cornerHandles[0] = HANDLE_CORNER_NW;
+
             for (int k = 0; k < 4; ++k) {
                 Vector3 cp = sel->GetCorner(static_cast<NavCornerType>(k));
-                cp.z += (kZLift + 1.0f);
-                float hSize = 5.0f;
+                cp.z += (kZLift + 1.2f);
+                bool isCornerActive = (hoveredHandle == cornerHandles[k] || selectedHandle == cornerHandles[k]);
+                float hSize = isCornerActive ? 7.0f : 5.0f;
+                float hr = isCornerActive ? 1.0f : 1.0f;
+                float hg = isCornerActive ? 1.0f : 0.85f;
+                float hb = isCornerActive ? 0.2f : 0.2f;
+
                 uint32_t hIdx = static_cast<uint32_t>(lineVertices.size());
-                lineVertices.push_back({ cp.x - hSize, cp.y, cp.z, 0,0,1, 0,0, 1.0f, 0.85f, 0.2f, 1.0f });
-                lineVertices.push_back({ cp.x + hSize, cp.y, cp.z, 0,0,1, 0,0, 1.0f, 0.85f, 0.2f, 1.0f });
-                lineVertices.push_back({ cp.x, cp.y - hSize, cp.z, 0,0,1, 0,0, 1.0f, 0.85f, 0.2f, 1.0f });
-                lineVertices.push_back({ cp.x, cp.y + hSize, cp.z, 0,0,1, 0,0, 1.0f, 0.85f, 0.2f, 1.0f });
+                lineVertices.push_back({ cp.x - hSize, cp.y, cp.z, 0,0,1, 0,0, hr, hg, hb, 1.0f });
+                lineVertices.push_back({ cp.x + hSize, cp.y, cp.z, 0,0,1, 0,0, hr, hg, hb, 1.0f });
+                lineVertices.push_back({ cp.x, cp.y - hSize, cp.z, 0,0,1, 0,0, hr, hg, hb, 1.0f });
+                lineVertices.push_back({ cp.x, cp.y + hSize, cp.z, 0,0,1, 0,0, hr, hg, hb, 1.0f });
                 lineIndices.push_back(hIdx + 0); lineIndices.push_back(hIdx + 1);
                 lineIndices.push_back(hIdx + 2); lineIndices.push_back(hIdx + 3);
             }
 
-            // Blender infinite axis guideline if axis constraint is active
+            // Infinite axis guideline if axis constraint is active
             if (transformAxis == 1) { // X axis
                 uint32_t ax = static_cast<uint32_t>(lineVertices.size());
                 lineVertices.push_back({ c.x - 4000.0f, c.y, c.z, 0,0,1, 0,0, 1.0f, 0.2f, 0.2f, 0.85f });
