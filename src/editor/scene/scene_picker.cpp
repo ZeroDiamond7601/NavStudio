@@ -475,7 +475,7 @@ SelectedHandleType ScenePicker::PickAreaHandles(
 bool ScenePicker::PickAnyAreaEdge(
     const EditorScene& scene,
     float screenX, float screenY,
-    int viewportWidth, int viewportHeight,
+    float viewportWidth, float viewportHeight,
     const Matrix4& viewMatrix,
     const Matrix4& projMatrix,
     uint32_t& outAreaId,

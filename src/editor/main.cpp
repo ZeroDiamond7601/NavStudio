@@ -331,7 +331,7 @@ static void CursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
             ScenePicker::PickAnyAreaEdge(
                 *g_activeScene,
                 static_cast<float>(xpos), static_cast<float>(ypos),
-                displayW, displayH,
+                static_cast<float>(displayW), static_cast<float>(displayH),
                 g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect),
                 edgeAreaId, edgeHandle, 20.0f
             );
