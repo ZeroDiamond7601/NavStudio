@@ -61,9 +61,9 @@ struct GridKey {
 
 struct GridKeyHash {
     size_t operator()(const GridKey& k) const {
-        uint64_t combined = (static_cast<uint64_t>(static_cast<uint32_t>(k.x)) << 32) |
-                            static_cast<uint64_t>(static_cast<uint32_t>(k.y));
-        return std::hash<uint64_t>{}(combined);
+        size_t h1 = std::hash<int32_t>{}(k.x);
+        size_t h2 = std::hash<int32_t>{}(k.y);
+        return h1 ^ (h2 + 0x9e3779b9U + (h1 << 6) + (h1 >> 2));
     }
 };
 

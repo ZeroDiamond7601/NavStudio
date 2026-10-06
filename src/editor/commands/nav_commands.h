@@ -737,6 +737,8 @@ private:
     std::vector<SavedConn> m_outgoing2;
     std::vector<SavedConn> m_incoming2;
     bool m_valid{false};
+};
+
 // Helper function to get 2D distance from point to segment
 static inline float DistPointToSegment2D(const Vector3& pt, const Vector3& s0, const Vector3& s1) {
     float dx = s1.x - s0.x;
