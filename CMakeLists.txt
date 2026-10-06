@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(NavMeshCore VERSION 1.3.2 LANGUAGES C CXX)
+project(NavMeshCore VERSION 1.3.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -166,10 +166,15 @@ if(BUILD_EDITOR)
         ${IMGUI_SOURCES}
     )
 
+    if(WIN32)
+        list(APPEND EDITOR_SOURCES src/editor/res/nav_editor.rc)
+    endif()
+
     add_executable(nav_editor ${EDITOR_SOURCES})
     target_include_directories(nav_editor PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/src/editor
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/editor/res
         ${CMAKE_CURRENT_SOURCE_DIR}/src/editor/glad/include
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party
         ${IMGUI_DIR}

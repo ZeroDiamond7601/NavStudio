@@ -13,6 +13,7 @@
 #include "editor/ui/editor_ui.h"
 #include "editor/render/shader.h"
 #include "editor/render/editor_shaders.h"
+#include "editor/res/app_icon_data.h"
 
 #include <cstdio>
 #include <iostream>
@@ -382,6 +383,13 @@ int main(int argc, char* argv[]) {
         glfwTerminate();
         return -1;
     }
+
+    // Set application window & taskbar icon
+    GLFWimage iconImage;
+    iconImage.width = APP_ICON_WIDTH;
+    iconImage.height = APP_ICON_HEIGHT;
+    iconImage.pixels = const_cast<unsigned char*>(APP_ICON_PIXELS);
+    glfwSetWindowIcon(window, 1, &iconImage);
 
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // Enable VSync
