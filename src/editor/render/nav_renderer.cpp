@@ -269,6 +269,8 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
     if (selectedId != 0) {
         const NavArea* sel = nav.GetAreaByID(selectedId);
         if (sel) {
+            Vector3 c = sel->GetCenter();
+            c.z += (kZLift + 3.0f);
 
             // 4 Corner vertex handles
             SelectedHandleType cornerHandles[4] = {

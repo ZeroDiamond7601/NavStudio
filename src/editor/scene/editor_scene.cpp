@@ -496,7 +496,7 @@ static bool ProjectRayToAxis(const Ray& ray, const Vector3& axisOrigin, const Ve
     if (denom < 1e-4f) {
         Vector3 camToAxis = axisOrigin - ray.origin;
         Vector3 planeNorm(camToAxis.x, camToAxis.y, 0.0f);
-        if (planeNorm.LengthSq() > 1e-4f) {
+        if (planeNorm.LengthSquared() > 1e-4f) {
             planeNorm = planeNorm.Normalized();
             float denomP = ray.direction.Dot(planeNorm);
             if (std::abs(denomP) > 1e-4f) {
@@ -593,7 +593,7 @@ void EditorScene::StartDragHandle(SelectedHandleType handle, float screenX, floa
         axisDir = Vector3(0.0f, 0.0f, 1.0f);
     }
 
-    if (axisDir.LengthSq() > 0.5f) {
+    if (axisDir.LengthSquared() > 0.5f) {
         float tStart = 0.0f;
         if (ProjectRayToAxis(ray, m_dragStartCenter, axisDir, tStart)) {
             m_dragStartAxisT = tStart;

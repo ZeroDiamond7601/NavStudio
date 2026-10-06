@@ -31,6 +31,7 @@ struct Vector3 {
 
     inline float Length() const { return std::sqrt(x * x + y * y + z * z); }
     inline float LengthSquared() const { return x * x + y * y + z * z; }
+    inline float LengthSq() const { return LengthSquared(); }
     inline float Length2D() const { return std::sqrt(x * x + y * y); }
     inline float Length2DSquared() const { return x * x + y * y; }
 
