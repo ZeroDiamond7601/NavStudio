@@ -82,17 +82,14 @@ void EditorScene::ClearRecentFiles() {
 
 void EditorScene::SetGridSize(float size) {
     m_gridSize = std::max(1.0f, std::min(512.0f, size));
-    RebuildNavRenderer();
 }
 
 void EditorScene::IncreaseGridSize() {
     m_gridSize = std::min(512.0f, m_gridSize * 2.0f);
-    RebuildNavRenderer();
 }
 
 void EditorScene::DecreaseGridSize() {
     m_gridSize = std::max(1.0f, m_gridSize * 0.5f);
-    RebuildNavRenderer();
 }
 
 void EditorScene::ToggleGridSnap() {
@@ -101,7 +98,30 @@ void EditorScene::ToggleGridSnap() {
 
 void EditorScene::SetShowGroundGrid(bool show) {
     m_showGroundGrid = show;
-    RebuildNavRenderer();
+}
+
+void EditorScene::SnapGridElevationToSelection() {
+    NavArea* sel = GetSelectedArea();
+    if (sel) {
+        m_gridElevation = sel->GetCenter().z;
+        return;
+    }
+    const EditorEntity* ent = GetSelectedEntity();
+    if (ent) {
+        m_gridElevation = ent->origin.z;
+        return;
+    }
+}
+
+void EditorScene::SnapGridElevationToFloorUnderCamera(const Vector3& camPos) {
+    if (m_bsp) {
+        Vector3 groundPos;
+        if (m_bsp->GetGround(camPos, &groundPos, 4096.0f)) {
+            m_gridElevation = groundPos.z;
+            return;
+        }
+    }
+    m_gridElevation = SnapValue(camPos.z);
 }
 
 float EditorScene::SnapValue(float val) const {
@@ -127,6 +147,19 @@ bool EditorScene::LoadBSP(const std::string& bspPath) {
     m_entityRenderer.BuildFromBSP(*m_bsp);
     m_selectedEntityIndex = -1;
     AddRecentFile(bspPath);
+
+    // Set initial grid elevation to player spawn floor
+    for (const auto& ent : m_bsp->GetEntities()) {
+        if (ent.classname == "info_player_start" || ent.classname == "info_player_deathmatch") {
+            Vector3 gPos;
+            if (m_bsp->GetGround(ent.origin, &gPos, 1024.0f)) {
+                m_gridElevation = gPos.z;
+            } else {
+                m_gridElevation = ent.origin.z;
+            }
+            break;
+        }
+    }
 
     // Auto-detect corresponding .nav file in the same directory
     std::string candidateNav = bspPath;
@@ -439,11 +472,6 @@ const NavArea* EditorScene::GetSelectedArea() const {
 void EditorScene::RebuildNavRenderer() {
     if (m_nav && m_nav->IsLoaded()) {
         int axis = static_cast<int>(m_transformAxis);
-        float elev = 0.0f;
-        NavArea* sel = GetSelectedArea();
-        if (sel) {
-            elev = sel->GetCenter().z;
-        }
         m_navRenderer.BuildFromNav(
             *m_nav,
             m_selectedAreaId,
@@ -451,10 +479,7 @@ void EditorScene::RebuildNavRenderer() {
             (m_transformMode == TRANSFORM_CONNECT) ? m_connectHoverAreaId : 0,
             axis,
             m_hoveredHandle,
-            (m_isDraggingHandle ? m_draggedHandle : m_selectedHandle),
-            m_showGroundGrid,
-            m_gridSize,
-            elev
+            (m_isDraggingHandle ? m_draggedHandle : m_selectedHandle)
         );
     }
 }
@@ -462,6 +487,10 @@ void EditorScene::RebuildNavRenderer() {
 void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, const Vector3& camPos) {
     if (m_showBSP && m_bspRenderer.IsLoaded()) {
         m_bspRenderer.Render(meshShader, lineShader, mvp, m_bspMode, camPos);
+    }
+
+    if (m_showGroundGrid) {
+        m_gridRenderer.Render(lineShader, mvp, camPos, m_gridSize, m_gridElevation);
     }
 
     if (m_entityRenderer.IsLoaded()) {

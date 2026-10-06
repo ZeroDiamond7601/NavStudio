@@ -36,9 +36,7 @@ void NavRenderer::Clear() {
 bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t hoveredId,
                                uint32_t connectTargetId, int transformAxis,
                                SelectedHandleType hoveredHandle,
-                               SelectedHandleType selectedHandle,
-                               bool showGroundGrid, float gridSize,
-                               float gridElevation) {
+                               SelectedHandleType selectedHandle) {
     Clear();
     if (!nav.IsLoaded()) return false;
 
@@ -53,46 +51,6 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
     std::vector<uint32_t> lineIndices;
 
     const float kZLift = 2.0f; // Elevate above floor to prevent surface overlap
-
-    // Hammer-style 3D Ground Reference Grid
-    if (showGroundGrid && gridSize >= 4.0f) {
-        float gridRange = std::max(2048.0f, gridSize * 48.0f);
-        gridRange = std::min(4096.0f, gridRange);
-        int numLines = static_cast<int>(gridRange / gridSize);
-        numLines = std::min(64, numLines);
-
-        for (int i = -numLines; i <= numLines; ++i) {
-            float coord = static_cast<float>(i) * gridSize;
-            bool isMajor = (i % 8 == 0);
-            bool isOrigin = (i == 0);
-
-            // X-parallel line (sweeps along X, constant Y = coord)
-            float gr = 0.20f, gg = 0.25f, gb = 0.30f, ga = 0.35f;
-            if (isOrigin) {
-                gr = 0.85f; gg = 0.25f; gb = 0.25f; ga = 0.75f; // Origin X-axis: Red
-            } else if (isMajor) {
-                gr = 0.32f; gg = 0.40f; gb = 0.48f; ga = 0.50f;
-            }
-
-            uint32_t lx = static_cast<uint32_t>(lineVertices.size());
-            lineVertices.push_back({ -gridRange, coord, gridElevation, 0,0,1, 0,0, gr, gg, gb, ga });
-            lineVertices.push_back({  gridRange, coord, gridElevation, 0,0,1, 0,0, gr, gg, gb, ga });
-            lineIndices.push_back(lx + 0); lineIndices.push_back(lx + 1);
-
-            // Y-parallel line (sweeps along Y, constant X = coord)
-            gr = 0.20f; gg = 0.25f; gb = 0.30f; ga = 0.35f;
-            if (isOrigin) {
-                gr = 0.25f; gg = 0.85f; gb = 0.35f; ga = 0.75f; // Origin Y-axis: Green
-            } else if (isMajor) {
-                gr = 0.32f; gg = 0.40f; gb = 0.48f; ga = 0.50f;
-            }
-
-            uint32_t ly = static_cast<uint32_t>(lineVertices.size());
-            lineVertices.push_back({ coord, -gridRange, gridElevation, 0,0,1, 0,0, gr, gg, gb, ga });
-            lineVertices.push_back({ coord,  gridRange, gridElevation, 0,0,1, 0,0, gr, gg, gb, ga });
-            lineIndices.push_back(ly + 0); lineIndices.push_back(ly + 1);
-        }
-    }
 
     for (const NavArea* area : areas) {
         if (!area) continue;

@@ -13,6 +13,7 @@
 #include "editor/render/nav_renderer.h"
 #include "editor/render/entity_renderer.h"
 #include "editor/render/texture_manager.h"
+#include "editor/render/grid_renderer.h"
 
 #include "editor/scene/editor_handles.h"
 #include <vector>
@@ -128,6 +129,11 @@ public:
     void ToggleGridSnap();
     bool GetShowGroundGrid() const { return m_showGroundGrid; }
     void SetShowGroundGrid(bool show);
+    float GetGridElevation() const { return m_gridElevation; }
+    void SetGridElevation(float elev) { m_gridElevation = elev; }
+    void AdjustGridElevation(float delta) { m_gridElevation += delta; }
+    void SnapGridElevationToSelection();
+    void SnapGridElevationToFloorUnderCamera(const Vector3& camPos);
     float SnapValue(float val) const;
     Vector3 SnapVector(const Vector3& v) const;
 
@@ -193,6 +199,7 @@ private:
     std::unique_ptr<NavMesh> m_nav;
     BSPRenderer m_bspRenderer;
     NavRenderer m_navRenderer;
+    GridRenderer m_gridRenderer;
     EntityRenderer m_entityRenderer;
     TextureManager m_textureManager;
 
@@ -217,6 +224,7 @@ private:
     float m_gridSize{32.0f};
     bool m_gridSnap{true};
     bool m_showGroundGrid{true};
+    float m_gridElevation{0.0f};
 
     // Handles
     SelectedHandleType m_hoveredHandle{HANDLE_NONE};

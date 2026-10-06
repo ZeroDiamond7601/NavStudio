@@ -341,7 +341,7 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
 
             if (ImGui::BeginMenu("Grid Size")) {
-                float sizes[] = { 4.0f, 8.0f, 16.0f, 32.0f, 64.0f, 128.0f, 256.0f };
+                float sizes[] = { 1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f, 64.0f, 128.0f, 256.0f, 512.0f };
                 for (float s : sizes) {
                     char label[32];
                     std::snprintf(label, sizeof(label), "%.0f units", s);
@@ -355,6 +355,30 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                 }
                 if (ImGui::MenuItem("Increase Grid Size", "]")) {
                     scene.IncreaseGridSize();
+                }
+                ImGui::EndMenu();
+            }
+
+            if (ImGui::BeginMenu("Grid Elevation")) {
+                float elev = scene.GetGridElevation();
+                char elevBuf[32];
+                std::snprintf(elevBuf, sizeof(elevBuf), "Current: %.0f units", elev);
+                ImGui::TextDisabled("%s", elevBuf);
+                ImGui::Separator();
+                if (ImGui::MenuItem("Raise Grid Elevation", "Page Up")) {
+                    scene.AdjustGridElevation(scene.GetGridSize());
+                }
+                if (ImGui::MenuItem("Lower Grid Elevation", "Page Down")) {
+                    scene.AdjustGridElevation(-scene.GetGridSize());
+                }
+                if (ImGui::MenuItem("Snap Grid to Floor under Cam", "End")) {
+                    scene.SnapGridElevationToFloorUnderCamera(camera.GetPosition());
+                }
+                if (ImGui::MenuItem("Snap Grid to Selection")) {
+                    scene.SnapGridElevationToSelection();
+                }
+                if (ImGui::MenuItem("Reset Grid Elevation to 0", "Home")) {
+                    scene.SetGridElevation(0.0f);
                 }
                 ImGui::EndMenu();
             }
@@ -491,13 +515,13 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
 
         ImGui::Text("Hammer Grid:");
         float curGrid = scene.GetGridSize();
-        if (ImGui::Button("[-]##decgrid", ImVec2(28, 22))) {
+        if (ImGui::Button("[-]##decgrid", ImVec2(24, 22))) {
             scene.DecreaseGridSize();
         }
         ImGui::SameLine();
         ImGui::Text("Grid: %.0f", curGrid);
         ImGui::SameLine();
-        if (ImGui::Button("[+]##incgrid", ImVec2(28, 22))) {
+        if (ImGui::Button("[+]##incgrid", ImVec2(24, 22))) {
             scene.IncreaseGridSize();
         }
 
@@ -505,9 +529,33 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         if (ImGui::Checkbox("Snap to Grid", &gridSnap)) {
             scene.SetGridSnap(gridSnap);
         }
+        ImGui::SameLine();
         bool showGrid = scene.GetShowGroundGrid();
         if (ImGui::Checkbox("Ground Grid", &showGrid)) {
             scene.SetShowGroundGrid(showGrid);
+        }
+
+        float curElev = scene.GetGridElevation();
+        ImGui::Text("Elev: %.0f", curElev);
+        ImGui::SameLine();
+        if (ImGui::Button("[-]##decelev", ImVec2(22, 20))) {
+            scene.AdjustGridElevation(-curGrid);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("[+]##incelev", ImVec2(22, 20))) {
+            scene.AdjustGridElevation(curGrid);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Floor##snpelev", ImVec2(40, 20))) {
+            scene.SnapGridElevationToFloorUnderCamera(camera.GetPosition());
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Sel##snpelevsel", ImVec2(32, 20))) {
+            scene.SnapGridElevationToSelection();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("0##zerorad", ImVec2(20, 20))) {
+            scene.SetGridElevation(0.0f);
         }
 
         ImGui::Spacing();
@@ -1161,6 +1209,7 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
         uint32_t selId = scene.GetSelectedAreaID();
         float grid = scene.GetGridSize();
         bool snap = scene.GetGridSnap();
+        float elev = scene.GetGridElevation();
 
         size_t entCount = scene.GetEntityRenderer().GetEntityCount();
         const auto& entR = scene.GetEntityRenderer();
@@ -1169,9 +1218,9 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
         if (selEntIdx >= 0 && selEntIdx < static_cast<int>(entCount)) {
             const auto* selEnt = scene.GetSelectedEntity();
             if (selEnt) {
-                ImGui::Text("Map: %s | Entity #%d (%s) @ (%.0f, %.0f, %.0f) | Entities: %zu | Grid: %.0f [%s]",
+                ImGui::Text("Map: %s | Entity #%d (%s) @ (%.0f, %.0f, %.0f) | Entities: %zu | Grid: %.0f [%s] Elev: %.0f",
                     bspName, selEnt->index, selEnt->classname.c_str(), selEnt->origin.x, selEnt->origin.y, selEnt->origin.z,
-                    entCount, grid, snap ? "SNAP" : "FREE");
+                    entCount, grid, snap ? "SNAP" : "FREE", elev);
             }
         } else if (selId != 0 && scene.HasNAV()) {
             const NavArea* sel = scene.GetNAV().GetAreaByID(selId);
@@ -1183,17 +1232,17 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
                 if (h == HANDLE_NONE) h = scene.GetHoveredHandle();
                 const char* hName = (h != HANDLE_NONE) ? GetHandleName(h) : "None";
 
-                ImGui::Text("Map: %s | NavArea #%u [W: %.0f, L: %.0f @ (%.0f, %.0f, %.0f)] | Handle: %s | Ents: %zu | Grid: %.0f [%s]",
-                    bspName, selId, w, l, c.x, c.y, c.z, hName, entCount, grid, snap ? "SNAP" : "FREE");
+                ImGui::Text("Map: %s | NavArea #%u [W: %.0f, L: %.0f @ (%.0f, %.0f, %.0f)] | Handle: %s | Ents: %zu | Grid: %.0f [%s] Elev: %.0f",
+                    bspName, selId, w, l, c.x, c.y, c.z, hName, entCount, grid, snap ? "SNAP" : "FREE", elev);
             }
         } else {
             if (entCount > 0) {
-                ImGui::Text("Map: %s | NavAreas: %zu | Entities: %zu (CT: %d, T: %d, Obj: %d, Light: %d) | Grid: %.0f [%s] | Cam: (%.0f, %.0f, %.0f)",
+                ImGui::Text("Map: %s | NavAreas: %zu | Entities: %zu (CT: %d, T: %d, Obj: %d, Light: %d) | Grid: %.0f [%s] Elev: %.0f | Cam: (%.0f, %.0f, %.0f)",
                     bspName, areaCount, entCount, entR.GetSpawnCTCount(), entR.GetSpawnTCount(), entR.GetObjectiveCount(), entR.GetLightCount(),
-                    grid, snap ? "SNAP" : "FREE", camera.GetPosition().x, camera.GetPosition().y, camera.GetPosition().z);
+                    grid, snap ? "SNAP" : "FREE", elev, camera.GetPosition().x, camera.GetPosition().y, camera.GetPosition().z);
             } else {
-                ImGui::Text("Map: %s | NavAreas: %zu | No Selection | Grid: %.0f [%s] | Cam: (%.0f, %.0f, %.0f)",
-                    bspName, areaCount, grid, snap ? "SNAP" : "FREE", camera.GetPosition().x, camera.GetPosition().y, camera.GetPosition().z);
+                ImGui::Text("Map: %s | NavAreas: %zu | No Selection | Grid: %.0f [%s] Elev: %.0f | Cam: (%.0f, %.0f, %.0f)",
+                    bspName, areaCount, grid, snap ? "SNAP" : "FREE", elev, camera.GetPosition().x, camera.GetPosition().y, camera.GetPosition().z);
             }
         }
     }
@@ -1231,6 +1280,8 @@ void EditorUI::RenderHelpModal() {
         ImGui::BulletText("Shift + M: Merge selected area with adjacent collinear area");
         ImGui::BulletText("[ / ]: Decrease / Increase Hammer grid size (1 to 512)");
         ImGui::BulletText("Shift + W: Toggle Grid Snapping");
+        ImGui::BulletText("Page Up / Page Down: Raise / Lower Grid Elevation");
+        ImGui::BulletText("Home / End: Reset Grid Elevation to 0 / Snap to Floor");
         ImGui::BulletText("R: Rotate area orientation 90 degrees");
         ImGui::BulletText("C: Connect Mode (Left-Click target: 2-Way, Shift+Click: 1-Way)");
         ImGui::BulletText("Shift + D: Duplicate selected area");

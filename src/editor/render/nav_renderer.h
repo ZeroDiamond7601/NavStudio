@@ -25,9 +25,7 @@ public:
     bool BuildFromNav(const NavMesh& nav, uint32_t selectedId = 0, uint32_t hoveredId = 0,
                       uint32_t connectTargetId = 0, int transformAxis = 0,
                       SelectedHandleType hoveredHandle = HANDLE_NONE,
-                      SelectedHandleType selectedHandle = HANDLE_NONE,
-                      bool showGroundGrid = false, float gridSize = 32.0f,
-                      float gridElevation = 0.0f);
+                      SelectedHandleType selectedHandle = HANDLE_NONE);
     void Clear();
 
     void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp);

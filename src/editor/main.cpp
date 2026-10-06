@@ -186,6 +186,14 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 g_activeScene->IncreaseGridSize();
             } else if (key == GLFW_KEY_W && (mods & GLFW_MOD_SHIFT) != 0) { // Shift+W: Toggle snap
                 g_activeScene->ToggleGridSnap();
+            } else if (key == GLFW_KEY_PAGE_UP) { // Page Up: Raise grid elevation
+                g_activeScene->AdjustGridElevation(g_activeScene->GetGridSize());
+            } else if (key == GLFW_KEY_PAGE_DOWN) { // Page Down: Lower grid elevation
+                g_activeScene->AdjustGridElevation(-g_activeScene->GetGridSize());
+            } else if (key == GLFW_KEY_HOME) { // Home: Reset grid elevation
+                g_activeScene->SetGridElevation(0.0f);
+            } else if (key == GLFW_KEY_END) { // End: Snap grid to floor
+                g_activeScene->SnapGridElevationToFloorUnderCamera(g_camera.GetPosition());
             } else if (key == GLFW_KEY_F3) { // F3: Toggle Entities
                 auto& entR = g_activeScene->GetEntityRenderer();
                 entR.SetShowEntities(!entR.GetShowEntities());
