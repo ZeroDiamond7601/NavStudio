@@ -527,3 +527,31 @@ bool NavMesh::DisconnectAreas(uint32_t fromId, uint32_t toId, bool bidirectional
     }
     return true;
 }
+
+void NavMesh::RebuildGrid(float cellSize) {
+    m_grid.Reset();
+    if (m_areas.empty()) {
+        m_grid.Initialize(0.0f, 0.0f, 0.0f, 0.0f, cellSize);
+        return;
+    }
+
+    float minX = 999999.0f, minY = 999999.0f;
+    float maxX = -999999.0f, maxY = -999999.0f;
+
+    for (NavArea* area : m_areas) {
+        if (!area) continue;
+        const auto& ext = area->GetExtent();
+        minX = std::min(minX, ext.lo.x);
+        minY = std::min(minY, ext.lo.y);
+        maxX = std::max(maxX, ext.hi.x);
+        maxY = std::max(maxY, ext.hi.y);
+    }
+
+    m_grid.Initialize(minX, maxX, minY, maxY, cellSize);
+    for (NavArea* area : m_areas) {
+        if (area) {
+            m_grid.AddArea(area);
+        }
+    }
+}
+

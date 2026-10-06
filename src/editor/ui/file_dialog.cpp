@@ -18,6 +18,7 @@ namespace FileDialog {
 #endif
 #include <windows.h>
 #include <commdlg.h>
+#include <shlobj.h>
 
 namespace FileDialog {
 
@@ -58,6 +59,25 @@ std::string SaveFile(const char* filter, const char* defaultExt, const char* tit
     return "";
 }
 
+std::string OpenFolder(const char* title) {
+    BROWSEINFOA bi;
+    ZeroMemory(&bi, sizeof(bi));
+    bi.hwndOwner = GetActiveWindow();
+    bi.lpszTitle = title ? title : "Select Folder";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+
+    LPITEMIDLIST pidl = SHBrowseForFolderA(&bi);
+    if (pidl) {
+        char path[MAX_PATH];
+        if (SHGetPathFromIDListA(pidl, path)) {
+            CoTaskMemFree(pidl);
+            return std::string(path);
+        }
+        CoTaskMemFree(pidl);
+    }
+    return "";
+}
+
 } // namespace FileDialog
 
 #else
@@ -82,6 +102,22 @@ std::string OpenFile(const char* /*filter*/, const char* title) {
 
 std::string SaveFile(const char* /*filter*/, const char* /*defaultExt*/, const char* title) {
     std::string cmd = "zenity --file-selection --save --confirm-overwrite --title=\"" + std::string(title ? title : "Save File") + "\" 2>/dev/null";
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return "";
+    char buffer[1024];
+    std::string result = "";
+    if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        result = buffer;
+        while (!result.empty() && (result.back() == '\n' || result.back() == '\r')) {
+            result.pop_back();
+        }
+    }
+    pclose(pipe);
+    return result;
+}
+
+std::string OpenFolder(const char* title) {
+    std::string cmd = "zenity --file-selection --directory --title=\"" + std::string(title ? title : "Select Folder") + "\" 2>/dev/null";
     FILE* pipe = popen(cmd.c_str(), "r");
     if (!pipe) return "";
     char buffer[1024];

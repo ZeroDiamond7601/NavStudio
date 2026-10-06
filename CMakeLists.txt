@@ -56,6 +56,7 @@ set(CORE_SOURCES
     src/nav/nav_grid.cpp
     src/nav/nav_path.cpp
     src/nav/nav_file.cpp
+    src/nav/nav_generator.cpp
 )
 
 add_library(nav_core STATIC ${CORE_SOURCES})
@@ -181,7 +182,7 @@ if(BUILD_EDITOR)
     )
 
     if(WIN32)
-        target_link_libraries(nav_editor PRIVATE comdlg32)
+        target_link_libraries(nav_editor PRIVATE comdlg32 shell32 ole32)
         set_target_properties(nav_editor PROPERTIES OUTPUT_NAME "nav_editor")
     endif()
 endif()

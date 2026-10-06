@@ -15,6 +15,7 @@ public:
     bool LoadFromMemory(const uint8_t* data, size_t size);
     void Unload();
     bool IsLoaded() const { return m_loaded; }
+    size_t GetFileSize() const { return m_rawData.size(); }
 
     // Map queries
     int GetLeafIDAtPoint(const Vector3& origin) const;

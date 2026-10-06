@@ -36,10 +36,14 @@ public:
     NavGrid& GetGrid() { return m_grid; }
 
     uint32_t GetVersion() const { return m_version; }
+    void SetVersion(uint32_t version) { m_version = version; }
     uint32_t GetBspSize() const { return m_bspSize; }
+    void SetBspSize(uint32_t size) { m_bspSize = size; }
+    void SetLoaded(bool loaded) { m_loaded = loaded; }
 
     const std::vector<std::string>& GetPlaceNames() const { return m_placeNames; }
     std::string GetPlaceName(uint16_t placeId) const;
+    void RebuildGrid(float cellSize = 300.0f);
 
     void BuildLadders(const BSPFile* bsp);
     const std::vector<NavLadder*>& GetLadders() const { return m_ladders; }

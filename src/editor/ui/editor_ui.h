@@ -31,11 +31,15 @@ private:
     void RenderTransformHUD(EditorScene& scene, CommandManager& cmdMgr);
     void RenderEntityHierarchy(EditorScene& scene, Camera& camera);
     void RenderEntityInspector(EditorScene& scene, Camera& camera);
+    void RenderGenerateModal(EditorScene& scene);
+    void RenderBatchGenerateModal(EditorScene& scene);
 
     bool m_mouseOverUI;
     bool m_requestQuit;
     bool m_showHelpModal;
     bool m_showOpenPathModal;
+    bool m_showGenerateModal{false};
+    bool m_showBatchGenerateModal{false};
     char m_searchFilter[64];
     char m_entityFilter[64];
     int m_entityCategoryFilter{-1};
@@ -43,6 +47,19 @@ private:
     char m_openPathBuffer[512];
     int m_openPathType; // 0 = BSP, 1 = NAV
     std::string m_openPathStatusMessage;
+
+    NavGenerateOptions m_genOptions;
+    std::string m_generateStatusText;
+
+    char m_batchMapDirBuffer[512];
+    char m_batchOutDirBuffer[512];
+    bool m_batchOverwrite{false};
+    bool m_batchRecursive{false};
+    int m_batchThreads{0};
+    bool m_batchRunning{false};
+    std::vector<NavGenerator::BatchItem> m_batchItems;
+    size_t m_batchCompletedCount{0};
+    size_t m_batchTotalCount{0};
 
     int m_connectTargetInputId{0};
     int m_connectDirSelection{0};

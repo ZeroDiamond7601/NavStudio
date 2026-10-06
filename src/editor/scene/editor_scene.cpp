@@ -171,6 +171,32 @@ bool EditorScene::SaveNAV(const std::string& navPath) {
     return true;
 }
 
+bool EditorScene::GenerateNavMesh(const NavGenerateOptions& options) {
+    if (!m_bsp || !m_bsp->IsLoaded()) {
+        std::fprintf(stderr, "[EditorScene] Cannot generate NavMesh: no BSP loaded\n");
+        return false;
+    }
+
+    auto newNav = std::make_unique<NavMesh>();
+    NavGenerateResult res = NavGenerator::Generate(*m_bsp, *newNav, options, nullptr);
+    if (!res.success) {
+        std::fprintf(stderr, "[EditorScene] Generation failed: %s\n", res.errorMessage.c_str());
+        return false;
+    }
+
+    m_nav = std::move(newNav);
+    if (m_navPath.empty() && !m_bspPath.empty()) {
+        size_t dotPos = m_bspPath.find_last_of('.');
+        if (dotPos != std::string::npos) {
+            m_navPath = m_bspPath.substr(0, dotPos) + ".nav";
+        }
+    }
+    m_selectedAreaId = 0;
+    m_hoveredAreaId = 0;
+    RebuildNavRenderer();
+    return true;
+}
+
 void EditorScene::StartAsyncLoad(const std::string& bspOrNavPath, const std::string& explicitNavPath) {
     if (m_loadThread.joinable()) {
         m_loadThread.join();

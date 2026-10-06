@@ -8,6 +8,7 @@
 #include <thread>
 #include "bsp/bsp_file.h"
 #include "nav/nav_file.h"
+#include "nav/nav_generator.h"
 #include "editor/render/bsp_renderer.h"
 #include "editor/render/nav_renderer.h"
 #include "editor/render/entity_renderer.h"
@@ -45,6 +46,7 @@ public:
     bool LoadBSP(const std::string& bspPath);
     bool LoadNAV(const std::string& navPath);
     bool SaveNAV(const std::string& navPath = "");
+    bool GenerateNavMesh(const NavGenerateOptions& options = NavGenerateOptions());
 
     // Asynchronous loading with progress and stage tracking
     void StartAsyncLoad(const std::string& bspOrNavPath, const std::string& explicitNavPath = "");

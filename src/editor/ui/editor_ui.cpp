@@ -5,19 +5,40 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <filesystem>
+#include <thread>
+
+namespace fs = std::filesystem;
 
 EditorUI::EditorUI()
     : m_mouseOverUI(false)
     , m_requestQuit(false)
     , m_showHelpModal(false)
     , m_showOpenPathModal(false)
+    , m_showGenerateModal(false)
+    , m_showBatchGenerateModal(false)
     , m_openPathType(0)
+    , m_batchOverwrite(false)
+    , m_batchRecursive(false)
+    , m_batchThreads(std::max(1u, std::thread::hardware_concurrency()))
+    , m_batchRunning(false)
+    , m_batchCompletedCount(0)
+    , m_batchTotalCount(0)
 {
     m_searchFilter[0] = '\0';
     m_entityFilter[0] = '\0';
     m_entityCategoryFilter = -1;
     m_placeEditBuffer[0] = '\0';
     m_openPathBuffer[0] = '\0';
+    m_batchMapDirBuffer[0] = '\0';
+    m_batchOutDirBuffer[0] = '\0';
+
+    // Auto-detect default Half-Life / Counter-Strike maps path
+    const std::string defaultMapsPath = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Half-Life\\cstrike\\maps";
+    if (fs::exists(defaultMapsPath)) {
+        std::strncpy(m_batchMapDirBuffer, defaultMapsPath.c_str(), sizeof(m_batchMapDirBuffer) - 1);
+        m_batchMapDirBuffer[sizeof(m_batchMapDirBuffer) - 1] = '\0';
+    }
 }
 
 EditorUI::~EditorUI() {
@@ -80,6 +101,9 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
             if (!path.empty()) {
                 scene.SaveNAV(path);
             }
+        } else if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_G, false) && scene.HasBSP()) {
+            m_showGenerateModal = true;
+            m_generateStatusText.clear();
         }
     }
 
@@ -128,6 +152,14 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
 
     if (m_showOpenPathModal) {
         RenderOpenPathModal(scene);
+    }
+
+    if (m_showGenerateModal) {
+        RenderGenerateModal(scene);
+    }
+
+    if (m_showBatchGenerateModal) {
+        RenderBatchGenerateModal(scene);
     }
 }
 
@@ -386,6 +418,15 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                 camera.FocusOn(sel->GetCenter());
             }
 
+            ImGui::Separator();
+            if (ImGui::MenuItem("Auto-Generate NavMesh...", "Ctrl+G", false, scene.HasBSP())) {
+                m_showGenerateModal = true;
+                m_generateStatusText.clear();
+            }
+            if (ImGui::MenuItem("Batch Generate NavMeshes...", nullptr)) {
+                m_showBatchGenerateModal = true;
+            }
+
             ImGui::EndMenu();
         }
 
@@ -427,6 +468,21 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
                     }
                 }
             }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::Text("Generation Tools:");
+        if (ImGui::Button("Auto-Generate [Ctrl+G]", ImVec2(-1, 26))) {
+            if (scene.HasBSP()) {
+                m_showGenerateModal = true;
+                m_generateStatusText.clear();
+            }
+        }
+        if (ImGui::Button("Batch Generate...", ImVec2(-1, 26))) {
+            m_showBatchGenerateModal = true;
         }
 
         ImGui::Spacing();
@@ -1418,3 +1474,229 @@ void EditorUI::RenderTransformHUD(EditorScene& scene, CommandManager& /*cmdMgr*/
     }
     ImGui::End();
 }
+
+void EditorUI::RenderGenerateModal(EditorScene& scene) {
+    ImGui::OpenPopup("Auto-Generate NavMesh");
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(460, 420), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("Auto-Generate NavMesh", &m_showGenerateModal, ImGuiWindowFlags_AlwaysAutoResize)) {
+        std::string mapName = scene.GetBSPPath();
+        size_t slash = mapName.find_last_of("/\\");
+        if (slash != std::string::npos) mapName = mapName.substr(slash + 1);
+
+        ImGui::Text("Map: %s", mapName.c_str());
+        ImGui::TextDisabled("Analyzes BSP walkability geometry and generates Valve .nav mesh.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::Text("Generation Parameters:");
+        ImGui::SliderFloat("Grid Step Size", &m_genOptions.stepSize, 15.0f, 40.0f, "%.1f units");
+        ImGui::SliderFloat("Max Step Height", &m_genOptions.maxStepHeight, 8.0f, 32.0f, "%.1f units");
+        ImGui::SliderFloat("Max Jump Height", &m_genOptions.maxJumpHeight, 18.0f, 64.0f, "%.1f units");
+        ImGui::SliderFloat("Max Drop Height", &m_genOptions.maxDrop, 100.0f, 600.0f, "%.0f units");
+
+        ImGui::Spacing();
+        ImGui::Checkbox("Detect Crouch Passages", &m_genOptions.generateCrouch);
+        ImGui::Checkbox("Connect Jump-Down Drops", &m_genOptions.generateJumpConnections);
+        ImGui::Checkbox("Link Ladder Entities", &m_genOptions.generateLadders);
+        ImGui::Checkbox("Merge Coplanar Adjacent Areas", &m_genOptions.mergeAreas);
+
+        if (!m_generateStatusText.empty()) {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", m_generateStatusText.c_str());
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Generate NavMesh", ImVec2(160, 28))) {
+            bool ok = scene.GenerateNavMesh(m_genOptions);
+            if (ok) {
+                m_showGenerateModal = false;
+                ImGui::CloseCurrentPopup();
+            } else {
+                m_generateStatusText = "Generation failed. Verify map geometry and spawns.";
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(100, 28))) {
+            m_showGenerateModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderBatchGenerateModal(EditorScene& /*scene*/) {
+    ImGui::OpenPopup("Batch Mass-Produce NavMeshes");
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(680, 520), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("Batch Mass-Produce NavMeshes", &m_showBatchGenerateModal, ImGuiWindowFlags_None)) {
+        ImGui::Text("Batch NavMesh Mass-Production");
+        ImGui::TextDisabled("Generate navigation meshes for multiple GoldSrc BSP maps concurrently.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::Text("Maps Directory (containing .bsp files):");
+        ImGui::SetNextItemWidth(-90);
+        ImGui::InputText("##BatchMapsDir", m_batchMapDirBuffer, sizeof(m_batchMapDirBuffer));
+        ImGui::SameLine();
+        if (ImGui::Button("Browse...##MapsDir", ImVec2(80, 22))) {
+            std::string selected = FileDialog::OpenFolder("Select Maps Directory");
+            if (!selected.empty()) {
+                std::strncpy(m_batchMapDirBuffer, selected.c_str(), sizeof(m_batchMapDirBuffer) - 1);
+                m_batchMapDirBuffer[sizeof(m_batchMapDirBuffer) - 1] = '\0';
+            }
+        }
+
+        ImGui::Text("Output Directory (leave empty to save alongside BSP files):");
+        ImGui::SetNextItemWidth(-90);
+        ImGui::InputText("##BatchOutDir", m_batchOutDirBuffer, sizeof(m_batchOutDirBuffer));
+        ImGui::SameLine();
+        if (ImGui::Button("Browse...##OutDir", ImVec2(80, 22))) {
+            std::string selected = FileDialog::OpenFolder("Select Output Directory");
+            if (!selected.empty()) {
+                std::strncpy(m_batchOutDirBuffer, selected.c_str(), sizeof(m_batchOutDirBuffer) - 1);
+                m_batchOutDirBuffer[sizeof(m_batchOutDirBuffer) - 1] = '\0';
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Columns(2, "BatchOptionsColumns", false);
+        ImGui::SliderFloat("Step Size", &m_genOptions.stepSize, 15.0f, 40.0f, "%.1f");
+        ImGui::SliderInt("Threads", &m_batchThreads, 1, 32);
+        ImGui::NextColumn();
+        ImGui::Checkbox("Overwrite Existing .nav", &m_batchOverwrite);
+        ImGui::Checkbox("Recursive Directory Scan", &m_batchRecursive);
+        ImGui::Columns(1);
+
+        ImGui::Spacing();
+        if (ImGui::Button("Scan Maps", ImVec2(120, 24)) && !m_batchRunning) {
+            m_batchItems.clear();
+            std::string dir = m_batchMapDirBuffer;
+            if (!dir.empty() && fs::exists(dir)) {
+                try {
+                    auto scanDir = [&](const fs::path& p) {
+                        if (fs::is_regular_file(p) && p.extension() == ".bsp") {
+                            NavGenerator::BatchItem item;
+                            item.bspPath = p.string();
+                            fs::path outP = (m_batchOutDirBuffer[0] != '\0')
+                                ? fs::path(m_batchOutDirBuffer) / (p.stem().string() + ".nav")
+                                : p.parent_path() / (p.stem().string() + ".nav");
+                            item.navPath = outP.string();
+                            m_batchItems.push_back(item);
+                        }
+                    };
+
+                    if (m_batchRecursive) {
+                        for (const auto& entry : fs::recursive_directory_iterator(dir)) {
+                            scanDir(entry.path());
+                        }
+                    } else {
+                        for (const auto& entry : fs::directory_iterator(dir)) {
+                            scanDir(entry.path());
+                        }
+                    }
+                    std::sort(m_batchItems.begin(), m_batchItems.end(), [](const auto& a, const auto& b) {
+                        return a.bspPath < b.bspPath;
+                    });
+                } catch (...) {}
+            }
+        }
+        ImGui::SameLine();
+        ImGui::Text("Found %zu maps", m_batchItems.size());
+
+        // Progress bar
+        if (m_batchTotalCount > 0) {
+            float frac = static_cast<float>(m_batchCompletedCount) / m_batchTotalCount;
+            char progressBuf[64];
+            std::snprintf(progressBuf, sizeof(progressBuf), "%zu / %zu Maps (%.0f%%)",
+                          m_batchCompletedCount, m_batchTotalCount, frac * 100.0f);
+            ImGui::ProgressBar(frac, ImVec2(-1, 20), progressBuf);
+        }
+
+        // Map list table
+        ImGui::BeginChild("BatchItemsTableChild", ImVec2(-1, 180), true);
+        if (ImGui::BeginTable("BatchMapTable", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollY)) {
+            ImGui::TableSetupColumn("Map", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Target NAV", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+            ImGui::TableHeadersRow();
+
+            for (const auto& item : m_batchItems) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                fs::path bp(item.bspPath);
+                ImGui::Text("%s", bp.filename().string().c_str());
+
+                ImGui::TableSetColumnIndex(1);
+                fs::path np(item.navPath);
+                ImGui::Text("%s", np.filename().string().c_str());
+
+                ImGui::TableSetColumnIndex(2);
+                if (item.result.success) {
+                    ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "Done (%zu areas)", item.result.areasGenerated);
+                } else if (!item.result.errorMessage.empty()) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", item.result.errorMessage.c_str());
+                } else {
+                    ImGui::TextDisabled("Ready");
+                }
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndChild();
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Start Batch Generation", ImVec2(180, 30)) && !m_batchRunning && !m_batchItems.empty()) {
+            m_batchRunning = true;
+            m_batchCompletedCount = 0;
+            m_batchTotalCount = m_batchItems.size();
+
+            std::vector<std::string> bspList;
+            for (const auto& it : m_batchItems) bspList.push_back(it.bspPath);
+            std::string outDir = m_batchOutDirBuffer;
+            NavGenerateOptions opts = m_genOptions;
+            opts.maxThreads = m_batchThreads;
+            bool overwrite = m_batchOverwrite;
+
+            std::thread([this, bspList, outDir, opts, overwrite]() {
+                auto res = NavGenerator::GenerateBatch(
+                    bspList, outDir, opts, overwrite,
+                    [this](size_t done, size_t /*total*/, const NavGenerator::BatchItem& item) {
+                        m_batchCompletedCount = done;
+                        for (auto& bi : m_batchItems) {
+                            if (bi.bspPath == item.bspPath) {
+                                bi.result = item.result;
+                                break;
+                            }
+                        }
+                    }
+                );
+                (void)res;
+                m_batchRunning = false;
+            }).detach();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Close", ImVec2(100, 30)) && !m_batchRunning) {
+            m_showBatchGenerateModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+

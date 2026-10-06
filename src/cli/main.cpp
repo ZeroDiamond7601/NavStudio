@@ -2,22 +2,175 @@
 #include <iomanip>
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <chrono>
 #include "../bsp/bsp_file.h"
 #include "../nav/nav_file.h"
 #include "../nav/nav_path.h"
+#include "../nav/nav_generator.h"
+
+static void PrintHelp() {
+    std::cout << "Usage:\n";
+    std::cout << "  nav_cli <path_to_bsp_or_nav> [optional_second_file]\n";
+    std::cout << "  nav_cli generate <map.bsp> [output.nav] [options]\n";
+    std::cout << "  nav_cli batch <maps_directory> [options]\n\n";
+    std::cout << "Commands:\n";
+    std::cout << "  generate <map.bsp> [out.nav]  Auto-generate navigation mesh for a BSP map\n";
+    std::cout << "  batch <maps_dir>              Mass-produce navigation meshes for all maps in directory\n";
+    std::cout << "  <map.bsp|map.nav>             Verify BSP data, NAV headers, places, and A* pathfinding\n\n";
+    std::cout << "Options:\n";
+    std::cout << "  --output, -o <dir|file>       Specify output directory or file path\n";
+    std::cout << "  --step <float>                Grid step size (default: 25.0)\n";
+    std::cout << "  --threads <int>               Worker thread count for batch mode (default: CPU cores)\n";
+    std::cout << "  --force, -f                   Overwrite existing .nav files\n";
+    std::cout << "  --recursive, -r               Recursively search directories for BSP files\n";
+    std::cout << "  --no-jump                     Disable jump drop connections\n";
+    std::cout << "  --no-merge                    Disable adjacent coplanar area merging\n\n";
+    std::cout << "Examples:\n";
+    std::cout << "  nav_cli generate cstrike/maps/de_dust2.bsp\n";
+    std::cout << "  nav_cli batch \"C:\\Steam\\Half-Life\\cstrike\\maps\" --threads 8\n";
+    std::cout << "  nav_cli de_dust2.bsp de_dust2.nav\n";
+}
+
+static int HandleGenerate(int argc, char* argv[]) {
+    if (argc < 3) {
+        std::cerr << "Error: 'generate' requires at least a path to a .bsp file.\n";
+        PrintHelp();
+        return 1;
+    }
+
+    std::string bspPath = argv[2];
+    std::string navPath = "";
+    NavGenerateOptions options;
+
+    for (int i = 3; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--output" || arg == "-o") {
+            if (i + 1 < argc) navPath = argv[++i];
+        } else if (arg == "--step") {
+            if (i + 1 < argc) options.stepSize = std::stof(argv[++i]);
+        } else if (arg == "--no-jump") {
+            options.generateJumpConnections = false;
+        } else if (arg == "--no-merge") {
+            options.mergeAreas = false;
+        } else if (navPath.empty() && arg.size() > 4 && arg.substr(arg.size() - 4) == ".nav") {
+            navPath = arg;
+        }
+    }
+
+    if (navPath.empty()) {
+        if (bspPath.size() > 4 && bspPath.substr(bspPath.size() - 4) == ".bsp") {
+            navPath = bspPath.substr(0, bspPath.size() - 4) + ".nav";
+        } else {
+            navPath = bspPath + ".nav";
+        }
+    }
+
+    std::cout << "[GENERATE] Map: " << bspPath << "\n";
+    std::cout << "[GENERATE] Output: " << navPath << "\n";
+    std::cout << "[GENERATE] Grid Step: " << options.stepSize << " units\n\n";
+
+    auto progressCallback = [](float progress, const std::string& msg) {
+        std::cout << "\r[" << std::setw(3) << static_cast<int>(progress * 100.0f) << "%] "
+                  << msg << std::string(20, ' ') << std::flush;
+    };
+
+    auto res = NavGenerator::GenerateToFile(bspPath, navPath, options, progressCallback);
+    std::cout << "\n\n";
+
+    if (res.success) {
+        std::cout << "[SUCCESS] Generated NavMesh successfully!\n";
+        std::cout << "  -> Total Areas:       " << res.areasGenerated << "\n";
+        std::cout << "  -> Total Connections: " << res.connectionsCreated << "\n";
+        std::cout << "  -> Linked Ladders:    " << res.laddersLinked << "\n";
+        std::cout << "  -> Elapsed Time:      " << std::fixed << std::setprecision(2) << res.durationSeconds << " s\n";
+        return 0;
+    } else {
+        std::cerr << "[ERROR] Generation failed: " << res.errorMessage << "\n";
+        return 1;
+    }
+}
+
+static int HandleBatch(int argc, char* argv[]) {
+    if (argc < 3) {
+        std::cerr << "Error: 'batch' requires a directory path containing .bsp files.\n";
+        PrintHelp();
+        return 1;
+    }
+
+    std::string dirPath = argv[2];
+    std::string outDir = "";
+    bool overwrite = false;
+    bool recursive = false;
+    NavGenerateOptions options;
+
+    for (int i = 3; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--output" || arg == "-o") {
+            if (i + 1 < argc) outDir = argv[++i];
+        } else if (arg == "--threads") {
+            if (i + 1 < argc) options.maxThreads = std::stoi(argv[++i]);
+        } else if (arg == "--step") {
+            if (i + 1 < argc) options.stepSize = std::stof(argv[++i]);
+        } else if (arg == "--force" || arg == "-f") {
+            overwrite = true;
+        } else if (arg == "--recursive" || arg == "-r") {
+            recursive = true;
+        } else if (arg == "--no-jump") {
+            options.generateJumpConnections = false;
+        } else if (arg == "--no-merge") {
+            options.mergeAreas = false;
+        }
+    }
+
+    std::cout << "[BATCH] Scanning directory: " << dirPath << "\n";
+    if (!outDir.empty()) std::cout << "[BATCH] Output directory:   " << outDir << "\n";
+    std::cout << "[BATCH] Step Size:          " << options.stepSize << " units\n";
+    std::cout << "[BATCH] Overwrite existing: " << (overwrite ? "Yes" : "No") << "\n";
+    std::cout << "[BATCH] Recursive search:   " << (recursive ? "Yes" : "No") << "\n\n";
+
+    auto batchProgress = [](size_t done, size_t total, const NavGenerator::BatchItem& item) {
+        float pct = (total > 0) ? (static_cast<float>(done) / total * 100.0f) : 100.0f;
+        std::cout << "[" << std::setw(3) << static_cast<int>(pct) << "%] ("
+                  << done << "/" << total << ") " << item.bspPath << " -> ";
+        if (item.result.success) {
+            std::cout << "DONE (" << item.result.areasGenerated << " areas in "
+                      << std::fixed << std::setprecision(1) << item.result.durationSeconds << "s)\n";
+        } else {
+            std::cout << "FAILED (" << item.result.errorMessage << ")\n";
+        }
+    };
+
+    auto res = NavGenerator::GenerateDirectory(dirPath, outDir, options, recursive, overwrite, batchProgress);
+
+    std::cout << "\n=========================================================\n";
+    std::cout << " Batch Mass-Generation Complete\n";
+    std::cout << "=========================================================\n";
+    std::cout << "  -> Total Maps:    " << res.totalMaps << "\n";
+    std::cout << "  -> Succeeded:     " << res.succeeded << "\n";
+    std::cout << "  -> Failed:        " << res.failed << "\n";
+    std::cout << "  -> Total Duration: " << std::fixed << std::setprecision(2) << res.totalDurationSeconds << " s\n";
+
+    return (res.failed > 0) ? 1 : 0;
+}
 
 int main(int argc, char* argv[]) {
     std::cout << "=========================================================\n";
-    std::cout << " NavMesh Core - CS 1.6 BSP & NAV Verification CLI\n";
+    std::cout << " NavMesh Core - CS 1.6 BSP & NAV Verification & Generator\n";
     std::cout << "=========================================================\n\n";
 
-    if (argc < 2 || std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h" || std::string(argv[1]) == "-v" || std::string(argv[1]) == "--version") {
-        std::cout << "Usage:\n";
-        std::cout << "  nav_cli <path_to_bsp_or_nav> [optional_second_file]\n\n";
-        std::cout << "Examples:\n";
-        std::cout << "  nav_cli de_dust2.bsp de_dust2.nav\n";
-        std::cout << "  nav_cli cstrike/maps/de_dust2.bsp\n";
+    if (argc < 2 || std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h" ||
+        std::string(argv[1]) == "-v" || std::string(argv[1]) == "--version") {
+        PrintHelp();
         return 0;
+    }
+
+    std::string firstArg = argv[1];
+    if (firstArg == "generate" || firstArg == "-g") {
+        return HandleGenerate(argc, argv);
+    }
+    if (firstArg == "batch" || firstArg == "mass" || firstArg == "generate-all") {
+        return HandleBatch(argc, argv);
     }
 
     std::string bspPath = "";
@@ -32,7 +185,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // If only one was provided, deduce the other
     if (!bspPath.empty() && navPath.empty()) {
         navPath = bspPath.substr(0, bspPath.size() - 4) + ".nav";
     } else if (!navPath.empty() && bspPath.empty()) {
@@ -42,7 +194,6 @@ int main(int argc, char* argv[]) {
     BSPFile bsp;
     NavMesh nav;
 
-    // Load BSP
     if (!bspPath.empty()) {
         std::cout << "[BSP] Loading: " << bspPath << "...\n";
         if (bsp.Load(bspPath)) {
@@ -87,7 +238,6 @@ int main(int argc, char* argv[]) {
                 int leafFaces = bsp.GetLeafFaceCount(ctLeaf);
                 std::cout << "  -> CT Leaf Marksurfaces Count: " << leafFaces << "\n";
 
-                // Test surface texture & material & lighting at ground below CT spawn
                 Vector3 traceDown = ctPos;
                 traceDown.z -= 500.0f;
                 char texName[64] = {0};
@@ -106,7 +256,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Load NAV
     if (!navPath.empty()) {
         std::cout << "\n[NAV] Loading: " << navPath << "...\n";
         if (nav.Load(navPath)) {
@@ -130,7 +279,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Test A* Pathfinding if both or nav loaded
     if (nav.IsLoaded()) {
         std::cout << "\n[PATHFINDING] Running A* Benchmark...\n";
 
@@ -175,6 +323,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    std::cout << "\n[COMPLETED] Verification finished successfully.\n";
+    std::cout << "\n[COMPLETED] Operation finished.\n";
     return 0;
 }

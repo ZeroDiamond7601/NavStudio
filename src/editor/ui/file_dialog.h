@@ -15,6 +15,9 @@ namespace FileDialog {
 
     // Opens native OS file picker to specify a save file location
     std::string SaveFile(const char* filter, const char* defaultExt, const char* title);
+
+    // Opens native OS directory picker to select a folder
+    std::string OpenFolder(const char* title = nullptr);
 }
 
 #endif // FILE_DIALOG_H
