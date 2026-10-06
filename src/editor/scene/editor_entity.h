@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_map>
 #include "math/vector3.h"
+#include "editor/math/matrix4.h"
 
 enum EntityCategory {
     ENT_CAT_SPAWN_CT = 0,
@@ -21,12 +22,6 @@ enum EntityCategory {
     ENT_CAT_BRUSH,
     ENT_CAT_OTHER,
     ENT_CAT_COUNT
-};
-
-struct Vector4 {
-    float x, y, z, w;
-    Vector4() : x(1.0f), y(1.0f), z(1.0f), w(1.0f) {}
-    Vector4(float _x, float _y, float _z, float _w) : x(_x), y(_y), z(_z), w(_w) {}
 };
 
 struct EditorEntity {
