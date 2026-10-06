@@ -24,6 +24,9 @@ public:
     // Tests ray against all NavAreas in the scene and returns the closest hit area ID (or 0 if none)
     static uint32_t PickNavArea(const EditorScene& scene, const Ray& ray, Vector3* outHitPoint = nullptr);
 
+    // Tests ray against entities and returns the closest hit entity index (or -1 if none)
+    static int PickEntity(const EditorScene& scene, const Ray& ray, float* outT = nullptr);
+
     // Tests ray against BSP world geometry and returns exact collision point
     static bool PickBSPFloor(const EditorScene& scene, const Ray& ray, Vector3* outHitPoint);
 
@@ -38,6 +41,12 @@ public:
     );
 
 private:
+    static bool RayIntersectsAABB(
+        const Ray& ray,
+        const Vector3& mins, const Vector3& maxs,
+        float& outT
+    );
+
     static bool RayIntersectsTriangle(
         const Ray& ray,
         const Vector3& v0, const Vector3& v1, const Vector3& v2,

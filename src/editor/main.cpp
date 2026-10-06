@@ -126,8 +126,16 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     return;
                 }
 
-                uint32_t hitArea = ScenePicker::PickNavArea(*g_activeScene, ray);
-                g_activeScene->SelectArea(hitArea);
+                // Test entity picking first, then NavArea
+                int hitEntity = ScenePicker::PickEntity(*g_activeScene, ray);
+                if (hitEntity >= 0) {
+                    g_activeScene->SelectEntity(hitEntity);
+                    g_activeScene->SelectArea(0);
+                } else {
+                    uint32_t hitArea = ScenePicker::PickNavArea(*g_activeScene, ray);
+                    g_activeScene->SelectArea(hitArea);
+                    g_activeScene->SelectEntity(-1);
+                }
             }
         } else if (action == GLFW_RELEASE) {
             if (g_activeScene->IsDraggingHandle()) {
@@ -171,6 +179,9 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 g_activeScene->IncreaseGridSize();
             } else if (key == GLFW_KEY_W && (mods & GLFW_MOD_SHIFT) != 0) { // Shift+W: Toggle snap
                 g_activeScene->ToggleGridSnap();
+            } else if (key == GLFW_KEY_F3) { // F3: Toggle Entities
+                auto& entR = g_activeScene->GetEntityRenderer();
+                entR.SetShowEntities(!entR.GetShowEntities());
             }
 
             // Normal Selection Mode Hotkeys
@@ -222,6 +233,13 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                     }
                 } else if (key == GLFW_KEY_ESCAPE) {
                     g_activeScene->SelectArea(0);
+                }
+            } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {
+                if (key == GLFW_KEY_F) {
+                    const EditorEntity* ent = g_activeScene->GetSelectedEntity();
+                    if (ent) g_camera.FocusOn(ent->origin);
+                } else if (key == GLFW_KEY_ESCAPE) {
+                    g_activeScene->SelectEntity(-1);
                 }
             }
 

@@ -14,6 +14,8 @@ EditorUI::EditorUI()
     , m_openPathType(0)
 {
     m_searchFilter[0] = '\0';
+    m_entityFilter[0] = '\0';
+    m_entityCategoryFilter = -1;
     m_placeEditBuffer[0] = '\0';
     m_openPathBuffer[0] = '\0';
 }
@@ -254,6 +256,43 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
 
             ImGui::Separator();
+            auto& entR = scene.GetEntityRenderer();
+            bool showEnts = entR.GetShowEntities();
+            if (ImGui::MenuItem("Show Entities", nullptr, &showEnts)) {
+                entR.SetShowEntities(showEnts);
+            }
+            if (showEnts) {
+                bool showSpawns = entR.GetShowSpawns();
+                if (ImGui::MenuItem("  Show Player Spawns", nullptr, &showSpawns)) {
+                    entR.SetShowSpawns(showSpawns);
+                }
+                bool showObjs = entR.GetShowObjectives();
+                if (ImGui::MenuItem("  Show Objectives & Hostages", nullptr, &showObjs)) {
+                    entR.SetShowObjectives(showObjs);
+                }
+                bool showLights = entR.GetShowLights();
+                if (ImGui::MenuItem("  Show Light Sources", nullptr, &showLights)) {
+                    entR.SetShowLights(showLights);
+                }
+                bool showItems = entR.GetShowItems();
+                if (ImGui::MenuItem("  Show Weapons & Armoury", nullptr, &showItems)) {
+                    entR.SetShowItems(showItems);
+                }
+                bool showTrig = entR.GetShowTriggers();
+                if (ImGui::MenuItem("  Show Triggers & Volumes", nullptr, &showTrig)) {
+                    entR.SetShowTriggers(showTrig);
+                }
+                bool showBrushes = entR.GetShowBrushes();
+                if (ImGui::MenuItem("  Show Brush Entities", nullptr, &showBrushes)) {
+                    entR.SetShowBrushes(showBrushes);
+                }
+                bool showLinks = entR.GetShowTargetLines();
+                if (ImGui::MenuItem("  Show Target Connections", nullptr, &showLinks)) {
+                    entR.SetShowTargetLines(showLinks);
+                }
+            }
+
+            ImGui::Separator();
             bool showGroundGrid = scene.GetShowGroundGrid();
             if (ImGui::MenuItem("Show 3D Ground Grid", nullptr, &showGroundGrid)) {
                 scene.SetShowGroundGrid(showGroundGrid);
@@ -485,75 +524,344 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         if (ImGui::Checkbox("Brush Outlines", &showWireOnSolid)) {
             scene.SetShowWireframeOnSolid(showWireOnSolid);
         }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::Text("Entities (F3):");
+        bool showEntities = scene.GetEntityRenderer().GetShowEntities();
+        if (ImGui::Checkbox("Show Entities", &showEntities)) {
+            scene.GetEntityRenderer().SetShowEntities(showEntities);
+        }
+        bool showTargetLines = scene.GetEntityRenderer().GetShowTargetLines();
+        if (ImGui::Checkbox("Show Target Lines", &showTargetLines)) {
+            scene.GetEntityRenderer().SetShowTargetLines(showTargetLines);
+        }
     }
     ImGui::End();
 }
 
 
 void EditorUI::RenderHierarchy(EditorScene& scene, Camera& camera) {
-    ImGui::SetNextWindowSize(ImVec2(240, 400), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Area Hierarchy")) {
-        if (!scene.HasNAV()) {
-            ImGui::TextDisabled("No NAV mesh loaded.");
-            ImGui::End();
-            return;
-        }
+    ImGui::SetNextWindowSize(ImVec2(270, 420), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Explorer")) {
+        if (ImGui::BeginTabBar("ExplorerTabs")) {
+            char navTabTitle[64];
+            size_t areaCount = scene.HasNAV() ? scene.GetNAV().GetAreaCount() : 0;
+            std::snprintf(navTabTitle, sizeof(navTabTitle), "NavAreas (%zu)", areaCount);
 
-        ImGui::InputTextWithHint("##Search", "Search Area ID or Place...", m_searchFilter, sizeof(m_searchFilter));
-        ImGui::Separator();
+            if (ImGui::BeginTabItem(navTabTitle)) {
+                if (!scene.HasNAV()) {
+                    ImGui::TextDisabled("No NAV mesh loaded.");
+                } else {
+                    ImGui::InputTextWithHint("##SearchArea", "Search Area ID or Place...", m_searchFilter, sizeof(m_searchFilter));
+                    ImGui::Separator();
 
-        const auto& areas = scene.GetNAV().GetAreas();
-        std::string filterStr = m_searchFilter;
-        std::transform(filterStr.begin(), filterStr.end(), filterStr.begin(), ::tolower);
+                    const auto& areas = scene.GetNAV().GetAreas();
+                    std::string filterStr = m_searchFilter;
+                    std::transform(filterStr.begin(), filterStr.end(), filterStr.begin(), ::tolower);
 
-        ImGui::BeginChild("AreaList", ImVec2(0, 0), true);
+                    ImGui::BeginChild("AreaList", ImVec2(0, 0), true);
 
-        for (const NavArea* area : areas) {
-            if (!area) continue;
+                    for (const NavArea* area : areas) {
+                        if (!area) continue;
 
-            uint32_t id = area->GetID();
-            std::string idStr = std::to_string(id);
-            const std::string& place = area->GetPlaceName();
+                        uint32_t id = area->GetID();
+                        std::string idStr = std::to_string(id);
+                        const std::string& place = area->GetPlaceName();
 
-            if (!filterStr.empty()) {
-                std::string lowerPlace = place;
-                std::transform(lowerPlace.begin(), lowerPlace.end(), lowerPlace.begin(), ::tolower);
-                if (idStr.find(filterStr) == std::string::npos && lowerPlace.find(filterStr) == std::string::npos) {
-                    continue;
+                        if (!filterStr.empty()) {
+                            std::string lowerPlace = place;
+                            std::transform(lowerPlace.begin(), lowerPlace.end(), lowerPlace.begin(), ::tolower);
+                            if (idStr.find(filterStr) == std::string::npos && lowerPlace.find(filterStr) == std::string::npos) {
+                                continue;
+                            }
+                        }
+
+                        char label[128];
+                        if (place.empty()) {
+                            std::snprintf(label, sizeof(label), "Area #%u", id);
+                        } else {
+                            std::snprintf(label, sizeof(label), "Area #%u (%s)", id, place.c_str());
+                        }
+
+                        bool isSelected = (scene.GetSelectedAreaID() == id);
+                        if (ImGui::Selectable(label, isSelected)) {
+                            scene.SelectArea(id);
+                            scene.SelectEntity(-1);
+                        }
+
+                        if (ImGui::IsItemHovered()) {
+                            scene.SetHoveredArea(id);
+                            if (ImGui::IsMouseDoubleClicked(0)) {
+                                camera.FocusOn(area->GetCenter());
+                            }
+                        }
+                    }
+
+                    ImGui::EndChild();
                 }
+                ImGui::EndTabItem();
             }
 
-            char label[128];
-            if (place.empty()) {
-                std::snprintf(label, sizeof(label), "Area #%u", id);
-            } else {
-                std::snprintf(label, sizeof(label), "Area #%u (%s)", id, place.c_str());
+            char entTabTitle[64];
+            size_t entCount = scene.GetEntityRenderer().GetEntityCount();
+            std::snprintf(entTabTitle, sizeof(entTabTitle), "Entities (%zu)", entCount);
+
+            if (ImGui::BeginTabItem(entTabTitle)) {
+                RenderEntityHierarchy(scene, camera);
+                ImGui::EndTabItem();
             }
 
-            bool isSelected = (scene.GetSelectedAreaID() == id);
-            if (ImGui::Selectable(label, isSelected)) {
-                scene.SelectArea(id);
-            }
-
-            if (ImGui::IsItemHovered()) {
-                scene.SetHoveredArea(id);
-                if (ImGui::IsMouseDoubleClicked(0)) {
-                    camera.FocusOn(area->GetCenter());
-                }
-            }
+            ImGui::EndTabBar();
         }
-
-        ImGui::EndChild();
     }
     ImGui::End();
 }
 
+void EditorUI::RenderEntityHierarchy(EditorScene& scene, Camera& camera) {
+    auto& entRenderer = scene.GetEntityRenderer();
+    if (!entRenderer.IsLoaded()) {
+        ImGui::TextDisabled("No BSP entities loaded.");
+        return;
+    }
+
+    // Category filter buttons
+    ImGui::Text("Filter:");
+    if (ImGui::SmallButton(m_entityCategoryFilter == -1 ? "[All]" : "All")) {
+        m_entityCategoryFilter = -1;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton(m_entityCategoryFilter == ENT_CAT_SPAWN_CT ? "[Spawns]" : "Spawns")) {
+        m_entityCategoryFilter = (m_entityCategoryFilter == ENT_CAT_SPAWN_CT) ? -1 : ENT_CAT_SPAWN_CT;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton(m_entityCategoryFilter == ENT_CAT_OBJECTIVE_BOMB ? "[Objectives]" : "Objectives")) {
+        m_entityCategoryFilter = (m_entityCategoryFilter == ENT_CAT_OBJECTIVE_BOMB) ? -1 : ENT_CAT_OBJECTIVE_BOMB;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton(m_entityCategoryFilter == ENT_CAT_LIGHT ? "[Lights]" : "Lights")) {
+        m_entityCategoryFilter = (m_entityCategoryFilter == ENT_CAT_LIGHT) ? -1 : ENT_CAT_LIGHT;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton(m_entityCategoryFilter == ENT_CAT_ITEM ? "[Items]" : "Items")) {
+        m_entityCategoryFilter = (m_entityCategoryFilter == ENT_CAT_ITEM) ? -1 : ENT_CAT_ITEM;
+    }
+
+    ImGui::InputTextWithHint("##SearchEnt", "Search classname or target...", m_entityFilter, sizeof(m_entityFilter));
+    ImGui::Separator();
+
+    std::string filterStr = m_entityFilter;
+    std::transform(filterStr.begin(), filterStr.end(), filterStr.begin(), ::tolower);
+
+    const auto& entities = entRenderer.GetEntities();
+    ImGui::BeginChild("EntityList", ImVec2(0, 0), true);
+
+    for (const auto& ent : entities) {
+        if (m_entityCategoryFilter != -1) {
+            if (m_entityCategoryFilter == ENT_CAT_SPAWN_CT) {
+                if (ent.category != ENT_CAT_SPAWN_CT && ent.category != ENT_CAT_SPAWN_T && ent.category != ENT_CAT_SPAWN_VIP) {
+                    continue;
+                }
+            } else if (m_entityCategoryFilter == ENT_CAT_OBJECTIVE_BOMB) {
+                if (ent.category != ENT_CAT_OBJECTIVE_BOMB && ent.category != ENT_CAT_OBJECTIVE_HOSTAGE && ent.category != ENT_CAT_OBJECTIVE_RESCUE && ent.category != ENT_CAT_OBJECTIVE_BUYZONE) {
+                    continue;
+                }
+            } else if (ent.category != m_entityCategoryFilter) {
+                continue;
+            }
+        }
+
+        if (!filterStr.empty()) {
+            std::string lowerClass = ent.classname;
+            std::transform(lowerClass.begin(), lowerClass.end(), lowerClass.begin(), ::tolower);
+            std::string lowerTarget = ent.targetname + " " + ent.target;
+            std::transform(lowerTarget.begin(), lowerTarget.end(), lowerTarget.begin(), ::tolower);
+
+            if (lowerClass.find(filterStr) == std::string::npos && lowerTarget.find(filterStr) == std::string::npos) {
+                continue;
+            }
+        }
+
+        const char* badge = "[ENT]";
+        ImVec4 badgeCol(0.6f, 0.6f, 0.6f, 1.0f);
+        if (ent.category == ENT_CAT_SPAWN_CT) { badge = "[CT]"; badgeCol = ImVec4(0.2f, 0.6f, 1.0f, 1.0f); }
+        else if (ent.category == ENT_CAT_SPAWN_T) { badge = "[T ]"; badgeCol = ImVec4(0.95f, 0.25f, 0.2f, 1.0f); }
+        else if (ent.category == ENT_CAT_SPAWN_VIP) { badge = "[VIP]"; badgeCol = ImVec4(0.0f, 0.9f, 0.9f, 1.0f); }
+        else if (ent.category == ENT_CAT_OBJECTIVE_BOMB) { badge = "[BOMB]"; badgeCol = ImVec4(0.95f, 0.2f, 0.2f, 1.0f); }
+        else if (ent.category == ENT_CAT_OBJECTIVE_HOSTAGE) { badge = "[HOST]"; badgeCol = ImVec4(0.25f, 0.8f, 0.3f, 1.0f); }
+        else if (ent.category == ENT_CAT_OBJECTIVE_RESCUE) { badge = "[RESC]"; badgeCol = ImVec4(0.2f, 0.85f, 0.6f, 1.0f); }
+        else if (ent.category == ENT_CAT_OBJECTIVE_BUYZONE) { badge = "[BUY]"; badgeCol = ImVec4(0.85f, 0.9f, 0.2f, 1.0f); }
+        else if (ent.category == ENT_CAT_LIGHT) { badge = "[LGT]"; badgeCol = ImVec4(1.0f, 0.92f, 0.25f, 1.0f); }
+        else if (ent.category == ENT_CAT_ITEM) { badge = "[WPN]"; badgeCol = ImVec4(1.0f, 0.72f, 0.15f, 1.0f); }
+        else if (ent.category == ENT_CAT_SOUND) { badge = "[SND]"; badgeCol = ImVec4(0.85f, 0.3f, 0.95f, 1.0f); }
+        else if (ent.category == ENT_CAT_TRIGGER) { badge = "[TRG]"; badgeCol = ImVec4(0.95f, 0.55f, 0.15f, 1.0f); }
+        else if (ent.category == ENT_CAT_BRUSH) { badge = "[BRS]"; badgeCol = ImVec4(0.35f, 0.75f, 0.9f, 1.0f); }
+
+        char itemText[160];
+        if (!ent.targetname.empty()) {
+            std::snprintf(itemText, sizeof(itemText), "%s %s \"%s\"", badge, ent.classname.c_str(), ent.targetname.c_str());
+        } else {
+            std::snprintf(itemText, sizeof(itemText), "%s %s #%d", badge, ent.classname.c_str(), ent.index);
+        }
+
+        bool isSelected = (scene.GetSelectedEntityIndex() == ent.index);
+        ImGui::PushStyleColor(ImGuiCol_Text, badgeCol);
+        if (ImGui::Selectable(itemText, isSelected)) {
+            scene.SelectEntity(ent.index);
+            scene.SelectArea(0);
+        }
+        ImGui::PopStyleColor();
+
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
+            camera.FocusOn(ent.origin);
+        }
+    }
+
+    ImGui::EndChild();
+}
+
+void EditorUI::RenderEntityInspector(EditorScene& scene, Camera& camera) {
+    const EditorEntity* ent = scene.GetSelectedEntity();
+    if (!ent) {
+        ImGui::TextDisabled("No entity selected.");
+        return;
+    }
+
+    // Category badge & header
+    ImGui::TextColored(ImVec4(ent->color.x, ent->color.y, ent->color.z, 1.0f), "[%s]", ent->GetCategoryName());
+    ImGui::SameLine();
+    ImGui::Text("%s", ent->classname.c_str());
+    ImGui::TextDisabled("%s (#%d)", ent->GetFriendlyName(), ent->index);
+    ImGui::Separator();
+
+    // Transform Coordinates
+    ImGui::Text("Origin:");
+    ImGui::Text("  X: %.1f  Y: %.1f  Z: %.1f", ent->origin.x, ent->origin.y, ent->origin.z);
+
+    if (ent->yaw != 0.0f || ent->angles.x != 0.0f || ent->angles.z != 0.0f) {
+        ImGui::Text("Angles:");
+        ImGui::Text("  Pitch: %.1f  Yaw: %.1f  Roll: %.1f", ent->angles.x, ent->angles.y, ent->angles.z);
+    }
+
+    // Special item info: Armoury
+    if (ent->classname == "armoury_entity") {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.15f, 1.0f), "Weapon Spawner:");
+        ImGui::Text("  Weapon: %s", ent->GetArmouryItemName().c_str());
+        auto itCount = ent->keyvalues.find("count");
+        if (itCount != ent->keyvalues.end()) {
+            ImGui::Text("  Count: %s", itCount->second.c_str());
+        }
+    }
+
+    // Special item info: Lights
+    if (ent->category == ENT_CAT_LIGHT) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 0.95f, 0.2f, 1.0f), "Light Parameters:");
+        auto itLight = ent->keyvalues.find("_light");
+        if (itLight != ent->keyvalues.end()) {
+            ImGui::Text("  RGB / Intensity: %s", itLight->second.c_str());
+            ImVec4 colSwatch(ent->color.x, ent->color.y, ent->color.z, 1.0f);
+            ImGui::ColorButton("##LightColorSwatch", colSwatch, ImGuiColorEditFlags_NoTooltip, ImVec2(24, 18));
+            ImGui::SameLine();
+            ImGui::Text("Light Color Preview");
+        }
+    }
+
+    // Special item info: Audio
+    if (ent->category == ENT_CAT_SOUND) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.85f, 0.35f, 0.95f, 1.0f), "Sound Parameters:");
+        auto itMsg = ent->keyvalues.find("message");
+        if (itMsg != ent->keyvalues.end()) {
+            ImGui::TextWrapped("  File: %s", itMsg->second.c_str());
+        }
+        auto itVol = ent->keyvalues.find("health");
+        if (itVol != ent->keyvalues.end()) {
+            ImGui::Text("  Volume: %s / 10", itVol->second.c_str());
+        }
+    }
+
+    // Target relationships
+    if (!ent->target.empty() || !ent->targetname.empty()) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Text("Target Linkages:");
+        if (!ent->target.empty()) {
+            ImGui::Text("  Target -> %s", ent->target.c_str());
+            if (ImGui::Button("Jump to Target Entity", ImVec2(-1, 24))) {
+                const auto& ents = scene.GetEntityRenderer().GetEntities();
+                for (const auto& other : ents) {
+                    if (other.targetname == ent->target) {
+                        scene.SelectEntity(other.index);
+                        camera.FocusOn(other.origin);
+                        break;
+                    }
+                }
+            }
+        }
+        if (!ent->targetname.empty()) {
+            ImGui::Text("  Targetname <- %s", ent->targetname.c_str());
+        }
+    }
+
+    // Brush model info
+    if (ent->isBrush) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Text("Brush Model: %s", ent->model.c_str());
+        ImGui::Text("Bounds: (%.0f, %.0f, %.0f) to (%.0f, %.0f, %.0f)",
+            ent->worldMins.x, ent->worldMins.y, ent->worldMins.z,
+            ent->worldMaxs.x, ent->worldMaxs.y, ent->worldMaxs.z);
+    }
+
+    // Key-Values Dictionary Table
+    ImGui::Spacing();
+    ImGui::Separator();
+    if (ImGui::CollapsingHeader("Key-Values Dictionary", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::BeginTable("KeyValTable", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+            ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableHeadersRow();
+
+            for (const auto& kv : ent->keyvalues) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(kv.first.c_str());
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextUnformatted(kv.second.c_str());
+            }
+            ImGui::EndTable();
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    if (ImGui::Button("Focus Camera [F]", ImVec2(-1, 26))) {
+        camera.FocusOn(ent->origin);
+    }
+    if (ImGui::Button("Deselect [Escape]", ImVec2(-1, 24))) {
+        scene.SelectEntity(-1);
+    }
+}
+
 void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
-    ImGui::SetNextWindowSize(ImVec2(280, 450), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(290, 460), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Property Inspector")) {
+        if (scene.GetSelectedEntityIndex() >= 0) {
+            RenderEntityInspector(scene, camera);
+            ImGui::End();
+            return;
+        }
+
         NavArea* area = scene.GetSelectedArea();
         if (!area) {
-            ImGui::TextDisabled("No area selected.\nClick an area in the 3D viewport or hierarchy.");
+            ImGui::TextDisabled("No object or area selected.\nClick a NavArea or Entity in the 3D viewport or explorer.");
             ImGui::End();
             return;
         }
@@ -784,7 +1092,18 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
         float grid = scene.GetGridSize();
         bool snap = scene.GetGridSnap();
 
-        if (selId != 0 && scene.HasNAV()) {
+        size_t entCount = scene.GetEntityRenderer().GetEntityCount();
+        const auto& entR = scene.GetEntityRenderer();
+        int selEntIdx = scene.GetSelectedEntityIndex();
+
+        if (selEntIdx >= 0 && selEntIdx < static_cast<int>(entCount)) {
+            const auto* selEnt = scene.GetSelectedEntity();
+            if (selEnt) {
+                ImGui::Text("Map: %s | Entity #%d (%s) @ (%.0f, %.0f, %.0f) | Entities: %zu | Grid: %.0f [%s]",
+                    bspName, selEnt->index, selEnt->classname.c_str(), selEnt->origin.x, selEnt->origin.y, selEnt->origin.z,
+                    entCount, grid, snap ? "SNAP" : "FREE");
+            }
+        } else if (selId != 0 && scene.HasNAV()) {
             const NavArea* sel = scene.GetNAV().GetAreaByID(selId);
             if (sel) {
                 Vector3 c = sel->GetCenter();
@@ -794,12 +1113,18 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
                 if (h == HANDLE_NONE) h = scene.GetHoveredHandle();
                 const char* hName = (h != HANDLE_NONE) ? GetHandleName(h) : "None";
 
-                ImGui::Text("Map: %s | Nav: %zu | Area #%u [W: %.0f, L: %.0f @ (%.0f, %.0f, %.0f)] | Handle: %s | Grid: %.0f [%s]",
-                    bspName, areaCount, selId, w, l, c.x, c.y, c.z, hName, grid, snap ? "SNAP" : "FREE");
+                ImGui::Text("Map: %s | NavArea #%u [W: %.0f, L: %.0f @ (%.0f, %.0f, %.0f)] | Handle: %s | Ents: %zu | Grid: %.0f [%s]",
+                    bspName, selId, w, l, c.x, c.y, c.z, hName, entCount, grid, snap ? "SNAP" : "FREE");
             }
         } else {
-            ImGui::Text("Map: %s | NavAreas: %zu | No Selection | Grid: %.0f [%s] | Cam: (%.0f, %.0f, %.0f)",
-                bspName, areaCount, grid, snap ? "SNAP" : "FREE", camera.GetPosition().x, camera.GetPosition().y, camera.GetPosition().z);
+            if (entCount > 0) {
+                ImGui::Text("Map: %s | NavAreas: %zu | Entities: %zu (CT: %d, T: %d, Obj: %d, Light: %d) | Grid: %.0f [%s] | Cam: (%.0f, %.0f, %.0f)",
+                    bspName, areaCount, entCount, entR.GetSpawnCTCount(), entR.GetSpawnTCount(), entR.GetObjectiveCount(), entR.GetLightCount(),
+                    grid, snap ? "SNAP" : "FREE", camera.GetPosition().x, camera.GetPosition().y, camera.GetPosition().z);
+            } else {
+                ImGui::Text("Map: %s | NavAreas: %zu | No Selection | Grid: %.0f [%s] | Cam: (%.0f, %.0f, %.0f)",
+                    bspName, areaCount, grid, snap ? "SNAP" : "FREE", camera.GetPosition().x, camera.GetPosition().y, camera.GetPosition().z);
+            }
         }
     }
     ImGui::End();
@@ -843,6 +1168,10 @@ void EditorUI::RenderHelpModal() {
         ImGui::BulletText("Space: Snap selected area elevation to BSP floor");
         ImGui::BulletText("Ctrl+Z / Ctrl+Y: Undo / Redo history");
         ImGui::BulletText("Ctrl+S: Save current navigation mesh");
+        ImGui::BulletText("F3: Toggle Entity 3D visualization");
+        ImGui::BulletText("Left-Click: Select entity or NavArea");
+        ImGui::BulletText("F: Focus camera on selected entity or NavArea");
+        ImGui::BulletText("Escape: Clear selection / Cancel modal tool");
 
         ImGui::Spacing();
         ImGui::Separator();

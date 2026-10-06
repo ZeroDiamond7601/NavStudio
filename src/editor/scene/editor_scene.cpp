@@ -16,6 +16,21 @@ EditorScene::EditorScene()
     , m_showConnections(true)
 {
     LoadRecentFiles();
+
+    // Auto-detect standard Half-Life / Counter-Strike game directory
+    static const char* kDefaultPaths[] = {
+        "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Half-Life",
+        "C:\\Program Files\\Steam\\steamapps\\common\\Half-Life"
+    };
+    for (const char* p : kDefaultPaths) {
+        std::string fgdCheck = std::string(p) + "\\cstrike\\halflife-cs.fgd";
+        FILE* f = std::fopen(fgdCheck.c_str(), "r");
+        if (f) {
+            std::fclose(f);
+            m_gameDirectory = p;
+            break;
+        }
+    }
 }
 
 EditorScene::~EditorScene() {
@@ -108,6 +123,8 @@ bool EditorScene::LoadBSP(const std::string& bspPath) {
     m_bsp = std::move(newBsp);
     m_bspPath = bspPath;
     m_bspRenderer.BuildFromBSP(*m_bsp);
+    m_entityRenderer.BuildFromBSP(*m_bsp);
+    m_selectedEntityIndex = -1;
     AddRecentFile(bspPath);
 
     // Auto-detect corresponding .nav file in the same directory
@@ -331,6 +348,8 @@ void EditorScene::UpdateAsyncLoading(float deltaTime) {
                 m_bsp = std::move(m_loadCtx.loadedBsp);
                 m_bspPath = m_loadCtx.targetBspPath;
                 m_bspRenderer.BuildFromBSP(*m_bsp);
+                m_entityRenderer.BuildFromBSP(*m_bsp);
+                m_selectedEntityIndex = -1;
                 AddRecentFile(m_bspPath);
             }
 
@@ -410,6 +429,10 @@ void EditorScene::RebuildNavRenderer() {
 void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, const Vector3& camPos) {
     if (m_showBSP && m_bspRenderer.IsLoaded()) {
         m_bspRenderer.Render(meshShader, lineShader, mvp, m_bspMode, camPos);
+    }
+
+    if (m_entityRenderer.IsLoaded()) {
+        m_entityRenderer.Render(meshShader, lineShader, mvp, m_selectedEntityIndex, camPos);
     }
 
     if (m_showNAV && m_navRenderer.IsLoaded()) {

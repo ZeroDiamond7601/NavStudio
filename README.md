@@ -60,6 +60,23 @@
   * **Connect Mode (`C`):** Click any target area in the 3D viewport to link (Left-Click for Two-Way, Shift+Click for One-Way) with live connecting beam preview.
   * **Inspector Manager:** One-click `[2-Way]` / `[1-Way]` reciprocity toggle buttons, jump buttons, disconnect buttons, and manual Area ID connection forms.
 * **Floor Snapping (`Space` / `S`):** Casts downward rays to the BSP collision hull to ground floating area corner vertices.
+* **GoldSrc Entity System & Hammer-Style 3D Archetypes:**
+  * **Player Spawns:** Humanoid 3D hulls (32x32x72) with head indicators and forward-facing yaw orientation arrows:
+    * Counter-Terrorist spawns (`info_player_start`) in CT Blue.
+    * Terrorist spawns (`info_player_deathmatch`) in T Red.
+    * VIP spawns (`info_vip_start`) in Cyan.
+  * **Objectives & Hostages:**
+    * Bomb targets (`info_bomb_target`, `func_bomb_target`) with hazard markers and red objective diamonds.
+    * Hostages (`hostage_entity`) with humanoid green hulls and rescue zones (`info_hostage_rescue`, `func_hostage_rescue`).
+    * Buy zones (`func_buyzone`) and escape zones (`func_escapezone`).
+  * **Light Sources:** 3D yellow diamonds/octahedrons for point lights (`light`), spotlight cones and direction vectors for `light_spot`, and ambient sun icons for `light_environment`.
+  * **Weapons & Armoury:** 3D item crates and diamonds for `armoury_entity` with automatic weapon name resolution (AK-47, M4A1, AWP, Deagle, etc.) and item count.
+  * **Ambient Audio:** Magenta emitter nodes for `ambient_generic` with sound file and volume inspect.
+  * **Brush Entities & Triggers:** Bounding volumes with wireframe edges for `func_door`, `func_button`, `func_breakable`, `func_ladder`, and `trigger_*`.
+  * **Entity Target Connections:** Visualizes cause-and-effect wiring in 3D by rendering cyan-amber linkage lines with directional mid-point arrows between triggers (`target`) and destination entities (`targetname`).
+  * **Interactive Entity Picking & Explorer:** Click entities in the 3D viewport or browse the dedicated Entities tab in the Explorer panel with quick category filter chips (`[All]`, `[Spawns]`, `[Objectives]`, `[Lights]`, `[Items]`, `[Brushes]`).
+  * **Comprehensive Property Inspector:** View classname, category, coordinates, angles, model, weapon names, and a full key-values dictionary table for selected entities.
+  * **Category Visibility Filters (`F3`):** Toggle display of spawns, objectives, lights, items, brushes, and connection lines independently.
 * **Attribute Flag Editor:** Toggle `NAV_ATTR_CROUCH`, `NAV_ATTR_JUMP`, `NAV_ATTR_PRECISE`, and `NAV_ATTR_NO_JUMP`.
 * **Place Name Manager:** Search, filter, and assign designated map locations.
 * **Undo / Redo System:** Command-pattern history stack (`Ctrl+Z` / `Ctrl+Y`) for non-destructive mesh authoring.

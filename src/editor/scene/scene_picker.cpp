@@ -64,6 +64,64 @@ bool ScenePicker::RayIntersectsTriangle(
     return false;
 }
 
+bool ScenePicker::RayIntersectsAABB(
+    const Ray& ray,
+    const Vector3& mins, const Vector3& maxs,
+    float& outT
+) {
+    float tMin = 0.0f;
+    float tMax = std::numeric_limits<float>::max();
+
+    float ro[3] = { ray.origin.x, ray.origin.y, ray.origin.z };
+    float rd[3] = { ray.direction.x, ray.direction.y, ray.direction.z };
+    float bMin[3] = { mins.x, mins.y, mins.z };
+    float bMax[3] = { maxs.x, maxs.y, maxs.z };
+
+    for (int i = 0; i < 3; ++i) {
+        if (std::abs(rd[i]) < 1e-7f) {
+            if (ro[i] < bMin[i] || ro[i] > bMax[i]) return false;
+        } else {
+            float ood = 1.0f / rd[i];
+            float t1 = (bMin[i] - ro[i]) * ood;
+            float t2 = (bMax[i] - ro[i]) * ood;
+            if (t1 > t2) std::swap(t1, t2);
+            tMin = std::max(tMin, t1);
+            tMax = std::min(tMax, t2);
+            if (tMin > tMax) return false;
+        }
+    }
+
+    outT = tMin;
+    return true;
+}
+
+int ScenePicker::PickEntity(const EditorScene& scene, const Ray& ray, float* outT) {
+    const auto& entRenderer = scene.GetEntityRenderer();
+    if (!entRenderer.GetShowEntities() || !entRenderer.IsLoaded()) return -1;
+
+    const auto& entities = entRenderer.GetEntities();
+    int closestIndex = -1;
+    float closestT = std::numeric_limits<float>::max();
+
+    for (size_t i = 0; i < entities.size(); ++i) {
+        const auto& ent = entities[i];
+        if (!entRenderer.IsEntityVisible(ent)) continue;
+
+        float t = 0.0f;
+        if (RayIntersectsAABB(ray, ent.worldMins, ent.worldMaxs, t)) {
+            if (t > 0.0f && t < closestT) {
+                closestT = t;
+                closestIndex = static_cast<int>(i);
+            }
+        }
+    }
+
+    if (closestIndex >= 0 && outT) {
+        *outT = closestT;
+    }
+    return closestIndex;
+}
+
 uint32_t ScenePicker::PickNavArea(const EditorScene& scene, const Ray& ray, Vector3* outHitPoint) {
     if (!scene.HasNAV()) return 0;
 

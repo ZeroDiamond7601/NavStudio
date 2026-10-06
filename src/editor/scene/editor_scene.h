@@ -10,6 +10,7 @@
 #include "nav/nav_file.h"
 #include "editor/render/bsp_renderer.h"
 #include "editor/render/nav_renderer.h"
+#include "editor/render/entity_renderer.h"
 
 #include "editor/scene/editor_handles.h"
 #include <vector>
@@ -62,6 +63,12 @@ public:
     NavArea* GetSelectedArea();
     uint32_t GetSelectedAreaID() const { return m_selectedAreaId; }
 
+    EntityRenderer& GetEntityRenderer() { return m_entityRenderer; }
+    const EntityRenderer& GetEntityRenderer() const { return m_entityRenderer; }
+    int GetSelectedEntityIndex() const { return m_selectedEntityIndex; }
+    void SelectEntity(int index) { m_selectedEntityIndex = index; }
+    const EditorEntity* GetSelectedEntity() const { return m_entityRenderer.GetEntity(m_selectedEntityIndex); }
+
     void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, const Vector3& camPos);
     void RebuildNavRenderer();
 
@@ -91,6 +98,11 @@ public:
 
     bool GetShowWireframeOnSolid() const { return m_bspRenderer.GetShowWireframeOnSolid(); }
     void SetShowWireframeOnSolid(bool show) { m_bspRenderer.SetShowWireframeOnSolid(show); }
+
+    // Game Resources Directory
+    const std::string& GetGameDirectory() const { return m_gameDirectory; }
+    void SetGameDirectory(const std::string& dir) { m_gameDirectory = dir; }
+    bool HasGameDirectory() const { return !m_gameDirectory.empty(); }
 
     // Recent Files Management
     const std::vector<std::string>& GetRecentFiles() const { return m_recentFiles; }
@@ -174,13 +186,16 @@ private:
     std::unique_ptr<NavMesh> m_nav;
     BSPRenderer m_bspRenderer;
     NavRenderer m_navRenderer;
+    EntityRenderer m_entityRenderer;
 
     std::string m_bspPath;
     std::string m_navPath;
     std::string m_errorMessage;
+    std::string m_gameDirectory;
 
     uint32_t m_selectedAreaId;
     uint32_t m_hoveredAreaId;
+    int m_selectedEntityIndex{-1};
 
     BSPRenderMode m_bspMode;
     bool m_showBSP;

@@ -29,12 +29,16 @@ private:
     void RenderLoadingModal(const EditorScene& scene);
     void RenderLoadingErrorModal(EditorScene& scene);
     void RenderTransformHUD(EditorScene& scene, CommandManager& cmdMgr);
+    void RenderEntityHierarchy(EditorScene& scene, Camera& camera);
+    void RenderEntityInspector(EditorScene& scene, Camera& camera);
 
     bool m_mouseOverUI;
     bool m_requestQuit;
     bool m_showHelpModal;
     bool m_showOpenPathModal;
     char m_searchFilter[64];
+    char m_entityFilter[64];
+    int m_entityCategoryFilter{-1};
     char m_placeEditBuffer[64];
     char m_openPathBuffer[512];
     int m_openPathType; // 0 = BSP, 1 = NAV

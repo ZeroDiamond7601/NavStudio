@@ -153,6 +153,7 @@ if(BUILD_EDITOR)
         src/editor/render/shader.cpp
         src/editor/render/bsp_renderer.cpp
         src/editor/render/nav_renderer.cpp
+        src/editor/render/entity_renderer.cpp
         src/editor/scene/editor_scene.cpp
         src/editor/scene/scene_picker.cpp
         src/editor/ui/editor_ui.cpp
