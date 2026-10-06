@@ -1084,47 +1084,139 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
         }
 
         ImGui::Spacing();
-        if (ImGui::Button("Grab [G]", ImVec2(75, 24))) {
+        ImGui::Separator();
+
+        float availW = ImGui::GetContentRegionAvail().x;
+        float spacing = ImGui::GetStyle().ItemSpacing.x;
+        float w2 = (availW - spacing) * 0.5f;
+        float w3 = (availW - spacing * 2.0f) / 3.0f;
+        float w4 = (availW - spacing * 3.0f) / 4.0f;
+
+        // Gizmo Mode Selection
+        ImGui::Text("Gizmo Mode:");
+        auto curGizmo = scene.GetGizmoMode();
+        bool isPos = (curGizmo == GIZMO_MODE_TRANSLATE);
+        if (isPos) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
+        if (ImGui::Button("Move##piGzmMove", ImVec2(w4, 22))) {
+            scene.SetGizmoMode(GIZMO_MODE_TRANSLATE);
+        }
+        if (isPos) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Translate Gizmo: 3D Axis Arrows & Translation Quads");
+
+        ImGui::SameLine();
+        bool isRot = (curGizmo == GIZMO_MODE_ROTATE);
+        if (isRot) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
+        if (ImGui::Button("Rot##piGzmRot", ImVec2(w4, 22))) {
+            scene.SetGizmoMode(GIZMO_MODE_ROTATE);
+        }
+        if (isRot) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rotate Gizmo: Yaw/Z Rotation Ring");
+
+        ImGui::SameLine();
+        bool isScl = (curGizmo == GIZMO_MODE_SCALE);
+        if (isScl) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
+        if (ImGui::Button("Scale##piGzmScl", ImVec2(w4, 22))) {
+            scene.SetGizmoMode(GIZMO_MODE_SCALE);
+        }
+        if (isScl) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Scale Gizmo: Axis Boxes & Uniform Scale Ring");
+
+        ImGui::SameLine();
+        bool isComb = (curGizmo == GIZMO_MODE_COMBINED);
+        if (isComb) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
+        if (ImGui::Button("All##piGzmAll", ImVec2(w4, 22))) {
+            scene.SetGizmoMode(GIZMO_MODE_COMBINED);
+        }
+        if (isComb) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Combined Gizmo: Move + Rotate + Scale simultaneously");
+
+        // Snapping toggles
+        bool gridSnap = scene.GetGridSnap();
+        if (ImGui::Checkbox("Snap to Grid", &gridSnap)) {
+            scene.SetGridSnap(gridSnap);
+        }
+        ImGui::SameLine();
+        bool meshSnap = scene.GetMeshSnap();
+        if (ImGui::Checkbox("Snap to Areas", &meshSnap)) {
+            scene.SetMeshSnap(meshSnap);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Magnetically snaps dragged edges and areas flush against neighbors");
+
+        ImGui::Spacing();
+
+        // Row 1: Grab, Scale, Rotate
+        if (ImGui::Button("Grab [G]", ImVec2(w3, 24))) {
             scene.StartGrab(center);
         }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Grab / Move area freely in 3D");
         ImGui::SameLine();
-        if (ImGui::Button("Scale [S]", ImVec2(75, 24))) {
+        if (ImGui::Button("Scale [S]", ImVec2(w3, 24))) {
             scene.StartScale(center);
         }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Scale area dimensions");
         ImGui::SameLine();
-        if (ImGui::Button("Rotate [R]", ImVec2(75, 24))) {
+        if (ImGui::Button("Rotate [R]", ImVec2(w3, 24))) {
             scene.RotateSelectedArea90(cmdMgr);
         }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rotate area orientation 90 degrees");
 
-        if (ImGui::Button("Extrude [E]", ImVec2(80, 24))) {
+        // Row 2: Extrude, Bridge Edges
+        if (ImGui::Button("Extrude [E]", ImVec2(w2, 24))) {
             scene.ExtrudeSelectedEdge(cmdMgr);
         }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Extrude selected edge outward to create adjacent area");
         ImGui::SameLine();
-        if (ImGui::Button("Split [Shift+X]", ImVec2(100, 24))) {
+        bool bridgeActive = scene.IsBridgeMode();
+        if (bridgeActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.45f, 0.15f, 1.0f));
+        if (ImGui::Button(bridgeActive ? "Cancel Bridge [Esc]" : "Bridge Edges [B]", ImVec2(w2, 24))) {
+            scene.ToggleBridgeMode();
+        }
+        if (bridgeActive) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Bridge Tool: Click edge A then edge B to create a connecting NavArea between them");
+
+        // Row 3: Snap to Neighbors, Snap to Floor
+        if (ImGui::Button("Snap Neighbors [Shift+S]", ImVec2(w2, 24))) {
+            scene.SnapSelectedAreaToNeighbors(cmdMgr);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Snaps selected area flush against adjacent areas and closes micro-gaps");
+        ImGui::SameLine();
+        bool hasBSP = scene.HasBSP();
+        if (!hasBSP) ImGui::BeginDisabled();
+        if (ImGui::Button("Snap Floor [Space]", ImVec2(w2, 24))) {
+            cmdMgr.ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(&scene, id));
+        }
+        if (!hasBSP) ImGui::EndDisabled();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(hasBSP ? "Snaps area corner elevations flush onto BSP floor geometry" : "Requires loaded BSP map");
+
+        // Row 4: Split, Merge
+        if (ImGui::Button("Split [Shift+X]", ImVec2(w2, 24))) {
             scene.SplitSelectedArea(cmdMgr);
         }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Split selected area along longest axis");
         ImGui::SameLine();
-        if (ImGui::Button("Merge [Shift+M]", ImVec2(-1, 24))) {
+        if (ImGui::Button("Merge [Shift+M]", ImVec2(w2, 24))) {
             scene.MergeSelectedArea(cmdMgr);
         }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Merge selected area with adjacent collinear area");
 
-        if (ImGui::Button("Duplicate [Shift+D]", ImVec2(120, 24))) {
+        // Row 5: Duplicate, Delete
+        if (ImGui::Button("Duplicate [Shift+D]", ImVec2(w2, 24))) {
             scene.DuplicateSelectedArea(cmdMgr);
         }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Duplicate selected area");
         ImGui::SameLine();
-        if (ImGui::Button("Delete [X]", ImVec2(-1, 24))) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.70f, 0.20f, 0.20f, 0.8f));
+        if (ImGui::Button("Delete [X]", ImVec2(w2, 24))) {
             scene.DeleteSelectedArea(cmdMgr);
         }
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Delete selected area");
 
-        if (ImGui::Button("Snap to Floor [Space]", ImVec2(-1, 26))) {
-            if (scene.HasBSP()) {
-                cmdMgr.ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(&scene, id));
-            }
-        }
-
-        if (ImGui::Button("Focus Viewport [F]", ImVec2(-1, 26))) {
+        // Row 6: Focus Viewport
+        if (ImGui::Button("Focus Viewport [F]", ImVec2(-1, 24))) {
             camera.FocusOn(area->GetCenter());
         }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Center camera viewport on this area");
 
         ImGui::Spacing();
         ImGui::Separator();
