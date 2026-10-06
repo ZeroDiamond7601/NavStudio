@@ -14,6 +14,7 @@
 #include "editor/render/entity_renderer.h"
 #include "editor/render/texture_manager.h"
 #include "editor/render/grid_renderer.h"
+#include "editor/render/gizmo_renderer.h"
 
 #include "editor/scene/editor_handles.h"
 #include <vector>
@@ -73,6 +74,12 @@ public:
     int GetSelectedEntityIndex() const { return m_selectedEntityIndex; }
     void SelectEntity(int index) { m_selectedEntityIndex = index; }
     const EditorEntity* GetSelectedEntity() const { return m_entityRenderer.GetEntity(m_selectedEntityIndex); }
+    EditorEntity* GetSelectedEntity() { return m_entityRenderer.GetEntity(m_selectedEntityIndex); }
+
+    GizmoMode GetGizmoMode() const { return m_gizmoMode; }
+    void SetGizmoMode(GizmoMode mode) { m_gizmoMode = mode; }
+    GizmoRenderer& GetGizmoRenderer() { return m_gizmoRenderer; }
+    const GizmoRenderer& GetGizmoRenderer() const { return m_gizmoRenderer; }
 
     void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, const Vector3& camPos);
     void RebuildNavRenderer();
@@ -200,6 +207,7 @@ private:
     BSPRenderer m_bspRenderer;
     NavRenderer m_navRenderer;
     GridRenderer m_gridRenderer;
+    GizmoRenderer m_gizmoRenderer;
     EntityRenderer m_entityRenderer;
     TextureManager m_textureManager;
 
@@ -216,6 +224,7 @@ private:
     bool m_showBSP;
     bool m_showNAV;
     bool m_showConnections;
+    GizmoMode m_gizmoMode{GIZMO_MODE_COMBINED};
 
     // Recent files
     std::vector<std::string> m_recentFiles;
@@ -236,9 +245,16 @@ private:
     NavExtent m_dragStartExtent;
     float m_dragStartNeZ{0.0f};
     float m_dragStartSwZ{0.0f};
+    Vector3 m_dragStartCenter{0.0f, 0.0f, 0.0f};
     Vector3 m_dragStartGroundHit{0.0f, 0.0f, 0.0f};
+    float m_dragStartAxisT{0.0f};
+    float m_dragStartAngle{0.0f};
     float m_dragStartScreenX{0.0f};
     float m_dragStartScreenY{0.0f};
+    Vector3 m_dragStartEntityOrigin{0.0f, 0.0f, 0.0f};
+    Vector3 m_dragStartEntityAngles{0.0f, 0.0f, 0.0f};
+    Vector3 m_dragStartEntityMins{0.0f, 0.0f, 0.0f};
+    Vector3 m_dragStartEntityMaxs{0.0f, 0.0f, 0.0f};
 
     // Modal Transform Initial State
     EditorTransformMode m_transformMode{TRANSFORM_NONE};

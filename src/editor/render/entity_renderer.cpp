@@ -342,6 +342,11 @@ const EditorEntity* EntityRenderer::GetEntity(int index) const {
     return &m_entities[index];
 }
 
+EditorEntity* EntityRenderer::GetEntity(int index) {
+    if (index < 0 || index >= static_cast<int>(m_entities.size())) return nullptr;
+    return &m_entities[index];
+}
+
 bool EntityRenderer::IsEntityVisible(const EditorEntity& ent) const {
     if (!m_showEntities) return false;
     switch (ent.category) {

@@ -562,6 +562,24 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         ImGui::Separator();
         ImGui::Spacing();
 
+        ImGui::Text("3D Transform Gizmo:");
+        GizmoMode curGizmo = scene.GetGizmoMode();
+        if (ImGui::RadioButton("Combined", curGizmo == GIZMO_MODE_COMBINED)) {
+            scene.SetGizmoMode(GIZMO_MODE_COMBINED);
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Move", curGizmo == GIZMO_MODE_TRANSLATE)) {
+            scene.SetGizmoMode(GIZMO_MODE_TRANSLATE);
+        }
+        if (ImGui::RadioButton("Rotate", curGizmo == GIZMO_MODE_ROTATE)) {
+            scene.SetGizmoMode(GIZMO_MODE_ROTATE);
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Scale", curGizmo == GIZMO_MODE_SCALE)) {
+            scene.SetGizmoMode(GIZMO_MODE_SCALE);
+        }
+
+        ImGui::Spacing();
         ImGui::Text("3D Transform Tools:");
         NavArea* sel = scene.GetSelectedArea();
         bool hasSel = (sel != nullptr);

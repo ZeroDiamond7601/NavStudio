@@ -30,6 +30,7 @@ public:
     size_t GetEntityCount() const { return m_entities.size(); }
     const std::vector<EditorEntity>& GetEntities() const { return m_entities; }
     const EditorEntity* GetEntity(int index) const;
+    EditorEntity* GetEntity(int index);
 
     // Category Counts
     int GetSpawnCTCount() const { return m_countSpawnCT; }

@@ -157,6 +157,7 @@ if(BUILD_EDITOR)
         src/editor/render/texture_manager.cpp
         src/editor/render/nav_renderer.cpp
         src/editor/render/grid_renderer.cpp
+        src/editor/render/gizmo_renderer.cpp
         src/editor/render/entity_renderer.cpp
         src/editor/scene/editor_scene.cpp
         src/editor/scene/scene_picker.cpp

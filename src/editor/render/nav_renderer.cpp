@@ -265,80 +265,10 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
         }
     }
 
-    // 3D Transform Gizmo, Center box, and vertex handles for selected area
+    // 4 Corner vertex handles for selected area
     if (selectedId != 0) {
         const NavArea* sel = nav.GetAreaByID(selectedId);
         if (sel) {
-            Vector3 c = sel->GetCenter();
-            c.z += (kZLift + 3.0f);
-            float gLen = 48.0f;
-
-            // Center Position Handle: Small diamond box
-            bool isCenterActive = (hoveredHandle == HANDLE_GIZMO_CENTER || selectedHandle == HANDLE_GIZMO_CENTER);
-            float cbR = isCenterActive ? 1.0f : 0.85f;
-            float cbG = isCenterActive ? 0.95f : 0.85f;
-            float cbB = isCenterActive ? 0.20f : 0.85f;
-            float cbSize = isCenterActive ? 5.5f : 4.0f;
-            uint32_t cbIdx = static_cast<uint32_t>(lineVertices.size());
-            lineVertices.push_back({ c.x - cbSize, c.y, c.z, 0,0,1, 0,0, cbR, cbG, cbB, 1.0f });
-            lineVertices.push_back({ c.x, c.y + cbSize, c.z, 0,0,1, 0,0, cbR, cbG, cbB, 1.0f });
-            lineVertices.push_back({ c.x + cbSize, c.y, c.z, 0,0,1, 0,0, cbR, cbG, cbB, 1.0f });
-            lineVertices.push_back({ c.x, c.y - cbSize, c.z, 0,0,1, 0,0, cbR, cbG, cbB, 1.0f });
-            lineIndices.push_back(cbIdx + 0); lineIndices.push_back(cbIdx + 1);
-            lineIndices.push_back(cbIdx + 1); lineIndices.push_back(cbIdx + 2);
-            lineIndices.push_back(cbIdx + 2); lineIndices.push_back(cbIdx + 3);
-            lineIndices.push_back(cbIdx + 3); lineIndices.push_back(cbIdx + 0);
-
-            // X Axis: Red (+X East) - Highlighted if active
-            bool isXActive = (hoveredHandle == HANDLE_GIZMO_X || selectedHandle == HANDLE_GIZMO_X);
-            float xR = isXActive ? 1.0f : 0.95f;
-            float xG = isXActive ? 0.90f : 0.20f;
-            float xB = isXActive ? 0.20f : 0.20f;
-            float xLen = isXActive ? (gLen + 6.0f) : gLen;
-            uint32_t gx = static_cast<uint32_t>(lineVertices.size());
-            lineVertices.push_back({ c.x, c.y, c.z, 0,0,1, 0,0, xR, xG, xB, 1.0f });
-            lineVertices.push_back({ c.x + xLen, c.y, c.z, 0,0,1, 0,0, xR, xG, xB, 1.0f });
-            lineVertices.push_back({ c.x + xLen, c.y, c.z, 0,0,1, 0,0, xR, xG, xB, 1.0f });
-            lineVertices.push_back({ c.x + xLen - 8.0f, c.y + 4.5f, c.z, 0,0,1, 0,0, xR, xG, xB, 1.0f });
-            lineVertices.push_back({ c.x + xLen, c.y, c.z, 0,0,1, 0,0, xR, xG, xB, 1.0f });
-            lineVertices.push_back({ c.x + xLen - 8.0f, c.y - 4.5f, c.z, 0,0,1, 0,0, xR, xG, xB, 1.0f });
-            lineIndices.push_back(gx + 0); lineIndices.push_back(gx + 1);
-            lineIndices.push_back(gx + 2); lineIndices.push_back(gx + 3);
-            lineIndices.push_back(gx + 4); lineIndices.push_back(gx + 5);
-
-            // Y Axis: Green (+Y North) - Highlighted if active
-            bool isYActive = (hoveredHandle == HANDLE_GIZMO_Y || selectedHandle == HANDLE_GIZMO_Y);
-            float yR = isYActive ? 0.35f : 0.20f;
-            float yG = isYActive ? 1.0f : 0.95f;
-            float yB = isYActive ? 0.90f : 0.30f;
-            float yLen = isYActive ? (gLen + 6.0f) : gLen;
-            uint32_t gy = static_cast<uint32_t>(lineVertices.size());
-            lineVertices.push_back({ c.x, c.y, c.z, 0,0,1, 0,0, yR, yG, yB, 1.0f });
-            lineVertices.push_back({ c.x, c.y + yLen, c.z, 0,0,1, 0,0, yR, yG, yB, 1.0f });
-            lineVertices.push_back({ c.x, c.y + yLen, c.z, 0,0,1, 0,0, yR, yG, yB, 1.0f });
-            lineVertices.push_back({ c.x + 4.5f, c.y + yLen - 8.0f, c.z, 0,0,1, 0,0, yR, yG, yB, 1.0f });
-            lineVertices.push_back({ c.x, c.y + yLen, c.z, 0,0,1, 0,0, yR, yG, yB, 1.0f });
-            lineVertices.push_back({ c.x - 4.5f, c.y + yLen - 8.0f, c.z, 0,0,1, 0,0, yR, yG, yB, 1.0f });
-            lineIndices.push_back(gy + 0); lineIndices.push_back(gy + 1);
-            lineIndices.push_back(gy + 2); lineIndices.push_back(gy + 3);
-            lineIndices.push_back(gy + 4); lineIndices.push_back(gy + 5);
-
-            // Z Axis: Blue (+Z Up) - Highlighted if active
-            bool isZActive = (hoveredHandle == HANDLE_GIZMO_Z || selectedHandle == HANDLE_GIZMO_Z);
-            float zR = isZActive ? 0.40f : 0.20f;
-            float zG = isZActive ? 0.90f : 0.55f;
-            float zB = isZActive ? 1.0f : 1.0f;
-            float zLen = isZActive ? (gLen + 6.0f) : gLen;
-            uint32_t gz = static_cast<uint32_t>(lineVertices.size());
-            lineVertices.push_back({ c.x, c.y, c.z, 0,0,1, 0,0, zR, zG, zB, 1.0f });
-            lineVertices.push_back({ c.x, c.y, c.z + zLen, 0,0,1, 0,0, zR, zG, zB, 1.0f });
-            lineVertices.push_back({ c.x, c.y, c.z + zLen, 0,0,1, 0,0, zR, zG, zB, 1.0f });
-            lineVertices.push_back({ c.x + 4.5f, c.y, c.z + zLen - 8.0f, 0,0,1, 0,0, zR, zG, zB, 1.0f });
-            lineVertices.push_back({ c.x, c.y, c.z + zLen, 0,0,1, 0,0, zR, zG, zB, 1.0f });
-            lineVertices.push_back({ c.x - 4.5f, c.y, c.z + zLen - 8.0f, 0,0,1, 0,0, zR, zG, zB, 1.0f });
-            lineIndices.push_back(gz + 0); lineIndices.push_back(gz + 1);
-            lineIndices.push_back(gz + 2); lineIndices.push_back(gz + 3);
-            lineIndices.push_back(gz + 4); lineIndices.push_back(gz + 5);
 
             // 4 Corner vertex handles
             SelectedHandleType cornerHandles[4] = {

@@ -1,5 +1,6 @@
 #include "editor/scene/scene_picker.h"
 #include <cmath>
+#include <algorithm>
 #include <limits>
 
 Ray ScenePicker::ScreenPointToRay(
@@ -221,87 +222,183 @@ SelectedHandleType ScenePicker::PickAreaHandles(
     const Matrix4& projMatrix,
     float maxPixelDist
 ) {
-    if (!scene.HasNAV() || scene.GetSelectedAreaID() == 0) return HANDLE_NONE;
-    const NavArea* sel = scene.GetSelectedArea();
-    if (!sel) return HANDLE_NONE;
+    Vector3 c(0.0f, 0.0f, 0.0f);
+    const NavArea* selArea = nullptr;
+    const EditorEntity* selEnt = nullptr;
+
+    if (scene.HasNAV() && scene.GetSelectedAreaID() != 0) {
+        selArea = scene.GetSelectedArea();
+        if (selArea) {
+            c = selArea->GetCenter();
+            c.z += 4.0f;
+        }
+    } else if (scene.GetSelectedEntityIndex() >= 0) {
+        selEnt = scene.GetSelectedEntity();
+        if (selEnt) {
+            c = selEnt->origin;
+        }
+    }
+
+    if (!selArea && !selEnt) return HANDLE_NONE;
 
     Matrix4 viewProj = projMatrix * viewMatrix;
+    Matrix4 invView = viewMatrix.Inverse();
+    Vector3 camPos(invView.m[12], invView.m[13], invView.m[14]);
 
-    Vector3 c = sel->GetCenter();
-    c.z += 4.0f;
+    float camDist = (camPos - c).Length();
+    float gLen = std::max(42.0f, std::min(130.0f, camDist * 0.082f));
+    float coneH = gLen * 0.22f;
+    float cubeDist = gLen * 0.72f;
+    float rotR = gLen * 0.58f;
+    float screenR = gLen * 0.88f;
+
+    GizmoMode mode = scene.GetGizmoMode();
     ScreenPoint2D sCenter = ProjectToScreen(c, viewProj, viewportWidth, viewportHeight);
 
-    // 1. Center Handle (priority: directly around gizmo origin)
-    if (sCenter.valid) {
+    // 1. Center Translation Diamond (Priority: center)
+    if (sCenter.valid && (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_TRANSLATE)) {
         float dCenter = std::hypot(screenX - sCenter.x, screenY - sCenter.y);
         if (dCenter <= 14.0f) {
             return HANDLE_GIZMO_CENTER;
         }
+    }
 
-        // 2. Gizmo Axis Arrows
-        float gLen = 48.0f;
-        ScreenPoint2D sX = ProjectToScreen(c + Vector3(gLen, 0.0f, 0.0f), viewProj, viewportWidth, viewportHeight);
-        ScreenPoint2D sY = ProjectToScreen(c + Vector3(0.0f, gLen, 0.0f), viewProj, viewportWidth, viewportHeight);
-        ScreenPoint2D sZ = ProjectToScreen(c + Vector3(0.0f, 0.0f, gLen), viewProj, viewportWidth, viewportHeight);
+    // 2. Scale Cubes (+X, +Y, +Z at cubeDist)
+    if (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_SCALE) {
+        ScreenPoint2D scX = ProjectToScreen(c + Vector3(cubeDist, 0.0f, 0.0f), viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D scY = ProjectToScreen(c + Vector3(0.0f, cubeDist, 0.0f), viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D scZ = ProjectToScreen(c + Vector3(0.0f, 0.0f, cubeDist), viewProj, viewportWidth, viewportHeight);
 
-        float bestGizmoDist = maxPixelDist;
-        SelectedHandleType bestGizmo = HANDLE_NONE;
+        if (scX.valid && std::hypot(screenX - scX.x, screenY - scX.y) <= 12.0f) return HANDLE_SCALE_X;
+        if (scY.valid && std::hypot(screenX - scY.x, screenY - scY.y) <= 12.0f) return HANDLE_SCALE_Y;
+        if (scZ.valid && std::hypot(screenX - scZ.x, screenY - scZ.y) <= 12.0f) return HANDLE_SCALE_Z;
+    }
 
-        if (sX.valid) {
-            float d = DistToSegment2D(screenX, screenY, sCenter.x, sCenter.y, sX.x, sX.y);
-            if (d < bestGizmoDist) { bestGizmoDist = d; bestGizmo = HANDLE_GIZMO_X; }
+    // 3. Translate Arrow Cone Tips (+X, +Y, +Z)
+    if (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_TRANSLATE) {
+        ScreenPoint2D sTipX = ProjectToScreen(c + Vector3(gLen + coneH * 0.5f, 0.0f, 0.0f), viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D sTipY = ProjectToScreen(c + Vector3(0.0f, gLen + coneH * 0.5f, 0.0f), viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D sTipZ = ProjectToScreen(c + Vector3(0.0f, 0.0f, gLen + coneH * 0.5f), viewProj, viewportWidth, viewportHeight);
+
+        if (sTipX.valid && std::hypot(screenX - sTipX.x, screenY - sTipX.y) <= 13.0f) return HANDLE_GIZMO_X;
+        if (sTipY.valid && std::hypot(screenX - sTipY.x, screenY - sTipY.y) <= 13.0f) return HANDLE_GIZMO_Y;
+        if (sTipZ.valid && std::hypot(screenX - sTipZ.x, screenY - sTipZ.y) <= 13.0f) return HANDLE_GIZMO_Z;
+    }
+
+    // 4. Rotate Rings (Yaw Z in XY, Pitch X in YZ, Roll Y in XZ, Screen trackball)
+    if (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_ROTATE) {
+        float rotTolerance = 8.0f;
+        const int kSegs = 32;
+
+        auto TestCircleSegments = [&](const Vector3& uDir, const Vector3& vDir, float radius) -> float {
+            float minD = 999.0f;
+            Vector3 prevP = c + uDir * radius;
+            ScreenPoint2D prevS = ProjectToScreen(prevP, viewProj, viewportWidth, viewportHeight);
+            for (int k = 1; k <= kSegs; ++k) {
+                float ang = 2.0f * 3.14159265358979323846f * static_cast<float>(k) / static_cast<float>(kSegs);
+                Vector3 curP = c + uDir * (radius * std::cos(ang)) + vDir * (radius * std::sin(ang));
+                ScreenPoint2D curS = ProjectToScreen(curP, viewProj, viewportWidth, viewportHeight);
+                if (prevS.valid && curS.valid) {
+                    float d = DistToSegment2D(screenX, screenY, prevS.x, prevS.y, curS.x, curS.y);
+                    if (d < minD) minD = d;
+                }
+                prevS = curS;
+            }
+            return minD;
+        };
+
+        float dRotZ = TestCircleSegments(Vector3(1.0f, 0.0f, 0.0f), Vector3(0.0f, 1.0f, 0.0f), rotR);
+        float dRotX = TestCircleSegments(Vector3(0.0f, 1.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), rotR);
+        float dRotY = TestCircleSegments(Vector3(1.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), rotR);
+
+        Vector3 fwd = (camPos - c).Normalized();
+        Vector3 upGuide(0.0f, 0.0f, 1.0f);
+        if (std::abs(fwd.z) > 0.92f) upGuide = Vector3(0.0f, 1.0f, 0.0f);
+        Vector3 rDir = fwd.Cross(upGuide).Normalized();
+        Vector3 uDir = rDir.Cross(fwd).Normalized();
+        float dRotScreen = TestCircleSegments(rDir, uDir, screenR);
+
+        float bestRotDist = rotTolerance;
+        SelectedHandleType bestRot = HANDLE_NONE;
+
+        if (dRotZ < bestRotDist) { bestRotDist = dRotZ; bestRot = HANDLE_ROTATE_Z; }
+        if (dRotX < bestRotDist) { bestRotDist = dRotX; bestRot = HANDLE_ROTATE_X; }
+        if (dRotY < bestRotDist) { bestRotDist = dRotY; bestRot = HANDLE_ROTATE_Y; }
+        if (dRotScreen < bestRotDist) { bestRotDist = dRotScreen; bestRot = HANDLE_ROTATE_SCREEN; }
+
+        if (bestRot != HANDLE_NONE) {
+            return bestRot;
         }
-        if (sY.valid) {
-            float d = DistToSegment2D(screenX, screenY, sCenter.x, sCenter.y, sY.x, sY.y);
-            if (d < bestGizmoDist) { bestGizmoDist = d; bestGizmo = HANDLE_GIZMO_Y; }
+    }
+
+    // 5. Translate Arrow Shafts
+    if (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_TRANSLATE) {
+        ScreenPoint2D sBaseX = ProjectToScreen(c + Vector3(gLen, 0.0f, 0.0f), viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D sBaseY = ProjectToScreen(c + Vector3(0.0f, gLen, 0.0f), viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D sBaseZ = ProjectToScreen(c + Vector3(0.0f, 0.0f, gLen), viewProj, viewportWidth, viewportHeight);
+
+        float bestArrowDist = maxPixelDist;
+        SelectedHandleType bestArrow = HANDLE_NONE;
+
+        if (sCenter.valid && sBaseX.valid) {
+            float d = DistToSegment2D(screenX, screenY, sCenter.x, sCenter.y, sBaseX.x, sBaseX.y);
+            if (d < bestArrowDist) { bestArrowDist = d; bestArrow = HANDLE_GIZMO_X; }
         }
-        if (sZ.valid) {
-            float d = DistToSegment2D(screenX, screenY, sCenter.x, sCenter.y, sZ.x, sZ.y);
-            if (d < bestGizmoDist) { bestGizmoDist = d; bestGizmo = HANDLE_GIZMO_Z; }
+        if (sCenter.valid && sBaseY.valid) {
+            float d = DistToSegment2D(screenX, screenY, sCenter.x, sCenter.y, sBaseY.x, sBaseY.y);
+            if (d < bestArrowDist) { bestArrowDist = d; bestArrow = HANDLE_GIZMO_Y; }
+        }
+        if (sCenter.valid && sBaseZ.valid) {
+            float d = DistToSegment2D(screenX, screenY, sCenter.x, sCenter.y, sBaseZ.x, sBaseZ.y);
+            if (d < bestArrowDist) { bestArrowDist = d; bestArrow = HANDLE_GIZMO_Z; }
         }
 
-        if (bestGizmo != HANDLE_NONE) {
-            return bestGizmo;
+        if (bestArrow != HANDLE_NONE) {
+            return bestArrow;
         }
     }
 
-    // 3. Corner Handles
-    Vector3 cNW = sel->GetCorner(NAV_CORNER_NORTH_WEST); cNW.z += 2.0f;
-    Vector3 cNE = sel->GetCorner(NAV_CORNER_NORTH_EAST); cNE.z += 2.0f;
-    Vector3 cSE = sel->GetCorner(NAV_CORNER_SOUTH_EAST); cSE.z += 2.0f;
-    Vector3 cSW = sel->GetCorner(NAV_CORNER_SOUTH_WEST); cSW.z += 2.0f;
+    // 6. Corner Handles (Area only)
+    if (selArea) {
+        Vector3 cNW = selArea->GetCorner(NAV_CORNER_NORTH_WEST); cNW.z += 2.0f;
+        Vector3 cNE = selArea->GetCorner(NAV_CORNER_NORTH_EAST); cNE.z += 2.0f;
+        Vector3 cSE = selArea->GetCorner(NAV_CORNER_SOUTH_EAST); cSE.z += 2.0f;
+        Vector3 cSW = selArea->GetCorner(NAV_CORNER_SOUTH_WEST); cSW.z += 2.0f;
 
-    ScreenPoint2D sNW = ProjectToScreen(cNW, viewProj, viewportWidth, viewportHeight);
-    ScreenPoint2D sNE = ProjectToScreen(cNE, viewProj, viewportWidth, viewportHeight);
-    ScreenPoint2D sSE = ProjectToScreen(cSE, viewProj, viewportWidth, viewportHeight);
-    ScreenPoint2D sSW = ProjectToScreen(cSW, viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D sNW = ProjectToScreen(cNW, viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D sNE = ProjectToScreen(cNE, viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D sSE = ProjectToScreen(cSE, viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D sSW = ProjectToScreen(cSW, viewProj, viewportWidth, viewportHeight);
 
-    if (sNW.valid && std::hypot(screenX - sNW.x, screenY - sNW.y) <= 12.0f) return HANDLE_CORNER_NW;
-    if (sNE.valid && std::hypot(screenX - sNE.x, screenY - sNE.y) <= 12.0f) return HANDLE_CORNER_NE;
-    if (sSE.valid && std::hypot(screenX - sSE.x, screenY - sSE.y) <= 12.0f) return HANDLE_CORNER_SE;
-    if (sSW.valid && std::hypot(screenX - sSW.x, screenY - sSW.y) <= 12.0f) return HANDLE_CORNER_SW;
+        if (sNW.valid && std::hypot(screenX - sNW.x, screenY - sNW.y) <= 12.0f) return HANDLE_CORNER_NW;
+        if (sNE.valid && std::hypot(screenX - sNE.x, screenY - sNE.y) <= 12.0f) return HANDLE_CORNER_NE;
+        if (sSE.valid && std::hypot(screenX - sSE.x, screenY - sSE.y) <= 12.0f) return HANDLE_CORNER_SE;
+        if (sSW.valid && std::hypot(screenX - sSW.x, screenY - sSW.y) <= 12.0f) return HANDLE_CORNER_SW;
 
-    // 4. Edges (North, East, South, West)
-    float edgeTolerance = 10.0f;
-    float bestEdgeDist = edgeTolerance;
-    SelectedHandleType bestEdge = HANDLE_NONE;
+        // 7. Edges (North, East, South, West)
+        float edgeTolerance = 10.0f;
+        float bestEdgeDist = edgeTolerance;
+        SelectedHandleType bestEdge = HANDLE_NONE;
 
-    if (sNW.valid && sNE.valid) {
-        float d = DistToSegment2D(screenX, screenY, sNW.x, sNW.y, sNE.x, sNE.y);
-        if (d < bestEdgeDist) { bestEdgeDist = d; bestEdge = HANDLE_EDGE_NORTH; }
+        if (sNW.valid && sNE.valid) {
+            float d = DistToSegment2D(screenX, screenY, sNW.x, sNW.y, sNE.x, sNE.y);
+            if (d < bestEdgeDist) { bestEdgeDist = d; bestEdge = HANDLE_EDGE_NORTH; }
+        }
+        if (sNE.valid && sSE.valid) {
+            float d = DistToSegment2D(screenX, screenY, sNE.x, sNE.y, sSE.x, sSE.y);
+            if (d < bestEdgeDist) { bestEdgeDist = d; bestEdge = HANDLE_EDGE_EAST; }
+        }
+        if (sSW.valid && sSE.valid) {
+            float d = DistToSegment2D(screenX, screenY, sSW.x, sSW.y, sSE.x, sSE.y);
+            if (d < bestEdgeDist) { bestEdgeDist = d; bestEdge = HANDLE_EDGE_SOUTH; }
+        }
+        if (sNW.valid && sSW.valid) {
+            float d = DistToSegment2D(screenX, screenY, sNW.x, sNW.y, sSW.x, sSW.y);
+            if (d < bestEdgeDist) { bestEdgeDist = d; bestEdge = HANDLE_EDGE_WEST; }
+        }
+
+        return bestEdge;
     }
-    if (sNE.valid && sSE.valid) {
-        float d = DistToSegment2D(screenX, screenY, sNE.x, sNE.y, sSE.x, sSE.y);
-        if (d < bestEdgeDist) { bestEdgeDist = d; bestEdge = HANDLE_EDGE_EAST; }
-    }
-    if (sSW.valid && sSE.valid) {
-        float d = DistToSegment2D(screenX, screenY, sSW.x, sSW.y, sSE.x, sSE.y);
-        if (d < bestEdgeDist) { bestEdgeDist = d; bestEdge = HANDLE_EDGE_SOUTH; }
-    }
-    if (sNW.valid && sSW.valid) {
-        float d = DistToSegment2D(screenX, screenY, sNW.x, sNW.y, sSW.x, sSW.y);
-        if (d < bestEdgeDist) { bestEdgeDist = d; bestEdge = HANDLE_EDGE_WEST; }
-    }
 
-    return bestEdge;
+    return HANDLE_NONE;
 }
