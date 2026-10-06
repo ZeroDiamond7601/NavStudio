@@ -384,12 +384,11 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
 
             // 4 Corner vertex handles
             SelectedHandleType cornerHandles[4] = {
-                HANDLE_CORNER_NORTH_WEST, // mapped from enum
+                HANDLE_CORNER_NW,
                 HANDLE_CORNER_NE,
                 HANDLE_CORNER_SE,
                 HANDLE_CORNER_SW
             };
-            cornerHandles[0] = HANDLE_CORNER_NW;
 
             for (int k = 0; k < 4; ++k) {
                 Vector3 cp = sel->GetCorner(static_cast<NavCornerType>(k));

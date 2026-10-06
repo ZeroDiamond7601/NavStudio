@@ -5,6 +5,12 @@
 #include <cstring>
 #include "math/vector3.h"
 
+struct Vector4 {
+    float x{0.0f}, y{0.0f}, z{0.0f}, w{0.0f};
+    Vector4() = default;
+    Vector4(float _x, float _y, float _z, float _w = 1.0f) : x(_x), y(_y), z(_z), w(_w) {}
+};
+
 // Column-major 4x4 matrix for OpenGL compatibility
 struct Matrix4 {
     float m[16];
@@ -89,6 +95,15 @@ struct Matrix4 {
             }
         }
         return out;
+    }
+
+    Vector4 operator*(const Vector4& v) const {
+        return Vector4(
+            m[0] * v.x + m[4] * v.y + m[8] * v.z + m[12] * v.w,
+            m[1] * v.x + m[5] * v.y + m[9] * v.z + m[13] * v.w,
+            m[2] * v.x + m[6] * v.y + m[10] * v.z + m[14] * v.w,
+            m[3] * v.x + m[7] * v.y + m[11] * v.z + m[15] * v.w
+        );
     }
 
     Vector3 MultiplyPoint(const Vector3& p) const {

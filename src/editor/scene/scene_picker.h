@@ -7,11 +7,6 @@
 #include "editor/scene/editor_scene.h"
 #include "editor/scene/editor_handles.h"
 
-struct Ray {
-    Vector3 origin;
-    Vector3 direction;
-};
-
 class ScenePicker {
 public:
     static Ray ScreenPointToRay(

@@ -62,6 +62,7 @@ public:
     void SelectArea(uint32_t id);
     void SetHoveredArea(uint32_t id);
     NavArea* GetSelectedArea();
+    const NavArea* GetSelectedArea() const;
     uint32_t GetSelectedAreaID() const { return m_selectedAreaId; }
 
     EntityRenderer& GetEntityRenderer() { return m_entityRenderer; }

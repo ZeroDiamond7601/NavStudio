@@ -1,6 +1,13 @@
 #ifndef EDITOR_HANDLES_H
 #define EDITOR_HANDLES_H
 
+#include "math/vector3.h"
+
+struct Ray {
+    Vector3 origin;
+    Vector3 direction;
+};
+
 enum SelectedHandleType {
     HANDLE_NONE = 0,
     HANDLE_GIZMO_X,

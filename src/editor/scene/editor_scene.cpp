@@ -405,6 +405,11 @@ NavArea* EditorScene::GetSelectedArea() {
     return m_nav->GetAreaByID(m_selectedAreaId);
 }
 
+const NavArea* EditorScene::GetSelectedArea() const {
+    if (m_selectedAreaId == 0 || !m_nav || !m_nav->IsLoaded()) return nullptr;
+    return m_nav->GetAreaByID(m_selectedAreaId);
+}
+
 void EditorScene::RebuildNavRenderer() {
     if (m_nav && m_nav->IsLoaded()) {
         int axis = static_cast<int>(m_transformAxis);
