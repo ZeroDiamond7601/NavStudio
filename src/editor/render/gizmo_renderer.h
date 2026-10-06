@@ -36,6 +36,11 @@ public:
                 SelectedHandleType hoveredHandle,
                 SelectedHandleType selectedHandle);
 
+    void RenderLineSegment(const Shader& lineShader, const Matrix4& mvp,
+                           const Vector3& p0, const Vector3& p1,
+                           float r, float g, float b, float a,
+                           float lineWidth = 3.5f);
+
 private:
     void BuildBuffers(const Vector3& center, const Vector3& camPos,
                       GizmoMode mode,

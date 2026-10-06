@@ -255,6 +255,13 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 
             ImGui::Separator();
             NavArea* sel = scene.GetSelectedArea();
+            bool bridgeActive = scene.IsBridgeMode();
+            if (ImGui::MenuItem("Bridge Two Edges...", "B", &bridgeActive)) {
+                scene.ToggleBridgeMode();
+            }
+            if (ImGui::MenuItem("Snap to Neighbors (Close Gaps)", "Shift+S", false, sel != nullptr)) {
+                scene.SnapSelectedAreaToNeighbors(cmdMgr);
+            }
             if (ImGui::MenuItem("Extrude Selected Edge", "E", false, sel != nullptr)) {
                 scene.ExtrudeSelectedEdge(cmdMgr);
             }
@@ -485,12 +492,18 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::Text("Grid Snapping:");
+        ImGui::Text("Snapping:");
         bool gridSnap = scene.GetGridSnap();
-        if (ImGui::Checkbox("Snap to Grid", &gridSnap)) {
+        if (ImGui::Checkbox("Grid", &gridSnap)) {
             scene.SetGridSnap(gridSnap);
         }
         ImGui::SameLine();
+        bool meshSnap = scene.GetMeshSnap();
+        if (ImGui::Checkbox("Snap to Areas", &meshSnap)) {
+            scene.SetMeshSnap(meshSnap);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Magnetically snaps dragged edges and areas flush against neighbors to eliminate gaps");
+
         float curGrid = scene.GetGridSize();
         if (ImGui::Button("[-]##decgrid", ImVec2(24, 22))) {
             scene.DecreaseGridSize();
@@ -561,6 +574,19 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         if (ImGui::Button("Extrude Edge [E]", ImVec2(-1, 26))) {
             if (hasSel) scene.ExtrudeSelectedEdge(cmdMgr);
         }
+
+        bool bridgeActive = scene.IsBridgeMode();
+        if (bridgeActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.45f, 0.15f, 1.0f));
+        if (ImGui::Button(bridgeActive ? "Cancel Bridge [Esc]" : "Bridge Edges [B]", ImVec2(-1, 26))) {
+            scene.ToggleBridgeMode();
+        }
+        if (bridgeActive) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click edge A then edge B to create an intermediate connecting NavArea between them");
+
+        if (ImGui::Button("Snap to Neighbors [Shift+S]", ImVec2(-1, 26))) {
+            if (hasSel) scene.SnapSelectedAreaToNeighbors(cmdMgr);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Snaps selected area flush to adjacent areas and closes micro-gaps");
 
         if (ImGui::Button("Split Area [Shift+X]", ImVec2(-1, 26))) {
             if (hasSel) scene.SplitSelectedArea(cmdMgr);
@@ -1198,7 +1224,16 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
         const auto& entR = scene.GetEntityRenderer();
         int selEntIdx = scene.GetSelectedEntityIndex();
 
-        if (selEntIdx >= 0 && selEntIdx < static_cast<int>(entCount)) {
+        if (scene.IsBridgeMode()) {
+            uint32_t a1 = scene.GetBridgeFirstArea();
+            if (a1 == 0) {
+                ImGui::TextColored(ImVec4(0.2f, 1.0f, 1.0f, 1.0f),
+                    "[BRIDGE TOOL ACTIVE] Step 1: Click the FIRST edge on any NavArea in 3D viewport | Right-Click or Esc to cancel");
+            } else {
+                ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f),
+                    "[BRIDGE TOOL ACTIVE] Step 2: First edge selected on Area #%u. Now click SECOND edge on another NavArea to bridge | Esc to cancel", a1);
+            }
+        } else if (selEntIdx >= 0 && selEntIdx < static_cast<int>(entCount)) {
             const auto* selEnt = scene.GetSelectedEntity();
             if (selEnt) {
                 ImGui::Text("Map: %s | Entity #%d (%s) @ (%.0f, %.0f, %.0f) | Entities: %zu | Grid: %.0f [%s]",
@@ -1263,6 +1298,8 @@ void EditorUI::RenderHelpModal() {
         ImGui::BulletText("Shift + M: Merge selected area with adjacent collinear area");
         ImGui::BulletText("[ / ]: Decrease / Increase grid snap size (1 to 512)");
         ImGui::BulletText("Shift + W: Toggle Grid Snapping");
+        ImGui::BulletText("B: Bridge Mode (Click Edge 1 + Edge 2 to generate connecting area)");
+        ImGui::BulletText("Shift + S: Snap selected area flush to neighbors (close micro-gaps)");
         ImGui::BulletText("R: Rotate area orientation 90 degrees");
         ImGui::BulletText("C: Connect Mode (Left-Click target: 2-Way, Shift+Click: 1-Way)");
         ImGui::BulletText("Shift + D: Duplicate selected area");

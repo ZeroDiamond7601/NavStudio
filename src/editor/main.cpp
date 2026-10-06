@@ -68,6 +68,10 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
 
     if (button == GLFW_MOUSE_BUTTON_RIGHT) {
         if (action == GLFW_PRESS) {
+            if (g_activeScene && g_activeScene->IsBridgeMode()) {
+                g_activeScene->CancelBridgeMode();
+                return;
+            }
             if (g_activeScene && g_activeScene->GetTransformMode() != EditorScene::TRANSFORM_NONE) {
                 // Right-click cancels active modal transform
                 g_activeScene->CancelTransform();
@@ -89,6 +93,16 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
             float aspect = (displayH > 0) ? (static_cast<float>(displayW) / static_cast<float>(displayH)) : 1.0f;
             double mouseX, mouseY;
             glfwGetCursorPos(window, &mouseX, &mouseY);
+
+            // Bridge Mode Left Click: Click Edge 1 then Edge 2
+            if (g_activeScene->IsBridgeMode()) {
+                uint32_t edgeArea = g_activeScene->GetBridgeHoverArea();
+                SelectedHandleType edgeHandle = g_activeScene->GetBridgeHoverEdge();
+                if (edgeArea != 0 && edgeHandle != HANDLE_NONE) {
+                    g_activeScene->OnBridgeClick(edgeArea, edgeHandle, *g_cmdMgr);
+                    return;
+                }
+            }
 
             Ray ray = ScenePicker::ScreenPointToRay(
                 static_cast<float>(mouseX), static_cast<float>(mouseY),
@@ -202,6 +216,10 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 g_activeScene->SetGizmoMode(GIZMO_MODE_SCALE);
             } else if (key == GLFW_KEY_4 && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // 4: All / Combined Gizmo
                 g_activeScene->SetGizmoMode(GIZMO_MODE_COMBINED);
+            } else if (key == GLFW_KEY_B && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // B: Bridge Tool
+                g_activeScene->ToggleBridgeMode();
+            } else if (key == GLFW_KEY_ESCAPE && g_activeScene->IsBridgeMode()) {
+                g_activeScene->CancelBridgeMode();
             }
 
             // Normal Selection Mode Hotkeys
@@ -222,7 +240,9 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
 
                 if (key == GLFW_KEY_G) {
                     if (sel) g_activeScene->StartGrabWithRay(ray);
-                } else if (key == GLFW_KEY_S && (mods & GLFW_MOD_CONTROL) == 0) {
+                } else if (key == GLFW_KEY_S && (mods & GLFW_MOD_SHIFT) != 0) { // Shift+S: Snap to Neighbors
+                    g_activeScene->SnapSelectedAreaToNeighbors(*g_cmdMgr);
+                } else if (key == GLFW_KEY_S && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_SHIFT)) == 0) {
                     if (sel) {
                         Matrix4 viewProj = g_camera.GetProjectionMatrix(aspect) * g_camera.GetViewMatrix();
                         g_activeScene->StartScaleWithScreen(
@@ -305,6 +325,17 @@ static void CursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
                 static_cast<float>(xpos), static_cast<float>(ypos),
                 ray, static_cast<float>(ypos - g_lastMouseY)
             );
+        } else if (g_activeScene->IsBridgeMode()) {
+            uint32_t edgeAreaId = 0;
+            SelectedHandleType edgeHandle = HANDLE_NONE;
+            ScenePicker::PickAnyAreaEdge(
+                *g_activeScene,
+                static_cast<float>(xpos), static_cast<float>(ypos),
+                displayW, displayH,
+                g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect),
+                edgeAreaId, edgeHandle, 20.0f
+            );
+            g_activeScene->SetBridgeHoverEdge(edgeAreaId, edgeHandle);
         } else {
             auto mode = g_activeScene->GetTransformMode();
             if (mode == EditorScene::TRANSFORM_TRANSLATE || mode == EditorScene::TRANSFORM_SCALE) {

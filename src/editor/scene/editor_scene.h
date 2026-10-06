@@ -136,6 +136,26 @@ public:
     float SnapValue(float val) const;
     Vector3 SnapVector(const Vector3& v) const;
 
+    // Mesh-to-Mesh Snapping (Snap flush against neighboring nav areas to eliminate gaps)
+    bool GetMeshSnap() const { return m_meshSnap; }
+    void SetMeshSnap(bool snap) { m_meshSnap = snap; }
+    void ToggleMeshSnap() { m_meshSnap = !m_meshSnap; }
+    float SnapToNeighborEdge(uint32_t currentAreaId, float candidateVal, bool isXAxis,
+                             float refMinOtherAxis, float refMaxOtherAxis) const;
+    void SnapSelectedAreaToNeighbors(class CommandManager& cmdMgr);
+
+    // Bridge Tool (Click Edge A and Edge B to create intermediate connecting NavArea)
+    bool IsBridgeMode() const { return m_isBridgeMode; }
+    void StartBridgeMode();
+    void CancelBridgeMode();
+    void ToggleBridgeMode();
+    uint32_t GetBridgeFirstArea() const { return m_bridgeFirstAreaId; }
+    SelectedHandleType GetBridgeFirstEdge() const { return m_bridgeFirstEdge; }
+    uint32_t GetBridgeHoverArea() const { return m_bridgeHoverAreaId; }
+    SelectedHandleType GetBridgeHoverEdge() const { return m_bridgeHoverEdge; }
+    void SetBridgeHoverEdge(uint32_t areaId, SelectedHandleType edge);
+    void OnBridgeClick(uint32_t areaId, SelectedHandleType edge, class CommandManager& cmdMgr);
+
     // Interactive Handles (Gizmo Arrows, Edges, Corners)
     SelectedHandleType GetHoveredHandle() const { return m_hoveredHandle; }
     void SetHoveredHandle(SelectedHandleType h);
@@ -223,6 +243,17 @@ private:
     // Grid Snapping
     float m_gridSize{32.0f};
     bool m_gridSnap{true};
+
+    // Mesh-to-Mesh Snapping
+    bool m_meshSnap{true};
+    float m_meshSnapTolerance{16.0f};
+
+    // Bridge Tool
+    bool m_isBridgeMode{false};
+    uint32_t m_bridgeFirstAreaId{0};
+    SelectedHandleType m_bridgeFirstEdge{HANDLE_NONE};
+    uint32_t m_bridgeHoverAreaId{0};
+    SelectedHandleType m_bridgeHoverEdge{HANDLE_NONE};
 
     // Handles
     SelectedHandleType m_hoveredHandle{HANDLE_NONE};

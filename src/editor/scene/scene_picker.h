@@ -35,6 +35,18 @@ public:
         float maxPixelDist = 12.0f
     );
 
+    // Tests screen point against all area edges in the scene (for Bridge Tool)
+    static bool PickAnyAreaEdge(
+        const EditorScene& scene,
+        float screenX, float screenY,
+        float viewportWidth, float viewportHeight,
+        const Matrix4& viewMatrix,
+        const Matrix4& projMatrix,
+        uint32_t& outAreaId,
+        SelectedHandleType& outEdge,
+        float maxPixelDist = 18.0f
+    );
+
 private:
     static bool RayIntersectsAABB(
         const Ray& ray,

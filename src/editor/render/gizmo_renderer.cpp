@@ -421,3 +421,53 @@ void GizmoRenderer::Render(const Shader& lineShader, const Matrix4& mvp,
     glDepthFunc(GL_LESS);
     glDisable(GL_BLEND);
 }
+
+void GizmoRenderer::RenderLineSegment(const Shader& lineShader, const Matrix4& mvp,
+                                      const Vector3& p0, const Vector3& p1,
+                                      float r, float g, float b, float a,
+                                      float lineWidth) {
+    if (m_vao == 0) {
+        glGenVertexArrays(1, &m_vao);
+        glGenBuffers(1, &m_vbo);
+        glGenBuffers(1, &m_ebo);
+    }
+
+    GizmoVertex v[2] = {
+        { p0.x, p0.y, p0.z, r, g, b, a },
+        { p1.x, p1.y, p1.z, r, g, b, a }
+    };
+    uint32_t indices[2] = { 0, 1 };
+
+    glBindVertexArray(m_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_DYNAMIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(GizmoVertex), (void*)offsetof(GizmoVertex, x));
+    glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(GizmoVertex), (void*)offsetof(GizmoVertex, r));
+    glEnableVertexAttribArray(1);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_FALSE);
+
+    lineShader.Bind();
+    lineShader.SetMat4("u_MVP", mvp);
+    lineShader.SetVec4("u_Color", 1.0f, 1.0f, 1.0f, 1.0f);
+
+    glLineWidth(lineWidth);
+    glDrawElements(GL_LINES, 2, GL_UNSIGNED_INT, nullptr);
+    glBindVertexArray(0);
+    lineShader.Unbind();
+
+    glLineWidth(1.0f);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
+    glDisable(GL_BLEND);
+}

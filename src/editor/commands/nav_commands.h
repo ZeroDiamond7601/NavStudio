@@ -737,6 +737,254 @@ private:
     std::vector<SavedConn> m_outgoing2;
     std::vector<SavedConn> m_incoming2;
     bool m_valid{false};
+// Helper function to get 2D distance from point to segment
+static inline float DistPointToSegment2D(const Vector3& pt, const Vector3& s0, const Vector3& s1) {
+    float dx = s1.x - s0.x;
+    float dy = s1.y - s0.y;
+    float l2 = dx * dx + dy * dy;
+    if (l2 < 1e-4f) return std::hypot(pt.x - s0.x, pt.y - s0.y);
+    float t = std::max(0.0f, std::min(1.0f, ((pt.x - s0.x) * dx + (pt.y - s0.y) * dy) / l2));
+    float px = s0.x + t * dx;
+    float py = s0.y + t * dy;
+    return std::hypot(pt.x - px, pt.y - py);
+}
+
+// Command: Bridge Two Edges (Create intermediate connecting NavArea between two edges)
+class CmdBridgeEdges : public IEditCommand {
+public:
+    CmdBridgeEdges(EditorScene* scene, uint32_t area1Id, SelectedHandleType edge1,
+                   uint32_t area2Id, SelectedHandleType edge2)
+        : m_scene(scene), m_area1Id(area1Id), m_edge1(edge1), m_area2Id(area2Id), m_edge2(edge2), m_createdId(0) {}
+
+    void Execute() override {
+        NavArea* a1 = m_scene->GetNAV().GetAreaByID(m_area1Id);
+        NavArea* a2 = m_scene->GetNAV().GetAreaByID(m_area2Id);
+        if (!a1 || !a2 || a1 == a2) return;
+
+        auto GetEdgeP1 = [](const NavArea* a, SelectedHandleType e) -> Vector3 {
+            switch (e) {
+                case HANDLE_EDGE_NORTH: return a->GetCorner(NAV_CORNER_NORTH_WEST);
+                case HANDLE_EDGE_EAST:  return a->GetCorner(NAV_CORNER_NORTH_EAST);
+                case HANDLE_EDGE_SOUTH: return a->GetCorner(NAV_CORNER_SOUTH_WEST);
+                case HANDLE_EDGE_WEST:  return a->GetCorner(NAV_CORNER_NORTH_WEST);
+                default: return a->GetCenter();
+            }
+        };
+        auto GetEdgeP2 = [](const NavArea* a, SelectedHandleType e) -> Vector3 {
+            switch (e) {
+                case HANDLE_EDGE_NORTH: return a->GetCorner(NAV_CORNER_NORTH_EAST);
+                case HANDLE_EDGE_EAST:  return a->GetCorner(NAV_CORNER_SOUTH_EAST);
+                case HANDLE_EDGE_SOUTH: return a->GetCorner(NAV_CORNER_SOUTH_EAST);
+                case HANDLE_EDGE_WEST:  return a->GetCorner(NAV_CORNER_SOUTH_WEST);
+                default: return a->GetCenter();
+            }
+        };
+
+        Vector3 p1a = GetEdgeP1(a1, m_edge1);
+        Vector3 p1b = GetEdgeP2(a1, m_edge1);
+        Vector3 p2a = GetEdgeP1(a2, m_edge2);
+        Vector3 p2b = GetEdgeP2(a2, m_edge2);
+
+        NavExtent ext;
+        // North/South edge pair (gap in Y)
+        if ((m_edge1 == HANDLE_EDGE_NORTH || m_edge1 == HANDLE_EDGE_SOUTH) &&
+            (m_edge2 == HANDLE_EDGE_NORTH || m_edge2 == HANDLE_EDGE_SOUTH)) {
+            ext.lo.y = std::min(p1a.y, p2a.y);
+            ext.hi.y = std::max(p1a.y, p2a.y);
+
+            float x1Min = std::min(p1a.x, p1b.x), x1Max = std::max(p1a.x, p1b.x);
+            float x2Min = std::min(p2a.x, p2b.x), x2Max = std::max(p2a.x, p2b.x);
+            float overlapMin = std::max(x1Min, x2Min);
+            float overlapMax = std::min(x1Max, x2Max);
+
+            if (overlapMax - overlapMin >= 16.0f) {
+                ext.lo.x = overlapMin;
+                ext.hi.x = overlapMax;
+            } else {
+                ext.lo.x = std::min(x1Min, x2Min);
+                ext.hi.x = std::max(x1Max, x2Max);
+            }
+        }
+        // East/West edge pair (gap in X)
+        else if ((m_edge1 == HANDLE_EDGE_EAST || m_edge1 == HANDLE_EDGE_WEST) &&
+                 (m_edge2 == HANDLE_EDGE_EAST || m_edge2 == HANDLE_EDGE_WEST)) {
+            ext.lo.x = std::min(p1a.x, p2a.x);
+            ext.hi.x = std::max(p1a.x, p2a.x);
+
+            float y1Min = std::min(p1a.y, p1b.y), y1Max = std::max(p1a.y, p1b.y);
+            float y2Min = std::min(p2a.y, p2b.y), y2Max = std::max(p2a.y, p2b.y);
+            float overlapMin = std::max(y1Min, y2Min);
+            float overlapMax = std::min(y1Max, y2Max);
+
+            if (overlapMax - overlapMin >= 16.0f) {
+                ext.lo.y = overlapMin;
+                ext.hi.y = overlapMax;
+            } else {
+                ext.lo.y = std::min(y1Min, y2Min);
+                ext.hi.y = std::max(y1Max, y2Max);
+            }
+        }
+        // Arbitrary / diagonal / perpendicular edges
+        else {
+            ext.lo.x = std::min({p1a.x, p1b.x, p2a.x, p2b.x});
+            ext.hi.x = std::max({p1a.x, p1b.x, p2a.x, p2b.x});
+            ext.lo.y = std::min({p1a.y, p1b.y, p2a.y, p2b.y});
+            ext.hi.y = std::max({p1a.y, p1b.y, p2a.y, p2b.y});
+        }
+
+        if (ext.hi.x - ext.lo.x < 16.0f) ext.hi.x = ext.lo.x + 16.0f;
+        if (ext.hi.y - ext.lo.y < 16.0f) ext.hi.y = ext.lo.y + 16.0f;
+
+        // Calculate smooth elevation interpolation across the 4 bridge corners
+        auto CalcZ = [&](float x, float y) -> float {
+            Vector3 pt(x, y, 0.0f);
+            float d1 = DistPointToSegment2D(pt, p1a, p1b);
+            float d2 = DistPointToSegment2D(pt, p2a, p2b);
+            float total = d1 + d2;
+            if (total < 1e-3f) return a1->GetZ(x, y);
+            float w1 = d2 / total;
+            float w2 = d1 / total;
+            return w1 * a1->GetZ(x, y) + w2 * a2->GetZ(x, y);
+        };
+
+        float nwZ = CalcZ(ext.lo.x, ext.hi.y);
+        float neZ = CalcZ(ext.hi.x, ext.hi.y);
+        float seZ = CalcZ(ext.hi.x, ext.lo.y);
+        float swZ = CalcZ(ext.lo.x, ext.lo.y);
+
+        ext.lo.z = nwZ;
+        ext.hi.z = seZ;
+
+        NavArea* bridge = m_scene->GetNAV().CreateArea(ext, neZ, swZ);
+        if (!bridge) return;
+
+        m_createdId = bridge->GetID();
+        bridge->SetAttributes(a1->GetAttributes());
+        bridge->SetPlace(a1->GetPlace());
+        bridge->SetPlaceName(a1->GetPlaceName());
+
+        // Connect 2-way with both parent areas
+        m_scene->GetNAV().ConnectAreas(m_area1Id, m_createdId, true);
+        m_scene->GetNAV().ConnectAreas(m_createdId, m_area2Id, true);
+
+        m_scene->SelectArea(m_createdId);
+        m_scene->RebuildNavRenderer();
+    }
+
+    void Undo() override {
+        if (m_createdId != 0) {
+            m_scene->GetNAV().RemoveArea(m_createdId);
+            m_scene->SelectArea(m_area1Id);
+            m_scene->RebuildNavRenderer();
+            m_createdId = 0;
+        }
+    }
+
+    uint32_t GetCreatedID() const { return m_createdId; }
+    const char* GetName() const override { return "Bridge Edges"; }
+
+private:
+    EditorScene* m_scene;
+    uint32_t m_area1Id;
+    SelectedHandleType m_edge1;
+    uint32_t m_area2Id;
+    SelectedHandleType m_edge2;
+    uint32_t m_createdId;
+};
+
+// Command: Snap Area To Neighbors (Close gaps to adjacent collinear nav areas and connect)
+class CmdSnapAreaToNeighbors : public IEditCommand {
+public:
+    CmdSnapAreaToNeighbors(EditorScene* scene, uint32_t areaId, float tolerance = 24.0f)
+        : m_scene(scene), m_areaId(areaId), m_tolerance(tolerance), m_valid(false) {}
+
+    void Execute() override {
+        NavArea* area = m_scene->GetNAV().GetAreaByID(m_areaId);
+        if (!area) return;
+
+        m_oldExt = area->GetExtent();
+        m_oldNeZ = area->GetNEZ();
+        m_oldSwZ = area->GetSWZ();
+        m_newExt = m_oldExt;
+        m_newNeZ = m_oldNeZ;
+        m_newSwZ = m_oldSwZ;
+
+        m_connectedNeighbors.clear();
+
+        for (const auto* other : m_scene->GetNAV().GetAreas()) {
+            if (!other || other->GetID() == m_areaId) continue;
+            const NavExtent& oExt = other->GetExtent();
+
+            // Check North edge gap
+            if (std::abs(m_newExt.hi.y - oExt.lo.y) <= m_tolerance &&
+                m_newExt.hi.x > oExt.lo.x + 4.0f && m_newExt.lo.x < oExt.hi.x - 4.0f) {
+                m_newExt.hi.y = oExt.lo.y;
+                m_newExt.lo.z = other->GetCorner(NAV_CORNER_SOUTH_WEST).z;
+                m_newNeZ = other->GetCorner(NAV_CORNER_SOUTH_EAST).z;
+                m_connectedNeighbors.push_back({ other->GetID(), NAV_DIR_NORTH });
+            }
+            // Check South edge gap
+            if (std::abs(m_newExt.lo.y - oExt.hi.y) <= m_tolerance &&
+                m_newExt.hi.x > oExt.lo.x + 4.0f && m_newExt.lo.x < oExt.hi.x - 4.0f) {
+                m_newExt.lo.y = oExt.hi.y;
+                m_newSwZ = other->GetCorner(NAV_CORNER_NORTH_WEST).z;
+                m_newExt.hi.z = other->GetCorner(NAV_CORNER_NORTH_EAST).z;
+                m_connectedNeighbors.push_back({ other->GetID(), NAV_DIR_SOUTH });
+            }
+            // Check East edge gap
+            if (std::abs(m_newExt.hi.x - oExt.lo.x) <= m_tolerance &&
+                m_newExt.hi.y > oExt.lo.y + 4.0f && m_newExt.lo.y < oExt.hi.y - 4.0f) {
+                m_newExt.hi.x = oExt.lo.x;
+                m_newNeZ = other->GetCorner(NAV_CORNER_NORTH_WEST).z;
+                m_newExt.hi.z = other->GetCorner(NAV_CORNER_SOUTH_WEST).z;
+                m_connectedNeighbors.push_back({ other->GetID(), NAV_DIR_EAST });
+            }
+            // Check West edge gap
+            if (std::abs(m_newExt.lo.x - oExt.hi.x) <= m_tolerance &&
+                m_newExt.hi.y > oExt.lo.y + 4.0f && m_newExt.lo.y < oExt.hi.y - 4.0f) {
+                m_newExt.lo.x = oExt.hi.x;
+                m_newExt.lo.z = other->GetCorner(NAV_CORNER_NORTH_EAST).z;
+                m_newSwZ = other->GetCorner(NAV_CORNER_SOUTH_EAST).z;
+                m_connectedNeighbors.push_back({ other->GetID(), NAV_DIR_WEST });
+            }
+        }
+
+        m_scene->GetNAV().GetGrid().RemoveArea(area);
+        area->SetExtent(m_newExt);
+        area->SetCornerHeights(m_newNeZ, m_newSwZ);
+        m_scene->GetNAV().GetGrid().AddArea(area);
+
+        for (const auto& conn : m_connectedNeighbors) {
+            m_scene->GetNAV().ConnectAreas(m_areaId, conn.targetId, true, conn.dir);
+        }
+
+        m_valid = true;
+        m_scene->RebuildNavRenderer();
+    }
+
+    void Undo() override {
+        if (!m_valid) return;
+        NavArea* area = m_scene->GetNAV().GetAreaByID(m_areaId);
+        if (area) {
+            m_scene->GetNAV().GetGrid().RemoveArea(area);
+            area->SetExtent(m_oldExt);
+            area->SetCornerHeights(m_oldNeZ, m_oldSwZ);
+            m_scene->GetNAV().GetGrid().AddArea(area);
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    const char* GetName() const override { return "Snap to Neighbors"; }
+
+private:
+    struct ConnInfo { uint32_t targetId; NavDirType dir; };
+    EditorScene* m_scene;
+    uint32_t m_areaId;
+    float m_tolerance;
+    NavExtent m_oldExt, m_newExt;
+    float m_oldNeZ{0.0f}, m_oldSwZ{0.0f}, m_newNeZ{0.0f}, m_newSwZ{0.0f};
+    std::vector<ConnInfo> m_connectedNeighbors;
+    bool m_valid;
 };
 
 #endif // NAV_COMMANDS_H

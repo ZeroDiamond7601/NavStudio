@@ -106,6 +106,124 @@ Vector3 EditorScene::SnapVector(const Vector3& v) const {
     return Vector3(SnapValue(v.x), SnapValue(v.y), SnapValue(v.z));
 }
 
+float EditorScene::SnapToNeighborEdge(uint32_t currentAreaId, float candidateVal, bool isXAxis,
+                                     float refMinOtherAxis, float refMaxOtherAxis) const {
+    if (!m_meshSnap || !m_nav || !m_nav->IsLoaded()) {
+        return SnapValue(candidateVal);
+    }
+
+    float bestDist = m_meshSnapTolerance;
+    float bestSnap = candidateVal;
+    bool found = false;
+
+    for (const auto* other : m_nav->GetAreas()) {
+        if (!other || other->GetID() == currentAreaId) continue;
+        const NavExtent& ext = other->GetExtent();
+
+        if (isXAxis) {
+            // Snapping an X coordinate: check if other area overlaps in Y
+            if (ext.hi.y < refMinOtherAxis - m_meshSnapTolerance || ext.lo.y > refMaxOtherAxis + m_meshSnapTolerance) {
+                continue;
+            }
+            float dLo = std::abs(candidateVal - ext.lo.x);
+            if (dLo < bestDist) {
+                bestDist = dLo;
+                bestSnap = ext.lo.x;
+                found = true;
+            }
+            float dHi = std::abs(candidateVal - ext.hi.x);
+            if (dHi < bestDist) {
+                bestDist = dHi;
+                bestSnap = ext.hi.x;
+                found = true;
+            }
+        } else {
+            // Snapping a Y coordinate: check if other area overlaps in X
+            if (ext.hi.x < refMinOtherAxis - m_meshSnapTolerance || ext.lo.x > refMaxOtherAxis + m_meshSnapTolerance) {
+                continue;
+            }
+            float dLo = std::abs(candidateVal - ext.lo.y);
+            if (dLo < bestDist) {
+                bestDist = dLo;
+                bestSnap = ext.lo.y;
+                found = true;
+            }
+            float dHi = std::abs(candidateVal - ext.hi.y);
+            if (dHi < bestDist) {
+                bestDist = dHi;
+                bestSnap = ext.hi.y;
+                found = true;
+            }
+        }
+    }
+
+    if (found) {
+        return bestSnap;
+    }
+    return SnapValue(candidateVal);
+}
+
+void EditorScene::SnapSelectedAreaToNeighbors(CommandManager& cmdMgr) {
+    NavArea* area = GetSelectedArea();
+    if (!area || !m_nav || !m_nav->IsLoaded()) return;
+    cmdMgr.ExecuteCommand(std::make_unique<CmdSnapAreaToNeighbors>(this, area->GetID(), m_meshSnapTolerance * 1.5f));
+}
+
+void EditorScene::StartBridgeMode() {
+    m_isBridgeMode = true;
+    m_bridgeFirstAreaId = 0;
+    m_bridgeFirstEdge = HANDLE_NONE;
+    m_bridgeHoverAreaId = 0;
+    m_bridgeHoverEdge = HANDLE_NONE;
+
+    NavArea* sel = GetSelectedArea();
+    if (sel && m_selectedHandle >= HANDLE_EDGE_NORTH && m_selectedHandle <= HANDLE_EDGE_WEST) {
+        m_bridgeFirstAreaId = sel->GetID();
+        m_bridgeFirstEdge = m_selectedHandle;
+    }
+}
+
+void EditorScene::CancelBridgeMode() {
+    m_isBridgeMode = false;
+    m_bridgeFirstAreaId = 0;
+    m_bridgeFirstEdge = HANDLE_NONE;
+    m_bridgeHoverAreaId = 0;
+    m_bridgeHoverEdge = HANDLE_NONE;
+}
+
+void EditorScene::ToggleBridgeMode() {
+    if (m_isBridgeMode) {
+        CancelBridgeMode();
+    } else {
+        StartBridgeMode();
+    }
+}
+
+void EditorScene::SetBridgeHoverEdge(uint32_t areaId, SelectedHandleType edge) {
+    m_bridgeHoverAreaId = areaId;
+    m_bridgeHoverEdge = edge;
+}
+
+void EditorScene::OnBridgeClick(uint32_t areaId, SelectedHandleType edge, CommandManager& cmdMgr) {
+    if (!m_isBridgeMode || areaId == 0 || edge == HANDLE_NONE) return;
+
+    if (m_bridgeFirstAreaId == 0 || m_bridgeFirstEdge == HANDLE_NONE) {
+        m_bridgeFirstAreaId = areaId;
+        m_bridgeFirstEdge = edge;
+    } else {
+        if (m_bridgeFirstAreaId == areaId) {
+            m_bridgeFirstEdge = edge;
+            return;
+        }
+
+        cmdMgr.ExecuteCommand(std::make_unique<CmdBridgeEdges>(
+            this, m_bridgeFirstAreaId, m_bridgeFirstEdge, areaId, edge
+        ));
+
+        CancelBridgeMode();
+    }
+}
+
 bool EditorScene::LoadBSP(const std::string& bspPath) {
     auto newBsp = std::make_unique<BSPFile>();
     if (!newBsp->Load(bspPath)) {
@@ -509,6 +627,67 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
         const EditorEntity* selEnt = m_entityRenderer.GetEntity(m_selectedEntityIndex);
         if (selEnt) {
             m_gizmoRenderer.Render(lineShader, mvp, selEnt->origin, camPos, m_gizmoMode, m_hoveredHandle, activeHandle);
+        }
+    }
+
+    // Bridge Mode Visual Highlights
+    if (m_isBridgeMode && m_nav && m_nav->IsLoaded()) {
+        auto GetEdgePts = [](const NavArea* a, SelectedHandleType e, Vector3& p0, Vector3& p1) {
+            switch (e) {
+                case HANDLE_EDGE_NORTH:
+                    p0 = a->GetCorner(NAV_CORNER_NORTH_WEST);
+                    p1 = a->GetCorner(NAV_CORNER_NORTH_EAST);
+                    break;
+                case HANDLE_EDGE_EAST:
+                    p0 = a->GetCorner(NAV_CORNER_NORTH_EAST);
+                    p1 = a->GetCorner(NAV_CORNER_SOUTH_EAST);
+                    break;
+                case HANDLE_EDGE_SOUTH:
+                    p0 = a->GetCorner(NAV_CORNER_SOUTH_WEST);
+                    p1 = a->GetCorner(NAV_CORNER_SOUTH_EAST);
+                    break;
+                case HANDLE_EDGE_WEST:
+                    p0 = a->GetCorner(NAV_CORNER_NORTH_WEST);
+                    p1 = a->GetCorner(NAV_CORNER_SOUTH_WEST);
+                    break;
+                default:
+                    p0 = p1 = a->GetCenter();
+                    break;
+            }
+            p0.z += 2.0f;
+            p1.z += 2.0f;
+        };
+
+        // First selected edge: Glowing Gold
+        if (m_bridgeFirstAreaId != 0 && m_bridgeFirstEdge != HANDLE_NONE) {
+            const NavArea* a1 = m_nav->GetAreaByID(m_bridgeFirstAreaId);
+            if (a1) {
+                Vector3 p0, p1;
+                GetEdgePts(a1, m_bridgeFirstEdge, p0, p1);
+                m_gizmoRenderer.RenderLineSegment(lineShader, mvp, p0, p1, 1.0f, 0.85f, 0.1f, 1.0f, 4.0f);
+            }
+        }
+
+        // Hovered edge: Glowing Cyan
+        if (m_bridgeHoverAreaId != 0 && m_bridgeHoverEdge != HANDLE_NONE) {
+            const NavArea* aH = m_nav->GetAreaByID(m_bridgeHoverAreaId);
+            if (aH) {
+                Vector3 p0, p1;
+                GetEdgePts(aH, m_bridgeHoverEdge, p0, p1);
+                m_gizmoRenderer.RenderLineSegment(lineShader, mvp, p0, p1, 0.2f, 1.0f, 1.0f, 1.0f, 4.0f);
+
+                // Connecting preview guideline from first edge to hovered edge
+                if (m_bridgeFirstAreaId != 0 && m_bridgeFirstEdge != HANDLE_NONE) {
+                    const NavArea* a1 = m_nav->GetAreaByID(m_bridgeFirstAreaId);
+                    if (a1) {
+                        Vector3 p1_0, p1_1;
+                        GetEdgePts(a1, m_bridgeFirstEdge, p1_0, p1_1);
+                        Vector3 mid1 = (p1_0 + p1_1) * 0.5f;
+                        Vector3 mid2 = (p0 + p1) * 0.5f;
+                        m_gizmoRenderer.RenderLineSegment(lineShader, mvp, mid1, mid2, 1.0f, 0.9f, 0.2f, 0.8f, 2.5f);
+                    }
+                }
+            }
         }
     }
 }
@@ -1086,53 +1265,57 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
             }
         }
     } else if (area && m_draggedHandle == HANDLE_EDGE_NORTH) {
-        float targetHiY = SnapValue(m_dragStartExtent.hi.y + groundDelta.y);
+        float candidateHiY = m_dragStartExtent.hi.y + groundDelta.y;
+        float targetHiY = SnapToNeighborEdge(area->GetID(), candidateHiY, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x);
         targetHiY = std::max(m_dragStartExtent.lo.y + 8.0f, targetHiY);
         NavExtent nextExt = m_dragStartExtent;
         nextExt.hi.y = targetHiY;
         area->SetExtent(nextExt);
     } else if (area && m_draggedHandle == HANDLE_EDGE_SOUTH) {
-        float targetLoY = SnapValue(m_dragStartExtent.lo.y + groundDelta.y);
+        float candidateLoY = m_dragStartExtent.lo.y + groundDelta.y;
+        float targetLoY = SnapToNeighborEdge(area->GetID(), candidateLoY, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x);
         targetLoY = std::min(m_dragStartExtent.hi.y - 8.0f, targetLoY);
         NavExtent nextExt = m_dragStartExtent;
         nextExt.lo.y = targetLoY;
         area->SetExtent(nextExt);
     } else if (area && m_draggedHandle == HANDLE_EDGE_EAST) {
-        float targetHiX = SnapValue(m_dragStartExtent.hi.x + groundDelta.x);
+        float candidateHiX = m_dragStartExtent.hi.x + groundDelta.x;
+        float targetHiX = SnapToNeighborEdge(area->GetID(), candidateHiX, true, m_dragStartExtent.lo.y, m_dragStartExtent.hi.y);
         targetHiX = std::max(m_dragStartExtent.lo.x + 8.0f, targetHiX);
         NavExtent nextExt = m_dragStartExtent;
         nextExt.hi.x = targetHiX;
         area->SetExtent(nextExt);
     } else if (area && m_draggedHandle == HANDLE_EDGE_WEST) {
-        float targetLoX = SnapValue(m_dragStartExtent.lo.x + groundDelta.x);
+        float candidateLoX = m_dragStartExtent.lo.x + groundDelta.x;
+        float targetLoX = SnapToNeighborEdge(area->GetID(), candidateLoX, true, m_dragStartExtent.lo.y, m_dragStartExtent.hi.y);
         targetLoX = std::min(m_dragStartExtent.hi.x - 8.0f, targetLoX);
         NavExtent nextExt = m_dragStartExtent;
         nextExt.lo.x = targetLoX;
         area->SetExtent(nextExt);
     } else if (area && m_draggedHandle == HANDLE_CORNER_NW) {
-        float targetLoX = std::min(m_dragStartExtent.hi.x - 8.0f, SnapValue(m_dragStartExtent.lo.x + groundDelta.x));
-        float targetHiY = std::max(m_dragStartExtent.lo.y + 8.0f, SnapValue(m_dragStartExtent.hi.y + groundDelta.y));
+        float targetLoX = std::min(m_dragStartExtent.hi.x - 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.lo.x + groundDelta.x, true, m_dragStartExtent.lo.y, m_dragStartExtent.hi.y));
+        float targetHiY = std::max(m_dragStartExtent.lo.y + 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.hi.y + groundDelta.y, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x));
         NavExtent nextExt = m_dragStartExtent;
         nextExt.lo.x = targetLoX;
         nextExt.hi.y = targetHiY;
         area->SetExtent(nextExt);
     } else if (area && m_draggedHandle == HANDLE_CORNER_NE) {
-        float targetHiX = std::max(m_dragStartExtent.lo.x + 8.0f, SnapValue(m_dragStartExtent.hi.x + groundDelta.x));
-        float targetHiY = std::max(m_dragStartExtent.lo.y + 8.0f, SnapValue(m_dragStartExtent.hi.y + groundDelta.y));
+        float targetHiX = std::max(m_dragStartExtent.lo.x + 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.hi.x + groundDelta.x, true, m_dragStartExtent.lo.y, m_dragStartExtent.hi.y));
+        float targetHiY = std::max(m_dragStartExtent.lo.y + 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.hi.y + groundDelta.y, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x));
         NavExtent nextExt = m_dragStartExtent;
         nextExt.hi.x = targetHiX;
         nextExt.hi.y = targetHiY;
         area->SetExtent(nextExt);
     } else if (area && m_draggedHandle == HANDLE_CORNER_SE) {
-        float targetHiX = std::max(m_dragStartExtent.lo.x + 8.0f, SnapValue(m_dragStartExtent.hi.x + groundDelta.x));
-        float targetLoY = std::min(m_dragStartExtent.hi.y - 8.0f, SnapValue(m_dragStartExtent.lo.y + groundDelta.y));
+        float targetHiX = std::max(m_dragStartExtent.lo.x + 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.hi.x + groundDelta.x, true, m_dragStartExtent.lo.y, m_dragStartExtent.hi.y));
+        float targetLoY = std::min(m_dragStartExtent.hi.y - 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.lo.y + groundDelta.y, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x));
         NavExtent nextExt = m_dragStartExtent;
         nextExt.hi.x = targetHiX;
         nextExt.lo.y = targetLoY;
         area->SetExtent(nextExt);
     } else if (area && m_draggedHandle == HANDLE_CORNER_SW) {
-        float targetLoX = std::min(m_dragStartExtent.hi.x - 8.0f, SnapValue(m_dragStartExtent.lo.x + groundDelta.x));
-        float targetLoY = std::min(m_dragStartExtent.hi.y - 8.0f, SnapValue(m_dragStartExtent.lo.y + groundDelta.y));
+        float targetLoX = std::min(m_dragStartExtent.hi.x - 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.lo.x + groundDelta.x, true, m_dragStartExtent.lo.y, m_dragStartExtent.hi.y));
+        float targetLoY = std::min(m_dragStartExtent.hi.y - 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.lo.y + groundDelta.y, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x));
         NavExtent nextExt = m_dragStartExtent;
         nextExt.lo.x = targetLoX;
         nextExt.lo.y = targetLoY;

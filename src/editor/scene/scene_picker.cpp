@@ -471,3 +471,81 @@ SelectedHandleType ScenePicker::PickAreaHandles(
 
     return HANDLE_NONE;
 }
+
+bool ScenePicker::PickAnyAreaEdge(
+    const EditorScene& scene,
+    float screenX, float screenY,
+    int viewportWidth, int viewportHeight,
+    const Matrix4& viewMatrix,
+    const Matrix4& projMatrix,
+    uint32_t& outAreaId,
+    SelectedHandleType& outEdge,
+    float maxPixelDist
+) {
+    outAreaId = 0;
+    outEdge = HANDLE_NONE;
+    if (!scene.HasNAV()) return false;
+
+    const auto& nav = scene.GetNAV();
+    if (!nav.IsLoaded() || nav.GetAreaCount() == 0) return false;
+
+    Matrix4 viewProj = projMatrix * viewMatrix;
+
+    float bestDist = maxPixelDist;
+    uint32_t bestAreaId = 0;
+    SelectedHandleType bestEdge = HANDLE_NONE;
+
+    // Ray to test area under cursor first for quick prioritization
+    Ray ray = ScreenPointToRay(screenX, screenY, (float)viewportWidth, (float)viewportHeight, viewMatrix, projMatrix);
+    uint32_t directAreaId = PickNavArea(scene, ray);
+
+    auto TestAreaEdges = [&](const NavArea* area) {
+        if (!area) return;
+        Vector3 cNW = area->GetCorner(NAV_CORNER_NORTH_WEST); cNW.z += 2.0f;
+        Vector3 cNE = area->GetCorner(NAV_CORNER_NORTH_EAST); cNE.z += 2.0f;
+        Vector3 cSE = area->GetCorner(NAV_CORNER_SOUTH_EAST); cSE.z += 2.0f;
+        Vector3 cSW = area->GetCorner(NAV_CORNER_SOUTH_WEST); cSW.z += 2.0f;
+
+        ScreenPoint2D sNW = ProjectToScreen(cNW, viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D sNE = ProjectToScreen(cNE, viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D sSE = ProjectToScreen(cSE, viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D sSW = ProjectToScreen(cSW, viewProj, viewportWidth, viewportHeight);
+
+        if (sNW.valid && sNE.valid) {
+            float d = DistToSegment2D(screenX, screenY, sNW.x, sNW.y, sNE.x, sNE.y);
+            if (d < bestDist) { bestDist = d; bestEdge = HANDLE_EDGE_NORTH; bestAreaId = area->GetID(); }
+        }
+        if (sNE.valid && sSE.valid) {
+            float d = DistToSegment2D(screenX, screenY, sNE.x, sNE.y, sSE.x, sSE.y);
+            if (d < bestDist) { bestDist = d; bestEdge = HANDLE_EDGE_EAST; bestAreaId = area->GetID(); }
+        }
+        if (sSW.valid && sSE.valid) {
+            float d = DistToSegment2D(screenX, screenY, sSW.x, sSW.y, sSE.x, sSE.y);
+            if (d < bestDist) { bestDist = d; bestEdge = HANDLE_EDGE_SOUTH; bestAreaId = area->GetID(); }
+        }
+        if (sNW.valid && sSW.valid) {
+            float d = DistToSegment2D(screenX, screenY, sNW.x, sNW.y, sSW.x, sSW.y);
+            if (d < bestDist) { bestDist = d; bestEdge = HANDLE_EDGE_WEST; bestAreaId = area->GetID(); }
+        }
+    };
+
+    if (directAreaId != 0) {
+        TestAreaEdges(nav.GetAreaByID(directAreaId));
+    }
+
+    for (const auto* area : nav.GetAreas()) {
+        if (!area || area->GetID() == directAreaId) continue;
+        ScreenPoint2D sCenter = ProjectToScreen(area->GetCenter(), viewProj, viewportWidth, viewportHeight);
+        if (sCenter.valid && std::hypot(screenX - sCenter.x, screenY - sCenter.y) > 400.0f) {
+            continue;
+        }
+        TestAreaEdges(area);
+    }
+
+    if (bestAreaId != 0 && bestEdge != HANDLE_NONE) {
+        outAreaId = bestAreaId;
+        outEdge = bestEdge;
+        return true;
+    }
+    return false;
+}
