@@ -26,7 +26,8 @@ void GizmoRenderer::Clear() {
 void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
                                  GizmoMode mode,
                                  SelectedHandleType hoveredHandle,
-                                 SelectedHandleType selectedHandle) {
+                                 SelectedHandleType selectedHandle,
+                                 bool allowRotation) {
     std::vector<GizmoVertex> vertices;
     std::vector<uint32_t> indices;
 
@@ -194,7 +195,7 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
     }
 
     // 4. Rotate Rings (Circles in XY, YZ, XZ planes and screen trackball)
-    if (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_ROTATE) {
+    if (allowRotation && (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_ROTATE)) {
         // Blue Ring: Yaw / Z-Axis (in XY plane, normal = +Z)
         {
             bool isRotZActive = (hoveredHandle == HANDLE_ROTATE_Z || selectedHandle == HANDLE_ROTATE_Z);
@@ -273,8 +274,9 @@ void GizmoRenderer::Render(const Shader& lineShader, const Matrix4& mvp,
                            const Vector3& center, const Vector3& camPos,
                            GizmoMode mode,
                            SelectedHandleType hoveredHandle,
-                           SelectedHandleType selectedHandle) {
-    BuildBuffers(center, camPos, mode, hoveredHandle, selectedHandle);
+                           SelectedHandleType selectedHandle,
+                           bool allowRotation) {
+    BuildBuffers(center, camPos, mode, hoveredHandle, selectedHandle, allowRotation);
     if (m_indexCount == 0 || m_vao == 0) return;
 
     glEnable(GL_BLEND);

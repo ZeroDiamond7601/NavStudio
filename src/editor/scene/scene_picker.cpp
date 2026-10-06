@@ -286,7 +286,7 @@ SelectedHandleType ScenePicker::PickAreaHandles(
     }
 
     // 4. Rotate Rings (Yaw Z in XY, Pitch X in YZ, Roll Y in XZ, Screen trackball)
-    if (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_ROTATE) {
+    if (selEnt && (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_ROTATE)) {
         float rotTolerance = 8.0f;
         const int kSegs = 32;
 

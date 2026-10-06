@@ -490,28 +490,31 @@ void EditorScene::RebuildNavRenderer() {
 
 static bool ProjectRayToAxis(const Ray& ray, const Vector3& axisOrigin, const Vector3& axisDir, float& outT) {
     Vector3 U = axisDir.Normalized();
-    Vector3 V = ray.direction.Normalized();
-    float b = U.Dot(V);
-    float denom = 1.0f - b * b;
-    if (denom < 1e-4f) {
-        Vector3 camToAxis = axisOrigin - ray.origin;
-        Vector3 planeNorm(camToAxis.x, camToAxis.y, 0.0f);
-        if (planeNorm.LengthSquared() > 1e-4f) {
-            planeNorm = planeNorm.Normalized();
-            float denomP = ray.direction.Dot(planeNorm);
-            if (std::abs(denomP) > 1e-4f) {
-                float s = (axisOrigin - ray.origin).Dot(planeNorm) / denomP;
-                Vector3 hit = ray.origin + ray.direction * s;
-                outT = (hit - axisOrigin).Dot(U);
-                return true;
-            }
+    Vector3 camToAxis = ray.origin - axisOrigin;
+    Vector3 planeNorm = camToAxis - U * camToAxis.Dot(U);
+    float lenSq = planeNorm.LengthSquared();
+    if (lenSq < 1e-4f) {
+        if (std::abs(U.z) < 0.9f) {
+            planeNorm = Vector3(-U.y, U.x, 0.0f);
+        } else {
+            planeNorm = Vector3(1.0f, 0.0f, 0.0f);
         }
+    } else {
+        planeNorm = planeNorm * (1.0f / std::sqrt(lenSq));
+    }
+
+    float denom = ray.direction.Dot(planeNorm);
+    if (std::abs(denom) < 1e-4f) {
         return false;
     }
-    Vector3 w0 = axisOrigin - ray.origin;
-    float d = U.Dot(w0);
-    float e = V.Dot(w0);
-    outT = (b * e - d) / denom;
+
+    float s = (axisOrigin - ray.origin).Dot(planeNorm) / denom;
+    if (s < 0.0f) {
+        return false;
+    }
+
+    Vector3 hitPoint = ray.origin + ray.direction * s;
+    outT = (hitPoint - axisOrigin).Dot(U);
     return true;
 }
 
@@ -539,12 +542,13 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
         if (sel) {
             Vector3 center = sel->GetCenter();
             center.z += 4.0f;
-            m_gizmoRenderer.Render(lineShader, mvp, center, camPos, m_gizmoMode, m_hoveredHandle, activeHandle);
+            GizmoMode effectiveMode = (m_gizmoMode == GIZMO_MODE_ROTATE) ? GIZMO_MODE_TRANSLATE : m_gizmoMode;
+            m_gizmoRenderer.Render(lineShader, mvp, center, camPos, effectiveMode, m_hoveredHandle, activeHandle, false);
         }
     } else if (m_selectedEntityIndex >= 0 && m_entityRenderer.IsLoaded()) {
         const EditorEntity* selEnt = m_entityRenderer.GetEntity(m_selectedEntityIndex);
         if (selEnt) {
-            m_gizmoRenderer.Render(lineShader, mvp, selEnt->origin, camPos, m_gizmoMode, m_hoveredHandle, activeHandle);
+            m_gizmoRenderer.Render(lineShader, mvp, selEnt->origin, camPos, m_gizmoMode, m_hoveredHandle, activeHandle, true);
         }
     }
 }
@@ -691,9 +695,13 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
         if (ProjectRayToAxis(ray, m_dragStartCenter, Vector3(0.0f, 0.0f, 1.0f), tCur)) {
             float deltaZ = tCur - m_dragStartAxisT;
             if (area) {
-                float origZ = (m_dragStartNeZ + m_dragStartSwZ) * 0.5f;
+                float origZ = (m_dragStartExtent.lo.z + m_dragStartExtent.hi.z + m_dragStartNeZ + m_dragStartSwZ) * 0.25f;
                 float targetZ = SnapValue(origZ + deltaZ);
                 float shiftZ = targetZ - origZ;
+                NavExtent nextExt = m_dragStartExtent;
+                nextExt.lo.z += shiftZ;
+                nextExt.hi.z += shiftZ;
+                area->SetExtent(nextExt);
                 area->SetCornerHeights(m_dragStartNeZ + shiftZ, m_dragStartSwZ + shiftZ);
             } else if (ent) {
                 float targetZ = SnapValue(m_dragStartEntityOrigin.z + deltaZ);
@@ -775,10 +783,18 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
         if (ProjectRayToAxis(ray, m_dragStartCenter, Vector3(0.0f, 0.0f, 1.0f), tCur)) {
             float deltaZ = tCur - m_dragStartAxisT;
             if (area) {
-                float midZ = (m_dragStartNeZ + m_dragStartSwZ) * 0.5f;
-                float halfDiff = (m_dragStartNeZ - m_dragStartSwZ) * 0.5f;
-                float newHalfDiff = halfDiff + deltaZ;
-                area->SetCornerHeights(midZ + newHalfDiff, midZ - newHalfDiff);
+                float midZ = (m_dragStartExtent.lo.z + m_dragStartExtent.hi.z + m_dragStartNeZ + m_dragStartSwZ) * 0.25f;
+                float nwOff = m_dragStartExtent.lo.z - midZ;
+                float seOff = m_dragStartExtent.hi.z - midZ;
+                float neOff = m_dragStartNeZ - midZ;
+                float swOff = m_dragStartSwZ - midZ;
+                float maxSpan = std::max({std::abs(nwOff), std::abs(seOff), std::abs(neOff), std::abs(swOff), 8.0f});
+                float scale = std::max(0.0f, 1.0f + deltaZ / maxSpan);
+                NavExtent nextExt = m_dragStartExtent;
+                nextExt.lo.z = midZ + nwOff * scale;
+                nextExt.hi.z = midZ + seOff * scale;
+                area->SetExtent(nextExt);
+                area->SetCornerHeights(midZ + neOff * scale, midZ + swOff * scale);
             } else if (ent) {
                 float origHalfH = (m_dragStartEntityMaxs.z - m_dragStartEntityMins.z) * 0.5f;
                 float scale = std::max(0.1f, 1.0f + deltaZ / std::max(origHalfH, 8.0f));
@@ -1129,8 +1145,14 @@ void EditorScene::UpdateTransformWithRay(const Ray& ray, float mouseX, float mou
         Vector3 origCenter = (m_initialExtent.lo + m_initialExtent.hi) * 0.5f;
         if (m_transformAxis == AXIS_Z) {
             float zDelta = -deltaY * 0.8f;
-            float newZ = SnapValue(m_initialNeZ + zDelta);
-            area->SetCornerHeights(newZ, newZ);
+            float origMidZ = (m_initialExtent.lo.z + m_initialExtent.hi.z + m_initialNeZ + m_initialSwZ) * 0.25f;
+            float targetZ = SnapValue(origMidZ + zDelta);
+            float shiftZ = targetZ - origMidZ;
+            NavExtent newExt = m_initialExtent;
+            newExt.lo.z += shiftZ;
+            newExt.hi.z += shiftZ;
+            area->SetExtent(newExt);
+            area->SetCornerHeights(m_initialNeZ + shiftZ, m_initialSwZ + shiftZ);
         } else {
             Vector3 hitPoint;
             if (std::abs(ray.direction.z) > 1e-4f) {

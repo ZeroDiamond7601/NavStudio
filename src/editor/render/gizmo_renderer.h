@@ -34,13 +34,15 @@ public:
                 const Vector3& center, const Vector3& camPos,
                 GizmoMode mode,
                 SelectedHandleType hoveredHandle,
-                SelectedHandleType selectedHandle);
+                SelectedHandleType selectedHandle,
+                bool allowRotation = true);
 
 private:
     void BuildBuffers(const Vector3& center, const Vector3& camPos,
                       GizmoMode mode,
                       SelectedHandleType hoveredHandle,
-                      SelectedHandleType selectedHandle);
+                      SelectedHandleType selectedHandle,
+                      bool allowRotation);
 
     GLuint m_vao{0};
     GLuint m_vbo{0};
