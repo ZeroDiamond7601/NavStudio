@@ -153,6 +153,12 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
     if (io.WantTextInput) return;
     if (!g_activeScene || !g_cmdMgr) return;
 
+    // While holding right-click (mouse2), the user is controlling camera navigation (WASD, Q, E).
+    // Editor hotkeys (such as S for scaling or G for grab) must not trigger during camera movement.
+    if (g_isRightMouseDown || glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+        return;
+    }
+
     if (action == GLFW_PRESS) {
         auto mode = g_activeScene->GetTransformMode();
 
