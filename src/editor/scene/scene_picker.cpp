@@ -263,7 +263,54 @@ SelectedHandleType ScenePicker::PickAreaHandles(
         }
     }
 
-    // 2. Scale Cubes (+X, +Y, +Z at cubeDist)
+    // 2. Planar Quads (XY Ground, XZ East-West Vert, YZ North-South Vert)
+    float planeDist = gLen * 0.35f;
+    float planeSize = gLen * 0.18f;
+    float planeMid = planeDist + planeSize * 0.5f;
+
+    if (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_TRANSLATE) {
+        ScreenPoint2D spXY = ProjectToScreen(c + Vector3(planeMid, planeMid, 0.0f), viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D spXZ = ProjectToScreen(c + Vector3(planeMid, 0.0f, planeMid), viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D spYZ = ProjectToScreen(c + Vector3(0.0f, planeMid, planeMid), viewProj, viewportWidth, viewportHeight);
+
+        float bestPlaneDist = 15.0f;
+        SelectedHandleType bestPlane = HANDLE_NONE;
+        if (spXY.valid) {
+            float d = std::hypot(screenX - spXY.x, screenY - spXY.y);
+            if (d <= bestPlaneDist) { bestPlaneDist = d; bestPlane = HANDLE_PLANE_XY; }
+        }
+        if (spXZ.valid) {
+            float d = std::hypot(screenX - spXZ.x, screenY - spXZ.y);
+            if (d <= bestPlaneDist) { bestPlaneDist = d; bestPlane = HANDLE_PLANE_XZ; }
+        }
+        if (spYZ.valid) {
+            float d = std::hypot(screenX - spYZ.x, screenY - spYZ.y);
+            if (d <= bestPlaneDist) { bestPlaneDist = d; bestPlane = HANDLE_PLANE_YZ; }
+        }
+        if (bestPlane != HANDLE_NONE) return bestPlane;
+    } else if (mode == GIZMO_MODE_SCALE) {
+        ScreenPoint2D spXY = ProjectToScreen(c + Vector3(planeMid, planeMid, 0.0f), viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D spXZ = ProjectToScreen(c + Vector3(planeMid, 0.0f, planeMid), viewProj, viewportWidth, viewportHeight);
+        ScreenPoint2D spYZ = ProjectToScreen(c + Vector3(0.0f, planeMid, planeMid), viewProj, viewportWidth, viewportHeight);
+
+        float bestPlaneDist = 15.0f;
+        SelectedHandleType bestPlane = HANDLE_NONE;
+        if (spXY.valid) {
+            float d = std::hypot(screenX - spXY.x, screenY - spXY.y);
+            if (d <= bestPlaneDist) { bestPlaneDist = d; bestPlane = HANDLE_SCALE_PLANE_XY; }
+        }
+        if (spXZ.valid) {
+            float d = std::hypot(screenX - spXZ.x, screenY - spXZ.y);
+            if (d <= bestPlaneDist) { bestPlaneDist = d; bestPlane = HANDLE_SCALE_PLANE_XZ; }
+        }
+        if (spYZ.valid) {
+            float d = std::hypot(screenX - spYZ.x, screenY - spYZ.y);
+            if (d <= bestPlaneDist) { bestPlaneDist = d; bestPlane = HANDLE_SCALE_PLANE_YZ; }
+        }
+        if (bestPlane != HANDLE_NONE) return bestPlane;
+    }
+
+    // 3. Scale Cubes (+X, +Y, +Z at cubeDist)
     if (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_SCALE) {
         ScreenPoint2D scX = ProjectToScreen(c + Vector3(cubeDist, 0.0f, 0.0f), viewProj, viewportWidth, viewportHeight);
         ScreenPoint2D scY = ProjectToScreen(c + Vector3(0.0f, cubeDist, 0.0f), viewProj, viewportWidth, viewportHeight);
@@ -285,18 +332,46 @@ SelectedHandleType ScenePicker::PickAreaHandles(
         if (sTipZ.valid && std::hypot(screenX - sTipZ.x, screenY - sTipZ.y) <= 13.0f) return HANDLE_GIZMO_Z;
     }
 
-    // 4. Rotate Rings (Yaw Z in XY, Pitch X in YZ, Roll Y in XZ, Screen trackball)
-    if (selEnt && (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_ROTATE)) {
+    // 5. Outer Uniform Scale Circle (in Scale Mode)
+    Vector3 fwd = (camPos - c).Normalized();
+    Vector3 upGuide(0.0f, 0.0f, 1.0f);
+    if (std::abs(fwd.z) > 0.92f) upGuide = Vector3(0.0f, 1.0f, 0.0f);
+    Vector3 rDir = fwd.Cross(upGuide).Normalized();
+    Vector3 uDir = rDir.Cross(fwd).Normalized();
+
+    if (mode == GIZMO_MODE_SCALE) {
+        float minD = 999.0f;
+        const int kSegs = 32;
+        float radius = screenR * 1.05f;
+        Vector3 prevP = c + rDir * radius;
+        ScreenPoint2D prevS = ProjectToScreen(prevP, viewProj, viewportWidth, viewportHeight);
+        for (int k = 1; k <= kSegs; ++k) {
+            float ang = 2.0f * 3.14159265358979323846f * static_cast<float>(k) / static_cast<float>(kSegs);
+            Vector3 curP = c + rDir * (radius * std::cos(ang)) + uDir * (radius * std::sin(ang));
+            ScreenPoint2D curS = ProjectToScreen(curP, viewProj, viewportWidth, viewportHeight);
+            if (prevS.valid && curS.valid) {
+                float d = DistToSegment2D(screenX, screenY, prevS.x, prevS.y, curS.x, curS.y);
+                if (d < minD) minD = d;
+            }
+            prevS = curS;
+        }
+        if (minD <= 9.0f) {
+            return HANDLE_SCALE_UNIFORM;
+        }
+    }
+
+    // 6. Rotate Rings (Yaw Z in XY, Pitch X in YZ, Roll Y in XZ, Screen trackball)
+    if (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_ROTATE) {
         float rotTolerance = 8.0f;
         const int kSegs = 32;
 
-        auto TestCircleSegments = [&](const Vector3& uDir, const Vector3& vDir, float radius) -> float {
+        auto TestCircleSegments = [&](const Vector3& ruDir, const Vector3& rvDir, float radius) -> float {
             float minD = 999.0f;
-            Vector3 prevP = c + uDir * radius;
+            Vector3 prevP = c + ruDir * radius;
             ScreenPoint2D prevS = ProjectToScreen(prevP, viewProj, viewportWidth, viewportHeight);
             for (int k = 1; k <= kSegs; ++k) {
                 float ang = 2.0f * 3.14159265358979323846f * static_cast<float>(k) / static_cast<float>(kSegs);
-                Vector3 curP = c + uDir * (radius * std::cos(ang)) + vDir * (radius * std::sin(ang));
+                Vector3 curP = c + ruDir * (radius * std::cos(ang)) + rvDir * (radius * std::sin(ang));
                 ScreenPoint2D curS = ProjectToScreen(curP, viewProj, viewportWidth, viewportHeight);
                 if (prevS.valid && curS.valid) {
                     float d = DistToSegment2D(screenX, screenY, prevS.x, prevS.y, curS.x, curS.y);
@@ -310,12 +385,6 @@ SelectedHandleType ScenePicker::PickAreaHandles(
         float dRotZ = TestCircleSegments(Vector3(1.0f, 0.0f, 0.0f), Vector3(0.0f, 1.0f, 0.0f), rotR);
         float dRotX = TestCircleSegments(Vector3(0.0f, 1.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), rotR);
         float dRotY = TestCircleSegments(Vector3(1.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), rotR);
-
-        Vector3 fwd = (camPos - c).Normalized();
-        Vector3 upGuide(0.0f, 0.0f, 1.0f);
-        if (std::abs(fwd.z) > 0.92f) upGuide = Vector3(0.0f, 1.0f, 0.0f);
-        Vector3 rDir = fwd.Cross(upGuide).Normalized();
-        Vector3 uDir = rDir.Cross(fwd).Normalized();
         float dRotScreen = TestCircleSegments(rDir, uDir, screenR);
 
         float bestRotDist = rotTolerance;

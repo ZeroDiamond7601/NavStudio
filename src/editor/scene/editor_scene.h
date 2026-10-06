@@ -247,10 +247,12 @@ private:
     float m_dragStartSwZ{0.0f};
     Vector3 m_dragStartCenter{0.0f, 0.0f, 0.0f};
     Vector3 m_dragStartGroundHit{0.0f, 0.0f, 0.0f};
+    Vector3 m_dragStartPlaneHit{0.0f, 0.0f, 0.0f};
     float m_dragStartAxisT{0.0f};
     float m_dragStartAngle{0.0f};
     float m_dragStartScreenX{0.0f};
     float m_dragStartScreenY{0.0f};
+    float m_dragStartScaleDist{1.0f};
     Vector3 m_dragStartEntityOrigin{0.0f, 0.0f, 0.0f};
     Vector3 m_dragStartEntityAngles{0.0f, 0.0f, 0.0f};
     Vector3 m_dragStartEntityMins{0.0f, 0.0f, 0.0f};

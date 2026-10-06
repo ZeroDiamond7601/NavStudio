@@ -562,22 +562,44 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::Text("3D Transform Gizmo:");
+        ImGui::Text("3D Transform Gizmo Mode:");
         GizmoMode curGizmo = scene.GetGizmoMode();
-        if (ImGui::RadioButton("Combined", curGizmo == GIZMO_MODE_COMBINED)) {
-            scene.SetGizmoMode(GIZMO_MODE_COMBINED);
-        }
-        ImGui::SameLine();
-        if (ImGui::RadioButton("Move", curGizmo == GIZMO_MODE_TRANSLATE)) {
+        float btnW = (ImGui::GetContentRegionAvail().x - 12.0f) / 4.0f;
+
+        bool isTrans = (curGizmo == GIZMO_MODE_TRANSLATE);
+        if (isTrans) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
+        if (ImGui::Button("Move##gzmMove", ImVec2(btnW, 24))) {
             scene.SetGizmoMode(GIZMO_MODE_TRANSLATE);
         }
-        if (ImGui::RadioButton("Rotate", curGizmo == GIZMO_MODE_ROTATE)) {
+        if (isTrans) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Move Gizmo: Axis Arrows, Planar Quads (XY/XZ/YZ), and Center Move");
+
+        ImGui::SameLine();
+        bool isRot = (curGizmo == GIZMO_MODE_ROTATE);
+        if (isRot) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
+        if (ImGui::Button("Rotate##gzmRot", ImVec2(btnW, 24))) {
             scene.SetGizmoMode(GIZMO_MODE_ROTATE);
         }
+        if (isRot) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rotate Gizmo: Yaw (Z), Pitch (X), Roll (Y), and Screen Trackball Ring");
+
         ImGui::SameLine();
-        if (ImGui::RadioButton("Scale", curGizmo == GIZMO_MODE_SCALE)) {
+        bool isScale = (curGizmo == GIZMO_MODE_SCALE);
+        if (isScale) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
+        if (ImGui::Button("Scale##gzmScale", ImVec2(btnW, 24))) {
             scene.SetGizmoMode(GIZMO_MODE_SCALE);
         }
+        if (isScale) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Scale Gizmo: Axis Boxes, Planar Scale Quads, and Outer Uniform Scale Ring");
+
+        ImGui::SameLine();
+        bool isComb = (curGizmo == GIZMO_MODE_COMBINED);
+        if (isComb) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
+        if (ImGui::Button("All##gzmAll", ImVec2(btnW, 24))) {
+            scene.SetGizmoMode(GIZMO_MODE_COMBINED);
+        }
+        if (isComb) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Combined Gizmo: Move + Rotate + Scale combined simultaneously");
 
         ImGui::Spacing();
         ImGui::Text("3D Transform Tools:");

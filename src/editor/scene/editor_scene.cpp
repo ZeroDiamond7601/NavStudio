@@ -488,6 +488,15 @@ void EditorScene::RebuildNavRenderer() {
     }
 }
 
+static bool IntersectRayWithPlane(const Ray& ray, const Vector3& planePoint, const Vector3& planeNormal, Vector3& outHit) {
+    float denom = ray.direction.Dot(planeNormal);
+    if (std::abs(denom) < 1e-5f) return false;
+    float t = (planePoint - ray.origin).Dot(planeNormal) / denom;
+    if (t < 0.0f) return false;
+    outHit = ray.origin + ray.direction * t;
+    return true;
+}
+
 static bool ProjectRayToAxis(const Ray& ray, const Vector3& axisOrigin, const Vector3& axisDir, float& outT) {
     Vector3 U = axisDir.Normalized();
     Vector3 camToAxis = ray.origin - axisOrigin;
@@ -542,13 +551,12 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
         if (sel) {
             Vector3 center = sel->GetCenter();
             center.z += 4.0f;
-            GizmoMode effectiveMode = (m_gizmoMode == GIZMO_MODE_ROTATE) ? GIZMO_MODE_TRANSLATE : m_gizmoMode;
-            m_gizmoRenderer.Render(lineShader, mvp, center, camPos, effectiveMode, m_hoveredHandle, activeHandle, false);
+            m_gizmoRenderer.Render(lineShader, mvp, center, camPos, m_gizmoMode, m_hoveredHandle, activeHandle);
         }
     } else if (m_selectedEntityIndex >= 0 && m_entityRenderer.IsLoaded()) {
         const EditorEntity* selEnt = m_entityRenderer.GetEntity(m_selectedEntityIndex);
         if (selEnt) {
-            m_gizmoRenderer.Render(lineShader, mvp, selEnt->origin, camPos, m_gizmoMode, m_hoveredHandle, activeHandle, true);
+            m_gizmoRenderer.Render(lineShader, mvp, selEnt->origin, camPos, m_gizmoMode, m_hoveredHandle, activeHandle);
         }
     }
 }
@@ -605,6 +613,32 @@ void EditorScene::StartDragHandle(SelectedHandleType handle, float screenX, floa
             m_dragStartAxisT = 0.0f;
         }
     }
+
+    // Planar translation or scaling plane hit
+    if (handle == HANDLE_PLANE_XY || handle == HANDLE_SCALE_PLANE_XY) {
+        Vector3 hit;
+        if (IntersectRayWithPlane(ray, m_dragStartCenter, Vector3(0.0f, 0.0f, 1.0f), hit)) {
+            m_dragStartPlaneHit = hit;
+        } else {
+            m_dragStartPlaneHit = m_dragStartCenter;
+        }
+    } else if (handle == HANDLE_PLANE_XZ || handle == HANDLE_SCALE_PLANE_XZ) {
+        Vector3 hit;
+        if (IntersectRayWithPlane(ray, m_dragStartCenter, Vector3(0.0f, 1.0f, 0.0f), hit)) {
+            m_dragStartPlaneHit = hit;
+        } else {
+            m_dragStartPlaneHit = m_dragStartCenter;
+        }
+    } else if (handle == HANDLE_PLANE_YZ || handle == HANDLE_SCALE_PLANE_YZ) {
+        Vector3 hit;
+        if (IntersectRayWithPlane(ray, m_dragStartCenter, Vector3(1.0f, 0.0f, 0.0f), hit)) {
+            m_dragStartPlaneHit = hit;
+        } else {
+            m_dragStartPlaneHit = m_dragStartCenter;
+        }
+    }
+
+    m_dragStartScaleDist = 1.0f;
 
     // Angle for rotation handles
     if (handle == HANDLE_ROTATE_Z) {
@@ -730,6 +764,80 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
             ent->worldMins.y = ent->origin.y + ent->mins.y;
             ent->worldMaxs.y = ent->origin.y + ent->maxs.y;
         }
+    } else if (m_draggedHandle == HANDLE_PLANE_XY) {
+        Vector3 curHit = m_dragStartPlaneHit;
+        if (IntersectRayWithPlane(ray, m_dragStartCenter, Vector3(0.0f, 0.0f, 1.0f), curHit)) {
+            Vector3 delta = curHit - m_dragStartPlaneHit;
+            if (area) {
+                float origCenterX = (m_dragStartExtent.lo.x + m_dragStartExtent.hi.x) * 0.5f;
+                float origCenterY = (m_dragStartExtent.lo.y + m_dragStartExtent.hi.y) * 0.5f;
+                float targetCenterX = SnapValue(origCenterX + delta.x);
+                float targetCenterY = SnapValue(origCenterY + delta.y);
+                float shiftX = targetCenterX - origCenterX;
+                float shiftY = targetCenterY - origCenterY;
+                NavExtent nextExt = m_dragStartExtent;
+                nextExt.lo.x += shiftX; nextExt.hi.x += shiftX;
+                nextExt.lo.y += shiftY; nextExt.hi.y += shiftY;
+                area->SetExtent(nextExt);
+            } else if (ent) {
+                ent->origin.x = SnapValue(m_dragStartEntityOrigin.x + delta.x);
+                ent->origin.y = SnapValue(m_dragStartEntityOrigin.y + delta.y);
+                ent->worldMins.x = ent->origin.x + ent->mins.x;
+                ent->worldMaxs.x = ent->origin.x + ent->maxs.x;
+                ent->worldMins.y = ent->origin.y + ent->mins.y;
+                ent->worldMaxs.y = ent->origin.y + ent->maxs.y;
+            }
+        }
+    } else if (m_draggedHandle == HANDLE_PLANE_XZ) {
+        Vector3 curHit = m_dragStartPlaneHit;
+        if (IntersectRayWithPlane(ray, m_dragStartCenter, Vector3(0.0f, 1.0f, 0.0f), curHit)) {
+            Vector3 delta = curHit - m_dragStartPlaneHit;
+            if (area) {
+                float origCenterX = (m_dragStartExtent.lo.x + m_dragStartExtent.hi.x) * 0.5f;
+                float origMidZ = (m_dragStartExtent.lo.z + m_dragStartExtent.hi.z + m_dragStartNeZ + m_dragStartSwZ) * 0.25f;
+                float targetCenterX = SnapValue(origCenterX + delta.x);
+                float targetMidZ = SnapValue(origMidZ + delta.z);
+                float shiftX = targetCenterX - origCenterX;
+                float shiftZ = targetMidZ - origMidZ;
+                NavExtent nextExt = m_dragStartExtent;
+                nextExt.lo.x += shiftX; nextExt.hi.x += shiftX;
+                nextExt.lo.z += shiftZ; nextExt.hi.z += shiftZ;
+                area->SetExtent(nextExt);
+                area->SetCornerHeights(m_dragStartNeZ + shiftZ, m_dragStartSwZ + shiftZ);
+            } else if (ent) {
+                ent->origin.x = SnapValue(m_dragStartEntityOrigin.x + delta.x);
+                ent->origin.z = SnapValue(m_dragStartEntityOrigin.z + delta.z);
+                ent->worldMins.x = ent->origin.x + ent->mins.x;
+                ent->worldMaxs.x = ent->origin.x + ent->maxs.x;
+                ent->worldMins.z = ent->origin.z + ent->mins.z;
+                ent->worldMaxs.z = ent->origin.z + ent->maxs.z;
+            }
+        }
+    } else if (m_draggedHandle == HANDLE_PLANE_YZ) {
+        Vector3 curHit = m_dragStartPlaneHit;
+        if (IntersectRayWithPlane(ray, m_dragStartCenter, Vector3(1.0f, 0.0f, 0.0f), curHit)) {
+            Vector3 delta = curHit - m_dragStartPlaneHit;
+            if (area) {
+                float origCenterY = (m_dragStartExtent.lo.y + m_dragStartExtent.hi.y) * 0.5f;
+                float origMidZ = (m_dragStartExtent.lo.z + m_dragStartExtent.hi.z + m_dragStartNeZ + m_dragStartSwZ) * 0.25f;
+                float targetCenterY = SnapValue(origCenterY + delta.y);
+                float targetMidZ = SnapValue(origMidZ + delta.z);
+                float shiftY = targetCenterY - origCenterY;
+                float shiftZ = targetMidZ - origMidZ;
+                NavExtent nextExt = m_dragStartExtent;
+                nextExt.lo.y += shiftY; nextExt.hi.y += shiftY;
+                nextExt.lo.z += shiftZ; nextExt.hi.z += shiftZ;
+                area->SetExtent(nextExt);
+                area->SetCornerHeights(m_dragStartNeZ + shiftZ, m_dragStartSwZ + shiftZ);
+            } else if (ent) {
+                ent->origin.y = SnapValue(m_dragStartEntityOrigin.y + delta.y);
+                ent->origin.z = SnapValue(m_dragStartEntityOrigin.z + delta.z);
+                ent->worldMins.y = ent->origin.y + ent->mins.y;
+                ent->worldMaxs.y = ent->origin.y + ent->maxs.y;
+                ent->worldMins.z = ent->origin.z + ent->mins.z;
+                ent->worldMaxs.z = ent->origin.z + ent->maxs.z;
+            }
+        }
     } else if (m_draggedHandle == HANDLE_SCALE_X) {
         float tCur = 0.0f;
         if (ProjectRayToAxis(ray, m_dragStartCenter, Vector3(1.0f, 0.0f, 0.0f), tCur)) {
@@ -804,6 +912,119 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
                 ent->worldMaxs.z = ent->origin.z + ent->maxs.z;
             }
         }
+    } else if (m_draggedHandle == HANDLE_SCALE_PLANE_XY) {
+        float deltaScreen = (screenX - m_dragStartScreenX) + (m_dragStartScreenY - screenY);
+        float scale = std::max(0.05f, 1.0f + deltaScreen / 100.0f);
+        if (area) {
+            float cX = (m_dragStartExtent.lo.x + m_dragStartExtent.hi.x) * 0.5f;
+            float cY = (m_dragStartExtent.lo.y + m_dragStartExtent.hi.y) * 0.5f;
+            float halfW = (m_dragStartExtent.hi.x - m_dragStartExtent.lo.x) * 0.5f;
+            float halfL = (m_dragStartExtent.hi.y - m_dragStartExtent.lo.y) * 0.5f;
+            float newHalfW = std::max(8.0f, SnapValue(halfW * scale));
+            float newHalfL = std::max(8.0f, SnapValue(halfL * scale));
+            NavExtent nextExt = m_dragStartExtent;
+            nextExt.lo.x = cX - newHalfW; nextExt.hi.x = cX + newHalfW;
+            nextExt.lo.y = cY - newHalfL; nextExt.hi.y = cY + newHalfL;
+            area->SetExtent(nextExt);
+        } else if (ent) {
+            ent->mins.x = m_dragStartEntityMins.x * scale;
+            ent->maxs.x = m_dragStartEntityMaxs.x * scale;
+            ent->mins.y = m_dragStartEntityMins.y * scale;
+            ent->maxs.y = m_dragStartEntityMaxs.y * scale;
+            ent->worldMins.x = ent->origin.x + ent->mins.x;
+            ent->worldMaxs.x = ent->origin.x + ent->maxs.x;
+            ent->worldMins.y = ent->origin.y + ent->mins.y;
+            ent->worldMaxs.y = ent->origin.y + ent->maxs.y;
+        }
+    } else if (m_draggedHandle == HANDLE_SCALE_PLANE_XZ) {
+        float deltaScreen = (screenX - m_dragStartScreenX) + (m_dragStartScreenY - screenY);
+        float scale = std::max(0.05f, 1.0f + deltaScreen / 100.0f);
+        if (area) {
+            float cX = (m_dragStartExtent.lo.x + m_dragStartExtent.hi.x) * 0.5f;
+            float halfW = (m_dragStartExtent.hi.x - m_dragStartExtent.lo.x) * 0.5f;
+            float newHalfW = std::max(8.0f, SnapValue(halfW * scale));
+            float midZ = (m_dragStartExtent.lo.z + m_dragStartExtent.hi.z + m_dragStartNeZ + m_dragStartSwZ) * 0.25f;
+            float nwOff = m_dragStartExtent.lo.z - midZ;
+            float seOff = m_dragStartExtent.hi.z - midZ;
+            float neOff = m_dragStartNeZ - midZ;
+            float swOff = m_dragStartSwZ - midZ;
+            NavExtent nextExt = m_dragStartExtent;
+            nextExt.lo.x = cX - newHalfW; nextExt.hi.x = cX + newHalfW;
+            nextExt.lo.z = midZ + nwOff * scale; nextExt.hi.z = midZ + seOff * scale;
+            area->SetExtent(nextExt);
+            area->SetCornerHeights(midZ + neOff * scale, midZ + swOff * scale);
+        } else if (ent) {
+            ent->mins.x = m_dragStartEntityMins.x * scale;
+            ent->maxs.x = m_dragStartEntityMaxs.x * scale;
+            ent->mins.z = m_dragStartEntityMins.z * scale;
+            ent->maxs.z = m_dragStartEntityMaxs.z * scale;
+            ent->worldMins.x = ent->origin.x + ent->mins.x;
+            ent->worldMaxs.x = ent->origin.x + ent->maxs.x;
+            ent->worldMins.z = ent->origin.z + ent->mins.z;
+            ent->worldMaxs.z = ent->origin.z + ent->maxs.z;
+        }
+    } else if (m_draggedHandle == HANDLE_SCALE_PLANE_YZ) {
+        float deltaScreen = (screenX - m_dragStartScreenX) + (m_dragStartScreenY - screenY);
+        float scale = std::max(0.05f, 1.0f + deltaScreen / 100.0f);
+        if (area) {
+            float cY = (m_dragStartExtent.lo.y + m_dragStartExtent.hi.y) * 0.5f;
+            float halfL = (m_dragStartExtent.hi.y - m_dragStartExtent.lo.y) * 0.5f;
+            float newHalfL = std::max(8.0f, SnapValue(halfL * scale));
+            float midZ = (m_dragStartExtent.lo.z + m_dragStartExtent.hi.z + m_dragStartNeZ + m_dragStartSwZ) * 0.25f;
+            float nwOff = m_dragStartExtent.lo.z - midZ;
+            float seOff = m_dragStartExtent.hi.z - midZ;
+            float neOff = m_dragStartNeZ - midZ;
+            float swOff = m_dragStartSwZ - midZ;
+            NavExtent nextExt = m_dragStartExtent;
+            nextExt.lo.y = cY - newHalfL; nextExt.hi.y = cY + newHalfL;
+            nextExt.lo.z = midZ + nwOff * scale; nextExt.hi.z = midZ + seOff * scale;
+            area->SetExtent(nextExt);
+            area->SetCornerHeights(midZ + neOff * scale, midZ + swOff * scale);
+        } else if (ent) {
+            ent->mins.y = m_dragStartEntityMins.y * scale;
+            ent->maxs.y = m_dragStartEntityMaxs.y * scale;
+            ent->mins.z = m_dragStartEntityMins.z * scale;
+            ent->maxs.z = m_dragStartEntityMaxs.z * scale;
+            ent->worldMins.y = ent->origin.y + ent->mins.y;
+            ent->worldMaxs.y = ent->origin.y + ent->maxs.y;
+            ent->worldMins.z = ent->origin.z + ent->mins.z;
+            ent->worldMaxs.z = ent->origin.z + ent->maxs.z;
+        }
+    } else if (m_draggedHandle == HANDLE_SCALE_UNIFORM) {
+        float deltaScreen = (screenX - m_dragStartScreenX) + (m_dragStartScreenY - screenY);
+        float scale = std::max(0.05f, 1.0f + deltaScreen / 100.0f);
+        if (area) {
+            float cX = (m_dragStartExtent.lo.x + m_dragStartExtent.hi.x) * 0.5f;
+            float cY = (m_dragStartExtent.lo.y + m_dragStartExtent.hi.y) * 0.5f;
+            float halfW = (m_dragStartExtent.hi.x - m_dragStartExtent.lo.x) * 0.5f;
+            float halfL = (m_dragStartExtent.hi.y - m_dragStartExtent.lo.y) * 0.5f;
+            float newHalfW = std::max(8.0f, SnapValue(halfW * scale));
+            float newHalfL = std::max(8.0f, SnapValue(halfL * scale));
+            float midZ = (m_dragStartExtent.lo.z + m_dragStartExtent.hi.z + m_dragStartNeZ + m_dragStartSwZ) * 0.25f;
+            float nwOff = m_dragStartExtent.lo.z - midZ;
+            float seOff = m_dragStartExtent.hi.z - midZ;
+            float neOff = m_dragStartNeZ - midZ;
+            float swOff = m_dragStartSwZ - midZ;
+            NavExtent nextExt = m_dragStartExtent;
+            nextExt.lo.x = cX - newHalfW; nextExt.hi.x = cX + newHalfW;
+            nextExt.lo.y = cY - newHalfL; nextExt.hi.y = cY + newHalfL;
+            nextExt.lo.z = midZ + nwOff * scale; nextExt.hi.z = midZ + seOff * scale;
+            area->SetExtent(nextExt);
+            area->SetCornerHeights(midZ + neOff * scale, midZ + swOff * scale);
+        } else if (ent) {
+            ent->mins.x = m_dragStartEntityMins.x * scale;
+            ent->maxs.x = m_dragStartEntityMaxs.x * scale;
+            ent->mins.y = m_dragStartEntityMins.y * scale;
+            ent->maxs.y = m_dragStartEntityMaxs.y * scale;
+            ent->mins.z = m_dragStartEntityMins.z * scale;
+            ent->maxs.z = m_dragStartEntityMaxs.z * scale;
+            ent->worldMins.x = ent->origin.x + ent->mins.x;
+            ent->worldMaxs.x = ent->origin.x + ent->maxs.x;
+            ent->worldMins.y = ent->origin.y + ent->mins.y;
+            ent->worldMaxs.y = ent->origin.y + ent->maxs.y;
+            ent->worldMins.z = ent->origin.z + ent->mins.z;
+            ent->worldMaxs.z = ent->origin.z + ent->maxs.z;
+        }
     } else if (m_draggedHandle == HANDLE_ROTATE_Z) {
         if (std::abs(ray.direction.z) > 1e-4f) {
             float t = (m_dragStartCenter.z - ray.origin.z) / ray.direction.z;
@@ -849,6 +1070,15 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
                 float newPitch = std::fmod(m_dragStartEntityAngles.x + deltaDeg, 360.0f);
                 if (newPitch < 0.0f) newPitch += 360.0f;
                 ent->angles.x = newPitch;
+            } else if (area) {
+                float midZ = (m_dragStartExtent.lo.z + m_dragStartExtent.hi.z + m_dragStartNeZ + m_dragStartSwZ) * 0.25f;
+                float tilt = deltaDeg * 1.5f;
+                if (m_gridSnap) tilt = SnapValue(tilt);
+                NavExtent nextExt = m_dragStartExtent;
+                nextExt.lo.z = midZ + tilt;
+                nextExt.hi.z = midZ - tilt;
+                area->SetExtent(nextExt);
+                area->SetCornerHeights(midZ + tilt, midZ - tilt);
             }
         }
     } else if (m_draggedHandle == HANDLE_ROTATE_Y) {
@@ -865,6 +1095,15 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
                 float newRoll = std::fmod(m_dragStartEntityAngles.z + deltaDeg, 360.0f);
                 if (newRoll < 0.0f) newRoll += 360.0f;
                 ent->angles.z = newRoll;
+            } else if (area) {
+                float midZ = (m_dragStartExtent.lo.z + m_dragStartExtent.hi.z + m_dragStartNeZ + m_dragStartSwZ) * 0.25f;
+                float tilt = deltaDeg * 1.5f;
+                if (m_gridSnap) tilt = SnapValue(tilt);
+                NavExtent nextExt = m_dragStartExtent;
+                nextExt.lo.z = midZ - tilt;
+                nextExt.hi.z = midZ + tilt;
+                area->SetExtent(nextExt);
+                area->SetCornerHeights(midZ + tilt, midZ - tilt);
             }
         }
     } else if (m_draggedHandle == HANDLE_ROTATE_SCREEN) {
@@ -879,6 +1118,20 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
             if (newYaw < 0.0f) newYaw += 360.0f;
             ent->yaw = newYaw;
             ent->angles.y = newYaw;
+        } else if (area) {
+            int steps = static_cast<int>(std::round(deltaDeg / 90.0f));
+            if (std::abs(steps) % 2 == 1) {
+                float cX = (m_dragStartExtent.lo.x + m_dragStartExtent.hi.x) * 0.5f;
+                float cY = (m_dragStartExtent.lo.y + m_dragStartExtent.hi.y) * 0.5f;
+                float halfW = (m_dragStartExtent.hi.x - m_dragStartExtent.lo.x) * 0.5f;
+                float halfL = (m_dragStartExtent.hi.y - m_dragStartExtent.lo.y) * 0.5f;
+                NavExtent rotExt = m_dragStartExtent;
+                rotExt.lo.x = cX - halfL; rotExt.hi.x = cX + halfL;
+                rotExt.lo.y = cY - halfW; rotExt.hi.y = cY + halfW;
+                area->SetExtent(rotExt);
+            } else {
+                area->SetExtent(m_dragStartExtent);
+            }
         }
     } else if (area && m_draggedHandle == HANDLE_EDGE_NORTH) {
         float targetHiY = SnapValue(m_dragStartExtent.hi.y + groundDelta.y);

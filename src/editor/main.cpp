@@ -201,6 +201,14 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 auto cur = g_activeScene->GetBSPMode();
                 int next = (static_cast<int>(cur) + 1) % 4;
                 g_activeScene->SetBSPMode(static_cast<BSPRenderMode>(next));
+            } else if (key == GLFW_KEY_1 && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // 1: Move Gizmo
+                g_activeScene->SetGizmoMode(GIZMO_MODE_TRANSLATE);
+            } else if (key == GLFW_KEY_2 && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // 2: Rotate Gizmo
+                g_activeScene->SetGizmoMode(GIZMO_MODE_ROTATE);
+            } else if (key == GLFW_KEY_3 && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // 3: Scale Gizmo
+                g_activeScene->SetGizmoMode(GIZMO_MODE_SCALE);
+            } else if (key == GLFW_KEY_4 && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // 4: All / Combined Gizmo
+                g_activeScene->SetGizmoMode(GIZMO_MODE_COMBINED);
             }
 
             // Normal Selection Mode Hotkeys
