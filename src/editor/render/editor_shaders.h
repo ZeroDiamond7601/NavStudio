@@ -48,7 +48,11 @@ out vec4 FragColor;
 void main() {
     vec4 col = vColor * u_BaseColor;
     if (u_UseTexture == 1) {
-        col *= texture(u_DiffuseTexture, vTexCoord);
+        vec4 texCol = texture(u_DiffuseTexture, vTexCoord);
+        if (texCol.a < 0.5) {
+            discard;
+        }
+        col *= texCol;
     }
 
     if (u_EnableLighting == 1) {

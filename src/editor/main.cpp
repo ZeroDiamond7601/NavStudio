@@ -46,6 +46,9 @@ static void DropCallback(GLFWwindow* /*window*/, int count, const char** paths) 
             bspPath = path;
         } else if (lowerPath.length() >= 4 && lowerPath.compare(lowerPath.length() - 4, 4, ".nav") == 0) {
             navPath = path;
+        } else if (lowerPath.length() >= 4 && lowerPath.compare(lowerPath.length() - 4, 4, ".wad") == 0) {
+            std::printf("[DragDrop] Loading WAD texture archive: %s\n", path.c_str());
+            g_activeScene->LoadWAD(path);
         }
     }
 
@@ -55,8 +58,6 @@ static void DropCallback(GLFWwindow* /*window*/, int count, const char** paths) 
     } else if (!navPath.empty()) {
         std::printf("[DragDrop] Loading NAV mesh: %s\n", navPath.c_str());
         g_activeScene->StartAsyncLoad(navPath);
-    } else {
-        std::printf("[DragDrop] Unsupported file format\n");
     }
 }
 
@@ -182,6 +183,10 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
             } else if (key == GLFW_KEY_F3) { // F3: Toggle Entities
                 auto& entR = g_activeScene->GetEntityRenderer();
                 entR.SetShowEntities(!entR.GetShowEntities());
+            } else if (key == GLFW_KEY_F4) { // F4: Cycle Shading Mode
+                auto cur = g_activeScene->GetBSPMode();
+                int next = (static_cast<int>(cur) + 1) % 4;
+                g_activeScene->SetBSPMode(static_cast<BSPRenderMode>(next));
             }
 
             // Normal Selection Mode Hotkeys

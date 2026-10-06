@@ -5,12 +5,14 @@
 #include "editor/glad/include/glad/glad.h"
 #include "bsp/bsp_file.h"
 #include "editor/render/shader.h"
+#include "editor/render/texture_manager.h"
 #include "editor/math/matrix4.h"
 
 enum BSPRenderMode {
-    BSP_RENDER_SOLID,
-    BSP_RENDER_WIREFRAME,
-    BSP_RENDER_GHOST
+    BSP_RENDER_TEXTURED = 0, // Hammer 3D Textured view
+    BSP_RENDER_SOLID,        // Solid Clay / Shaded view
+    BSP_RENDER_WIREFRAME,    // Wireframe view
+    BSP_RENDER_GHOST         // Ghost / X-Ray translucent view
 };
 
 struct BSPVertex {
@@ -20,12 +22,19 @@ struct BSPVertex {
     float r, g, b, a;
 };
 
+struct BSPTextureBatch {
+    GLuint textureId{0};
+    GLsizei startIndex{0};
+    GLsizei indexCount{0};
+    bool isTransparent{false};
+};
+
 class BSPRenderer {
 public:
     BSPRenderer();
     ~BSPRenderer();
 
-    bool BuildFromBSP(const BSPFile& bsp);
+    bool BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr = nullptr);
     void Clear();
 
     void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, BSPRenderMode mode, const Vector3& camPos);
@@ -33,6 +42,7 @@ public:
     bool IsLoaded() const { return m_loaded; }
     size_t GetFaceCount() const { return m_faceCount; }
     size_t GetTriangleCount() const { return m_indexCount / 3; }
+    size_t GetBatchCount() const { return m_textureBatches.size(); }
 
     bool GetShowWireframeOnSolid() const { return m_showWireframeOnSolid; }
     void SetShowWireframeOnSolid(bool show) { m_showWireframeOnSolid = show; }
@@ -50,6 +60,8 @@ private:
     GLuint m_wireVbo;
     GLuint m_wireEbo;
     GLsizei m_wireIndexCount;
+
+    std::vector<BSPTextureBatch> m_textureBatches;
 
     bool m_loaded;
     bool m_showWireframeOnSolid;

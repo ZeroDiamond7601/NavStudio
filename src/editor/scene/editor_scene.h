@@ -11,6 +11,7 @@
 #include "editor/render/bsp_renderer.h"
 #include "editor/render/nav_renderer.h"
 #include "editor/render/entity_renderer.h"
+#include "editor/render/texture_manager.h"
 
 #include "editor/scene/editor_handles.h"
 #include <vector>
@@ -99,10 +100,13 @@ public:
     bool GetShowWireframeOnSolid() const { return m_bspRenderer.GetShowWireframeOnSolid(); }
     void SetShowWireframeOnSolid(bool show) { m_bspRenderer.SetShowWireframeOnSolid(show); }
 
-    // Game Resources Directory
+    // Game Resources Directory & Textures
     const std::string& GetGameDirectory() const { return m_gameDirectory; }
     void SetGameDirectory(const std::string& dir) { m_gameDirectory = dir; }
     bool HasGameDirectory() const { return !m_gameDirectory.empty(); }
+    TextureManager& GetTextureManager() { return m_textureManager; }
+    const TextureManager& GetTextureManager() const { return m_textureManager; }
+    bool LoadWAD(const std::string& wadPath);
 
     // Recent Files Management
     const std::vector<std::string>& GetRecentFiles() const { return m_recentFiles; }
@@ -187,6 +191,7 @@ private:
     BSPRenderer m_bspRenderer;
     NavRenderer m_navRenderer;
     EntityRenderer m_entityRenderer;
+    TextureManager m_textureManager;
 
     std::string m_bspPath;
     std::string m_navPath;

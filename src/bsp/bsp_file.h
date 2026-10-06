@@ -82,6 +82,12 @@ public:
     static BSPMaterialType ClassifyMaterial(const char* textureName);
     int GetTextureFlags(int textureIndex, bool* isTransparent = nullptr, bool* isFluid = nullptr, bool* isSky = nullptr, bool* isAnimated = nullptr) const;
 
+    // TexInfo and MipTex access
+    const texinfo_t* GetTexInfo(int index) const;
+    int GetTexInfoCount() const { return m_numTexInfo; }
+    const miptex_t* GetMiptex(int index) const;
+    const uint8_t* GetMiptexData(int index, size_t* outRemaining = nullptr) const;
+
 private:
     bool ParseLumps(const uint8_t* buffer, size_t size);
     bool TraceNodeRecursive(int nodeNum, float p1f, float p2f, const Vector3& p1, const Vector3& p2, BSPTraceResult* tr, int depth = 0) const;
@@ -133,6 +139,9 @@ private:
 
     const uint8_t* m_lightdata;
     int m_lightdatalen;
+
+    const uint8_t* m_texlumpData;
+    int32_t m_texlumpLen;
 
     std::vector<BSPTextureInfo> m_textures;
     std::vector<BSPEntity> m_entities;

@@ -51,6 +51,7 @@ find_package(Threads REQUIRED)
 set(CORE_SOURCES
     src/bsp/bsp_entity.cpp
     src/bsp/bsp_file.cpp
+    src/bsp/wad_file.cpp
     src/nav/nav_area.cpp
     src/nav/nav_grid.cpp
     src/nav/nav_path.cpp
@@ -152,6 +153,7 @@ if(BUILD_EDITOR)
         src/editor/camera/camera.cpp
         src/editor/render/shader.cpp
         src/editor/render/bsp_renderer.cpp
+        src/editor/render/texture_manager.cpp
         src/editor/render/nav_renderer.cpp
         src/editor/render/entity_renderer.cpp
         src/editor/scene/editor_scene.cpp

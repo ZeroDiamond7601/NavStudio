@@ -174,6 +174,12 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                 m_openPathBuffer[0] = '\0';
                 m_openPathStatusMessage.clear();
             }
+            if (ImGui::MenuItem("Load Texture WAD...", nullptr)) {
+                std::string path = FileDialog::OpenFile(FileDialog::kWADFilter, "Open Texture WAD Archive");
+                if (!path.empty()) {
+                    scene.LoadWAD(path);
+                }
+            }
             ImGui::Separator();
             if (ImGui::MenuItem("Save NAV Mesh", "Ctrl+S", false, scene.HasNAV())) {
                 if (!scene.GetNAVPath().empty()) {
@@ -323,7 +329,10 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 
             ImGui::Separator();
             if (ImGui::BeginMenu("BSP Shading Mode")) {
-                if (ImGui::MenuItem("Solid / Shaded", nullptr, scene.GetBSPMode() == BSP_RENDER_SOLID)) {
+                if (ImGui::MenuItem("3D Textured (Hammer)", "F4", scene.GetBSPMode() == BSP_RENDER_TEXTURED)) {
+                    scene.SetBSPMode(BSP_RENDER_TEXTURED);
+                }
+                if (ImGui::MenuItem("Solid Clay / Shaded", nullptr, scene.GetBSPMode() == BSP_RENDER_SOLID)) {
                     scene.SetBSPMode(BSP_RENDER_SOLID);
                 }
                 if (ImGui::MenuItem("Wireframe", nullptr, scene.GetBSPMode() == BSP_RENDER_WIREFRAME)) {
@@ -509,14 +518,19 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         ImGui::Spacing();
 
         // Shading quick buttons
-        ImGui::Text("BSP View:");
+        ImGui::Text("BSP View (F4):");
+        if (ImGui::RadioButton("Textured", scene.GetBSPMode() == BSP_RENDER_TEXTURED)) {
+            scene.SetBSPMode(BSP_RENDER_TEXTURED);
+        }
+        ImGui::SameLine();
         if (ImGui::RadioButton("Solid", scene.GetBSPMode() == BSP_RENDER_SOLID)) {
             scene.SetBSPMode(BSP_RENDER_SOLID);
         }
         if (ImGui::RadioButton("Wireframe", scene.GetBSPMode() == BSP_RENDER_WIREFRAME)) {
             scene.SetBSPMode(BSP_RENDER_WIREFRAME);
         }
-        if (ImGui::RadioButton("Ghost (X-Ray)", scene.GetBSPMode() == BSP_RENDER_GHOST)) {
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Ghost", scene.GetBSPMode() == BSP_RENDER_GHOST)) {
             scene.SetBSPMode(BSP_RENDER_GHOST);
         }
 
@@ -1169,6 +1183,7 @@ void EditorUI::RenderHelpModal() {
         ImGui::BulletText("Ctrl+Z / Ctrl+Y: Undo / Redo history");
         ImGui::BulletText("Ctrl+S: Save current navigation mesh");
         ImGui::BulletText("F3: Toggle Entity 3D visualization");
+        ImGui::BulletText("F4: Cycle BSP Shading Mode (Textured / Solid / Wireframe / Ghost)");
         ImGui::BulletText("Left-Click: Select entity or NavArea");
         ImGui::BulletText("F: Focus camera on selected entity or NavArea");
         ImGui::BulletText("Escape: Clear selection / Cancel modal tool");

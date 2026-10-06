@@ -18,7 +18,8 @@ BSPFile::BSPFile()
       m_surfedges(nullptr), m_numSurfEdges(0),
       m_marksurfaces(nullptr), m_numMarkSurfaces(0),
       m_visdata(nullptr), m_visdatalen(0),
-      m_lightdata(nullptr), m_lightdatalen(0) {
+      m_lightdata(nullptr), m_lightdatalen(0),
+      m_texlumpData(nullptr), m_texlumpLen(0) {
 }
 
 BSPFile::~BSPFile() {
@@ -56,6 +57,8 @@ void BSPFile::Unload() {
     m_visdatalen = 0;
     m_lightdata = nullptr;
     m_lightdatalen = 0;
+    m_texlumpData = nullptr;
+    m_texlumpLen = 0;
 
     m_textures.clear();
     m_entities.clear();
@@ -142,6 +145,8 @@ bool BSPFile::ParseLumps(const uint8_t* buffer, size_t size) {
     int32_t texOfs = header->lumps[LUMP_TEXTURES].fileofs;
     int32_t texLen = header->lumps[LUMP_TEXTURES].filelen;
     if (texOfs >= 0 && texLen >= static_cast<int32_t>(sizeof(int32_t)) && static_cast<uint64_t>(texOfs) + static_cast<uint64_t>(texLen) <= size) {
+        m_texlumpData = buffer + texOfs;
+        m_texlumpLen = texLen;
         const dmiptexlump_t* miptexLump = reinterpret_cast<const dmiptexlump_t*>(buffer + texOfs);
         int32_t numMiptex = miptexLump->nummiptex;
         if (numMiptex > 0 && numMiptex < 65536) {
@@ -500,6 +505,30 @@ const char* BSPFile::GetFaceTextureName(int faceIndex) const {
     int miptex = m_texinfo[face->texinfo].miptex;
     if (miptex < 0 || miptex >= static_cast<int>(m_textures.size())) return "";
     return m_textures[miptex].name;
+}
+
+const texinfo_t* BSPFile::GetTexInfo(int index) const {
+    if (!m_loaded || index < 0 || index >= m_numTexInfo || !m_texinfo) return nullptr;
+    return &m_texinfo[index];
+}
+
+const miptex_t* BSPFile::GetMiptex(int index) const {
+    if (!m_loaded || index < 0 || !m_texlumpData || m_texlumpLen < static_cast<int32_t>(sizeof(dmiptexlump_t))) return nullptr;
+    const dmiptexlump_t* lump = reinterpret_cast<const dmiptexlump_t*>(m_texlumpData);
+    if (index >= lump->nummiptex) return nullptr;
+    int32_t dataOfs = lump->dataofs[index];
+    if (dataOfs < 0 || static_cast<size_t>(dataOfs + sizeof(miptex_t)) > static_cast<size_t>(m_texlumpLen)) return nullptr;
+    return reinterpret_cast<const miptex_t*>(m_texlumpData + dataOfs);
+}
+
+const uint8_t* BSPFile::GetMiptexData(int index, size_t* outRemaining) const {
+    if (!m_loaded || index < 0 || !m_texlumpData || m_texlumpLen < static_cast<int32_t>(sizeof(dmiptexlump_t))) return nullptr;
+    const dmiptexlump_t* lump = reinterpret_cast<const dmiptexlump_t*>(m_texlumpData);
+    if (index >= lump->nummiptex) return nullptr;
+    int32_t dataOfs = lump->dataofs[index];
+    if (dataOfs < 0 || static_cast<size_t>(dataOfs) >= static_cast<size_t>(m_texlumpLen)) return nullptr;
+    if (outRemaining) *outRemaining = static_cast<size_t>(m_texlumpLen - dataOfs);
+    return m_texlumpData + dataOfs;
 }
 
 BSPMaterialType BSPFile::ClassifyMaterial(const char* textureName) {

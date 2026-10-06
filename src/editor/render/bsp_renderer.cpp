@@ -1,5 +1,8 @@
 #include "editor/render/bsp_renderer.h"
 #include <cmath>
+#include <map>
+#include <unordered_map>
+#include <algorithm>
 
 BSPRenderer::BSPRenderer()
     : m_vao(0)
@@ -31,11 +34,12 @@ void BSPRenderer::Clear() {
     if (m_wireEbo != 0) { glDeleteBuffers(1, &m_wireEbo); m_wireEbo = 0; }
     m_wireIndexCount = 0;
 
+    m_textureBatches.clear();
     m_loaded = false;
     m_faceCount = 0;
 }
 
-bool BSPRenderer::BuildFromBSP(const BSPFile& bsp) {
+bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr) {
     Clear();
     if (!bsp.IsLoaded()) return false;
 
@@ -49,6 +53,12 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp) {
     m_faceCount = static_cast<size_t>(numFaces);
 
     Vector3 poly[128];
+
+    // Temporary storage grouping triangle indices by OpenGL texture ID
+    std::unordered_map<GLuint, std::vector<uint32_t>> batchIndices;
+    std::unordered_map<GLuint, bool> batchTransparency;
+
+    GLuint fallbackTexId = texMgr ? texMgr->GetCheckerboardTextureID() : 0;
 
     for (int f = 0; f < numFaces; ++f) {
         const dface_t* face = bsp.GetFace(f);
@@ -66,6 +76,47 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp) {
             }
         }
 
+        // UV Projection setup
+        float sVec[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+        float tVec[4] = {0.0f, 1.0f, 0.0f, 0.0f};
+        float texW = 64.0f;
+        float texH = 64.0f;
+        GLuint texId = fallbackTexId;
+        bool isTransparent = false;
+
+        const texinfo_t* ti = bsp.GetTexInfo(face->texinfo);
+        if (ti) {
+            sVec[0] = ti->vecs[0][0]; sVec[1] = ti->vecs[0][1]; sVec[2] = ti->vecs[0][2]; sVec[3] = ti->vecs[0][3];
+            tVec[0] = ti->vecs[1][0]; tVec[1] = ti->vecs[1][1]; tVec[2] = ti->vecs[1][2]; tVec[3] = ti->vecs[1][3];
+
+            int w = 0, h = 0;
+            if (bsp.GetTextureDimensions(ti->miptex, w, h) && w > 0 && h > 0) {
+                texW = static_cast<float>(w);
+                texH = static_cast<float>(h);
+            }
+
+            const char* texName = bsp.GetTextureName(ti->miptex);
+            if (texName && texName[0] != '\0') {
+                if (texMgr) {
+                    texId = texMgr->GetTextureID(texName);
+                    LoadedTextureInfo tInfo;
+                    if (texMgr->GetTextureInfo(texName, tInfo)) {
+                        if (tInfo.width > 0 && tInfo.height > 0) {
+                            texW = static_cast<float>(tInfo.width);
+                            texH = static_cast<float>(tInfo.height);
+                        }
+                        isTransparent = tInfo.isTransparent;
+                    }
+                }
+                if (texName[0] == '{') {
+                    isTransparent = true;
+                }
+            }
+        }
+
+        if (texW <= 0.0f) texW = 64.0f;
+        if (texH <= 0.0f) texH = 64.0f;
+
         // Triangulate solid face (fan triangulation)
         uint32_t baseSolidVertex = static_cast<uint32_t>(solidVertices.size());
         for (int i = 0; i < vertCount; ++i) {
@@ -76,19 +127,29 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp) {
             vert.nx = norm.x;
             vert.ny = norm.y;
             vert.nz = norm.z;
-            vert.u = 0.0f;
-            vert.v = 0.0f;
-            vert.r = 0.8f;
-            vert.g = 0.8f;
-            vert.b = 0.82f;
+
+            // Mathematical UV projection from texinfo
+            float s = poly[i].x * sVec[0] + poly[i].y * sVec[1] + poly[i].z * sVec[2] + sVec[3];
+            float t = poly[i].x * tVec[0] + poly[i].y * tVec[1] + poly[i].z * tVec[2] + tVec[3];
+            vert.u = s / texW;
+            vert.v = t / texH;
+
+            vert.r = 1.0f;
+            vert.g = 1.0f;
+            vert.b = 1.0f;
             vert.a = 1.0f;
             solidVertices.push_back(vert);
         }
 
+        auto& batchList = batchIndices[texId];
         for (int i = 1; i < vertCount - 1; ++i) {
-            solidIndices.push_back(baseSolidVertex);
-            solidIndices.push_back(baseSolidVertex + i);
-            solidIndices.push_back(baseSolidVertex + i + 1);
+            batchList.push_back(baseSolidVertex);
+            batchList.push_back(baseSolidVertex + i);
+            batchList.push_back(baseSolidVertex + i + 1);
+        }
+
+        if (isTransparent) {
+            batchTransparency[texId] = true;
         }
 
         // Generate perimeter lines for wireframe
@@ -113,6 +174,41 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp) {
             wireIndices.push_back(baseWireVertex + i);
             wireIndices.push_back(baseWireVertex + next);
         }
+    }
+
+    // Assemble index buffer: opaque batches first, then transparent batches
+    std::vector<std::pair<GLuint, bool>> orderedBatches;
+    orderedBatches.reserve(batchIndices.size());
+
+    // 1. Opaque batches
+    for (const auto& kv : batchIndices) {
+        if (!batchTransparency[kv.first]) {
+            orderedBatches.push_back({kv.first, false});
+        }
+    }
+    // 2. Transparent batches (masked cutouts like fences)
+    for (const auto& kv : batchIndices) {
+        if (batchTransparency[kv.first]) {
+            orderedBatches.push_back({kv.first, true});
+        }
+    }
+
+    m_textureBatches.clear();
+    m_textureBatches.reserve(orderedBatches.size());
+
+    for (const auto& pair : orderedBatches) {
+        GLuint texId = pair.first;
+        bool isTrans = pair.second;
+        const auto& indices = batchIndices[texId];
+
+        BSPTextureBatch batch;
+        batch.textureId = texId;
+        batch.startIndex = static_cast<GLsizei>(solidIndices.size());
+        batch.indexCount = static_cast<GLsizei>(indices.size());
+        batch.isTransparent = isTrans;
+
+        solidIndices.insert(solidIndices.end(), indices.begin(), indices.end());
+        m_textureBatches.push_back(batch);
     }
 
     if (!solidIndices.empty()) {
@@ -185,12 +281,58 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
 
     Matrix4 modelMat = Matrix4::MakeIdentity();
 
-    if (mode == BSP_RENDER_SOLID) {
+    if (mode == BSP_RENDER_TEXTURED) {
         meshShader.Bind();
         meshShader.SetMat4("u_MVP", mvp);
         meshShader.SetMat4("u_Model", modelMat);
         meshShader.SetVec3("u_CameraPos", camPos.x, camPos.y, camPos.z);
         meshShader.SetVec4("u_BaseColor", 1.0f, 1.0f, 1.0f, 1.0f);
+        meshShader.SetInt("u_UseTexture", 1);
+        meshShader.SetInt("u_DiffuseTexture", 0);
+        meshShader.SetFloat("u_Alpha", 1.0f);
+        meshShader.SetInt("u_EnableLighting", 1);
+
+        if (m_showWireframeOnSolid) {
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(1.0f, 1.0f);
+        }
+
+        glBindVertexArray(m_vao);
+        glActiveTexture(GL_TEXTURE0);
+
+        for (const auto& batch : m_textureBatches) {
+            glBindTexture(GL_TEXTURE_2D, batch.textureId);
+            glDrawElements(GL_TRIANGLES, batch.indexCount, GL_UNSIGNED_INT, (const void*)(static_cast<uintptr_t>(batch.startIndex) * sizeof(uint32_t)));
+        }
+
+        glBindVertexArray(0);
+        meshShader.Unbind();
+
+        if (m_showWireframeOnSolid) {
+            glDisable(GL_POLYGON_OFFSET_FILL);
+
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            lineShader.Bind();
+            lineShader.SetMat4("u_MVP", mvp);
+            lineShader.SetVec4("u_Color", 0.18f, 0.20f, 0.24f, 0.65f);
+
+            glLineWidth(1.2f);
+            glBindVertexArray(m_wireVao);
+            glDrawElements(GL_LINES, m_wireIndexCount, GL_UNSIGNED_INT, 0);
+            glBindVertexArray(0);
+            lineShader.Unbind();
+            glLineWidth(1.0f);
+
+            glDisable(GL_BLEND);
+        }
+    } else if (mode == BSP_RENDER_SOLID) {
+        meshShader.Bind();
+        meshShader.SetMat4("u_MVP", mvp);
+        meshShader.SetMat4("u_Model", modelMat);
+        meshShader.SetVec3("u_CameraPos", camPos.x, camPos.y, camPos.z);
+        meshShader.SetVec4("u_BaseColor", 0.80f, 0.80f, 0.82f, 1.0f);
         meshShader.SetInt("u_UseTexture", 0);
         meshShader.SetFloat("u_Alpha", 1.0f);
         meshShader.SetInt("u_EnableLighting", 1);
@@ -236,7 +378,6 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
         lineShader.Unbind();
         glLineWidth(1.0f);
     } else if (mode == BSP_RENDER_GHOST) {
-        // Translucent BSP surfaces so NavMesh inside rooms is visible
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(GL_FALSE);

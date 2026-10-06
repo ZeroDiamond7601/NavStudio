@@ -10,7 +10,7 @@ EditorScene::EditorScene()
     , m_nav(std::make_unique<NavMesh>())
     , m_selectedAreaId(0)
     , m_hoveredAreaId(0)
-    , m_bspMode(BSP_RENDER_SOLID)
+    , m_bspMode(BSP_RENDER_TEXTURED)
     , m_showBSP(true)
     , m_showNAV(true)
     , m_showConnections(true)
@@ -122,7 +122,8 @@ bool EditorScene::LoadBSP(const std::string& bspPath) {
 
     m_bsp = std::move(newBsp);
     m_bspPath = bspPath;
-    m_bspRenderer.BuildFromBSP(*m_bsp);
+    m_textureManager.LoadForBSP(*m_bsp, bspPath, m_gameDirectory);
+    m_bspRenderer.BuildFromBSP(*m_bsp, &m_textureManager);
     m_entityRenderer.BuildFromBSP(*m_bsp);
     m_selectedEntityIndex = -1;
     AddRecentFile(bspPath);
@@ -347,7 +348,8 @@ void EditorScene::UpdateAsyncLoading(float deltaTime) {
             if (m_loadCtx.loadedBsp) {
                 m_bsp = std::move(m_loadCtx.loadedBsp);
                 m_bspPath = m_loadCtx.targetBspPath;
-                m_bspRenderer.BuildFromBSP(*m_bsp);
+                m_textureManager.LoadForBSP(*m_bsp, m_bspPath, m_gameDirectory);
+                m_bspRenderer.BuildFromBSP(*m_bsp, &m_textureManager);
                 m_entityRenderer.BuildFromBSP(*m_bsp);
                 m_selectedEntityIndex = -1;
                 AddRecentFile(m_bspPath);
@@ -920,4 +922,15 @@ void EditorScene::MergeSelectedArea(CommandManager& cmdMgr) {
     if (targetId != 0) {
         cmdMgr.ExecuteCommand(std::make_unique<CmdMergeAreas>(this, area->GetID(), targetId));
     }
+}
+
+bool EditorScene::LoadWAD(const std::string& wadPath) {
+    if (!m_textureManager.LoadWAD(wadPath)) {
+        return false;
+    }
+    if (m_bsp && m_bsp->IsLoaded()) {
+        m_textureManager.LoadForBSP(*m_bsp, m_bspPath, m_gameDirectory);
+        m_bspRenderer.BuildFromBSP(*m_bsp, &m_textureManager);
+    }
+    return true;
 }

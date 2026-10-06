@@ -40,7 +40,17 @@
 
 ### NavStudio: 3D BSP Visualizer & NavMesh Editor
 * **Hardware-Accelerated 3D Viewport:** OpenGL 3.3 Core rendering with Dear ImGui docking interface.
-* **Multiple Shading Modes:** Solid clay shading with GoldSrc Z-Up hemisphere lighting, distance depth cueing, overlay brush edge outlines, wireframe edge display, and Ghost / X-Ray mode (translucent BSP walls to view navigation meshes through floors and ceilings).
+* **Valve Hammer Editor 3D Textured Rendering & Shading Modes (`F4`):**
+  * **Hammer 3D Textured View:** Renders full GoldSrc textures mapped onto BSP brush faces with directional sun lighting, ambient hemisphere fill, and specular highlights matching Valve Hammer Editor.
+  * **WAD3 Archive Loader & Texture Management:** Parses GoldSrc `WAD3` and `WAD2` archives (`cstrike.wad`, `halflife.wad`, etc.), decoding 4-level miptex lumps (`TYP_MIPTEX`) and 256-color RGB palettes into high-resolution 32-bit RGBA OpenGL textures with automatic mipmap generation and repeat wrapping.
+  * **Embedded & External Texture Resolution:** Automatically resolves external WAD files referenced by `worldspawn` entity `"wad"` key strings, scans map and game mod directories (`cstrike/`, `valve/`), and extracts embedded textures directly from BSP `LUMP_TEXTURES`.
+  * **Mathematical UV Projection:** Calculates exact texture coordinates per vertex using `texinfo_t` spatial vectors:
+    $$u = \frac{P \cdot \vec{s}_{xyz} + s_w}{\text{texture\_width}}, \quad v = \frac{P \cdot \vec{t}_{xyz} + t_w}{\text{texture\_height}}$$
+  * **Masked Alpha Cutouts:** Transparent alpha-test masking for `{`-prefixed textures (grates, chainlink fences, ladders, vents) discarding masked pixels for clean silhouettes without sorting artifacts.
+  * **Missing Texture Fallback:** Classic Hammer-style amber and dark slate checkerboard for missing textures so maps always render stably.
+  * **WAD Drag & Drop:** Drag and drop `.wad` files directly into the viewport or use `File -> Load Texture WAD...` to hot-load custom texture packages.
+  * **Solid Clay Shading:** Clean neutral studio clay view with GoldSrc Z-Up hemisphere lighting and brush edge outlines.
+  * **Wireframe & Ghost / X-Ray:** Wireframe edge view and translucent Ghost view to see navigation areas through complex walls and multi-story rooms.
 * **Interactive 3D Controls & Hammer Editor Tools:**
   * **3D Position Gizmo & Arrows:** Interactive Red (+X East), Green (+Y North), and Blue (+Z Up) axis arrows and center box handle for precise dragging and elevation control.
   * **Move / Grab (`G`):** Areas smoothly glide and track the 3D mouse cursor position on the ground plane, with optional `X`, `Y`, `Z` axis constraints.
