@@ -105,8 +105,8 @@ void GridRenderer::Update(const Vector3& camPos, float gridSize, float gridEleva
         bool isOriginAxis = (std::abs(y) < 0.01f);
         bool isMajor = false;
 
-        float rem = std::abs(std::remainder(y, majorInterval));
-        if (rem < 0.01f) {
+        float rem = std::fmod(std::fabs(y), majorInterval);
+        if (rem < 0.01f || std::fabs(rem - majorInterval) < 0.01f) {
             isMajor = true;
         }
 
@@ -138,8 +138,8 @@ void GridRenderer::Update(const Vector3& camPos, float gridSize, float gridEleva
         bool isOriginAxis = (std::abs(x) < 0.01f);
         bool isMajor = false;
 
-        float rem = std::abs(std::remainder(x, majorInterval));
-        if (rem < 0.01f) {
+        float rem = std::fmod(std::fabs(x), majorInterval);
+        if (rem < 0.01f || std::fabs(rem - majorInterval) < 0.01f) {
             isMajor = true;
         }
 

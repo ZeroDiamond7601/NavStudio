@@ -5,7 +5,7 @@
 #include <cstdint>
 #include "editor/math/matrix4.h"
 #include "editor/render/shader.h"
-#include "glad/glad.h"
+#include "editor/glad/include/glad/glad.h"
 
 struct GridVertex {
     float x, y, z;

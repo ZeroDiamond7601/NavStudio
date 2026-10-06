@@ -151,13 +151,16 @@ bool EditorScene::LoadBSP(const std::string& bspPath) {
     // Set initial grid elevation to player spawn floor
     for (const auto& ent : m_bsp->GetEntities()) {
         if (ent.classname == "info_player_start" || ent.classname == "info_player_deathmatch") {
-            Vector3 gPos;
-            if (m_bsp->GetGround(ent.origin, &gPos, 1024.0f)) {
-                m_gridElevation = gPos.z;
-            } else {
-                m_gridElevation = ent.origin.z;
+            Vector3 entOrigin;
+            if (ent.GetOrigin(entOrigin)) {
+                Vector3 gPos;
+                if (m_bsp->GetGround(entOrigin, &gPos, 1024.0f)) {
+                    m_gridElevation = gPos.z;
+                } else {
+                    m_gridElevation = entOrigin.z;
+                }
+                break;
             }
-            break;
         }
     }
 
