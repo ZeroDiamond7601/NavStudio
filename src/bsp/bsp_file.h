@@ -42,7 +42,7 @@ public:
     bool TraceModel(int modelIndex, const Vector3& start, const Vector3& end, int hullType, BSPTraceResult* tr = nullptr) const;
     bool TraceTexture(const Vector3& start, const Vector3& end, char* outTexture, size_t maxLen) const;
     BSPMaterialType TraceMaterial(const Vector3& start, const Vector3& end, char* outTexture = nullptr, size_t maxLen = 0) const;
-    bool GetGround(const Vector3& start, Vector3* outGround, float maxDrop = 2000.0f) const;
+    bool GetGround(const Vector3& start, Vector3* outGround, float maxDrop = 2000.0f, int hullType = HULL_HUMAN) const;
 
     // Lightmap and illumination sampling
     bool GetPointLight(const Vector3& start, const Vector3& end, float& outBrightness, Vector3* outColor = nullptr) const;

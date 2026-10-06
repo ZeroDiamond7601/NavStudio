@@ -1083,19 +1083,32 @@ bool BSPFile::TraceTexture(const Vector3& start, const Vector3& end, char* outTe
     return false;
 }
 
-bool BSPFile::GetGround(const Vector3& start, Vector3* outGround, float maxDrop) const {
+bool BSPFile::GetGround(const Vector3& start, Vector3* outGround, float maxDrop, int hullType) const {
     if (!m_loaded || !outGround) return false;
 
     Vector3 end = start;
     end.z -= maxDrop;
 
     BSPTraceResult tr;
-    bool hit = TraceWorld(start, end, HULL_HUMAN, &tr);
-    if (!hit) {
-        hit = TraceWorld(start, end, HULL_POINT, &tr);
+    // 1. Try requested hull (default HULL_HUMAN)
+    bool hit = TraceWorld(start, end, hullType, &tr);
+    if (hit && !tr.startsolid && !tr.allsolid && tr.fraction > 0.0f) {
+        *outGround = tr.endpos;
+        return true;
     }
 
-    if (hit) {
+    // 2. If standing hull started in solid or failed, try crouching player hull (HULL_HEAD)
+    if (hullType != HULL_HEAD) {
+        hit = TraceWorld(start, end, HULL_HEAD, &tr);
+        if (hit && !tr.startsolid && !tr.allsolid && tr.fraction > 0.0f) {
+            *outGround = tr.endpos;
+            return true;
+        }
+    }
+
+    // 3. Fallback to point ray trace
+    hit = TraceWorld(start, end, HULL_POINT, &tr);
+    if (hit && !tr.startsolid && !tr.allsolid && tr.fraction > 0.0f) {
         *outGround = tr.endpos;
         return true;
     }

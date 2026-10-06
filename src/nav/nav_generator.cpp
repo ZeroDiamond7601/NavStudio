@@ -359,7 +359,17 @@ NavGenerateResult NavGenerator::Generate(
                 case NAV_DIR_WEST:  targetX -= options.stepSize; break;
             }
 
-            Vector3 traceStart(targetX, targetY, curr->pos.z + 20.0f);
+            // Determine ceiling height at current node to ensure traceStart doesn't enter an upper floor/ceiling
+            float currCeilZ = curr->pos.z + 120.0f;
+            BSPTraceResult trCurrCeil;
+            if (bsp.TraceWorld(curr->pos + Vector3(0, 0, 2.0f), curr->pos + Vector3(0, 0, 200.0f), HULL_POINT, &trCurrCeil)) {
+                currCeilZ = trCurrCeil.endpos.z;
+            }
+
+            float traceStartZ = std::min(curr->pos.z + options.maxJumpHeight, currCeilZ - 4.0f);
+            traceStartZ = std::max(traceStartZ, curr->pos.z + 8.0f);
+            Vector3 traceStart(targetX, targetY, traceStartZ);
+
             Vector3 groundPos;
             if (!bsp.GetGround(traceStart, &groundPos, options.maxDrop)) {
                 continue;
@@ -370,9 +380,9 @@ NavGenerateResult NavGenerator::Generate(
                 continue;
             }
 
-            // Slope check
+            // Slope check using point trace to get accurate floor normal without ceiling interference
             BSPTraceResult groundTr;
-            bsp.TraceWorld(groundPos + Vector3(0, 0, 10.0f), groundPos - Vector3(0, 0, 10.0f), HULL_HUMAN, &groundTr);
+            bsp.TraceWorld(groundPos + Vector3(0, 0, 2.0f), groundPos - Vector3(0, 0, 10.0f), HULL_POINT, &groundTr);
             if (groundTr.planeNormal.z < options.maxSlopeNormalZ) {
                 continue;
             }
@@ -385,28 +395,53 @@ NavGenerateResult NavGenerator::Generate(
                 continue;
             }
 
-            // Horizontal clearance traces (feet, waist, head)
-            BSPTraceResult trFeet, trWaist;
-            bsp.TraceWorld(curr->pos + Vector3(0, 0, 14.0f), groundPos + Vector3(0, 0, 14.0f), HULL_HUMAN, &trFeet);
-            if (trFeet.fraction < 1.0f) continue;
+            // Vertical headroom clearance from floor to ceiling
+            BSPTraceResult trHead;
+            bsp.TraceWorld(groundPos + Vector3(0, 0, 2.0f), groundPos + Vector3(0, 0, 200.0f), HULL_POINT, &trHead);
+            float clearance = trHead.endpos.z - groundPos.z;
 
-            bsp.TraceWorld(curr->pos + Vector3(0, 0, 36.0f), groundPos + Vector3(0, 0, 36.0f), HULL_HUMAN, &trWaist);
-            if (trWaist.fraction < 1.0f) {
-                BSPTraceResult trCrouch;
-                bsp.TraceWorld(curr->pos + Vector3(0, 0, 24.0f), groundPos + Vector3(0, 0, 24.0f), HULL_HUMAN, &trCrouch);
-                if (trCrouch.fraction < 1.0f) continue;
+            // Reject if space cannot fit even a crouching player (standard duck height: 36 units)
+            if (clearance < options.crouchHeight - 2.0f) {
+                continue;
             }
 
-            // Vertical headroom clearance
-            BSPTraceResult trHead;
-            bsp.TraceWorld(groundPos + Vector3(0, 0, 5.0f), groundPos + Vector3(0, 0, options.humanHeight), HULL_HUMAN, &trHead);
-            float clearance = trHead.fraction * (options.humanHeight - 5.0f);
-            if (clearance < options.crouchHeight - 5.0f) {
+            bool isCrouch = (clearance < options.humanHeight - 8.0f);
+
+            // Traversal check from curr to groundPos
+            float stepZ = std::max(curr->pos.z, groundPos.z);
+            bool traversalClear = false;
+
+            // Try standing traversal first if both current and target nodes have standing headroom
+            if (!isCrouch && (curr->attributes & NAV_ATTR_CROUCH) == 0) {
+                // Standing hull: HULL_HUMAN is 72 units tall, center is 36 units above feet
+                BSPTraceResult trStand;
+                Vector3 sStart(curr->pos.x, curr->pos.y, stepZ + 36.0f);
+                Vector3 sEnd(groundPos.x, groundPos.y, stepZ + 36.0f);
+                bsp.TraceWorld(sStart, sEnd, HULL_HUMAN, &trStand);
+                if (trStand.fraction >= 1.0f && !trStand.startsolid && !trStand.allsolid) {
+                    traversalClear = true;
+                }
+            }
+
+            // If standing traversal failed or if low clearance is present, test crouch traversal
+            if (!traversalClear && options.generateCrouch && clearance >= options.crouchHeight - 2.0f) {
+                // Crouching hull: HULL_HEAD is 36 units tall, center is 18 units above feet
+                BSPTraceResult trCrouch;
+                Vector3 cStart(curr->pos.x, curr->pos.y, stepZ + 18.0f);
+                Vector3 cEnd(groundPos.x, groundPos.y, stepZ + 18.0f);
+                bsp.TraceWorld(cStart, cEnd, HULL_HEAD, &trCrouch);
+                if (trCrouch.fraction >= 1.0f && !trCrouch.startsolid && !trCrouch.allsolid) {
+                    traversalClear = true;
+                    isCrouch = true;
+                }
+            }
+
+            if (!traversalClear) {
                 continue;
             }
 
             uint8_t attributes = 0;
-            if (options.generateCrouch && clearance < options.humanHeight - 10.0f) {
+            if (options.generateCrouch && isCrouch) {
                 attributes |= NAV_ATTR_CROUCH;
             }
 
