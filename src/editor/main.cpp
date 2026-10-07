@@ -68,6 +68,10 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
 
     if (button == GLFW_MOUSE_BUTTON_RIGHT) {
         if (action == GLFW_PRESS) {
+            if (g_activeScene && g_activeScene->IsDrawAreaMode()) {
+                g_activeScene->CancelDrawArea();
+                return;
+            }
             if (g_activeScene && g_activeScene->IsBridgeMode()) {
                 g_activeScene->CancelBridgeMode();
                 return;
@@ -94,6 +98,18 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
             double mouseX, mouseY;
             glfwGetCursorPos(window, &mouseX, &mouseY);
 
+            Ray ray = ScenePicker::ScreenPointToRay(
+                static_cast<float>(mouseX), static_cast<float>(mouseY),
+                static_cast<float>(displayW), static_cast<float>(displayH),
+                g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
+            );
+
+            // Draw Area Mode Left Click: Click 1st corner, then 2nd corner
+            if (g_activeScene->IsDrawAreaMode()) {
+                g_activeScene->OnDrawAreaClick(ray, *g_cmdMgr);
+                return;
+            }
+
             // Bridge Mode Left Click: Click Edge 1 then Edge 2
             if (g_activeScene->IsBridgeMode()) {
                 uint32_t edgeArea = g_activeScene->GetBridgeHoverArea();
@@ -103,12 +119,6 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     return;
                 }
             }
-
-            Ray ray = ScenePicker::ScreenPointToRay(
-                static_cast<float>(mouseX), static_cast<float>(mouseY),
-                static_cast<float>(displayW), static_cast<float>(displayH),
-                g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
-            );
 
             auto mode = g_activeScene->GetTransformMode();
             if (mode == EditorScene::TRANSFORM_TRANSLATE || mode == EditorScene::TRANSFORM_SCALE) {
@@ -146,11 +156,15 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                 int hitEntity = ScenePicker::PickEntity(*g_activeScene, ray);
                 if (hitEntity >= 0) {
                     g_activeScene->SelectEntity(hitEntity);
-                    g_activeScene->SelectArea(0);
+                    g_activeScene->ClearSelection();
                 } else {
                     uint32_t hitArea = ScenePicker::PickNavArea(*g_activeScene, ray);
-                    g_activeScene->SelectArea(hitArea);
-                    g_activeScene->SelectEntity(-1);
+                    bool additive = (mods & GLFW_MOD_SHIFT) != 0;
+                    bool toggle = (mods & GLFW_MOD_CONTROL) != 0;
+                    g_activeScene->SelectArea(hitArea, additive, toggle);
+                    if (hitArea != 0) {
+                        g_activeScene->SelectEntity(-1);
+                    }
                 }
             }
         } else if (action == GLFW_RELEASE) {
@@ -218,12 +232,24 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 g_activeScene->SetGizmoMode(GIZMO_MODE_COMBINED);
             } else if (key == GLFW_KEY_B && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // B: Bridge Tool
                 g_activeScene->ToggleBridgeMode();
-            } else if (key == GLFW_KEY_ESCAPE && g_activeScene->IsBridgeMode()) {
-                g_activeScene->CancelBridgeMode();
+            } else if (key == GLFW_KEY_N && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // N: Draw Area Tool
+                g_activeScene->ToggleDrawAreaMode();
+            } else if (key == GLFW_KEY_A && (mods & GLFW_MOD_CONTROL) != 0) { // Ctrl+A: Select All
+                g_activeScene->SelectAllAreas();
+            } else if (key == GLFW_KEY_ESCAPE) {
+                if (g_activeScene->IsDrawAreaMode()) {
+                    g_activeScene->CancelDrawArea();
+                } else if (g_activeScene->IsBridgeMode()) {
+                    g_activeScene->CancelBridgeMode();
+                } else if (!g_activeScene->GetSelectedAreaIDs().empty() || g_activeScene->GetSelectedAreaID() != 0) {
+                    g_activeScene->ClearSelection();
+                } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {
+                    g_activeScene->SelectEntity(-1);
+                }
             }
 
             // Normal Selection Mode Hotkeys
-            if (g_activeScene->GetSelectedAreaID() != 0) {
+            if (g_activeScene->GetSelectedAreaID() != 0 || !g_activeScene->GetSelectedAreaIDs().empty()) {
                 NavArea* sel = g_activeScene->GetSelectedArea();
 
                 int displayW = 0, displayH = 0;
@@ -241,7 +267,11 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 if (key == GLFW_KEY_G) {
                     if (sel) g_activeScene->StartGrabWithRay(ray);
                 } else if (key == GLFW_KEY_S && (mods & GLFW_MOD_SHIFT) != 0) { // Shift+S: Snap to Neighbors
-                    g_activeScene->SnapSelectedAreaToNeighbors(*g_cmdMgr);
+                    if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
+                        g_activeScene->BatchSnapToNeighbors(*g_cmdMgr);
+                    } else if (sel) {
+                        g_activeScene->SnapSelectedAreaToNeighbors(*g_cmdMgr);
+                    }
                 } else if (key == GLFW_KEY_S && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_SHIFT)) == 0) {
                     if (sel) {
                         Matrix4 viewProj = g_camera.GetProjectionMatrix(aspect) * g_camera.GetViewMatrix();
@@ -252,27 +282,37 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                         );
                     }
                 } else if (key == GLFW_KEY_E && (mods & GLFW_MOD_CONTROL) == 0) { // Hammer Edge Extrude
-                    g_activeScene->ExtrudeSelectedEdge(*g_cmdMgr);
+                    if (sel) g_activeScene->ExtrudeSelectedEdge(*g_cmdMgr);
                 } else if (key == GLFW_KEY_X && (mods & GLFW_MOD_SHIFT) != 0) { // Hammer Shift+X Split Area
-                    g_activeScene->SplitSelectedArea(*g_cmdMgr);
+                    if (sel) g_activeScene->SplitSelectedArea(*g_cmdMgr);
                 } else if (key == GLFW_KEY_M && (mods & GLFW_MOD_SHIFT) != 0) { // Hammer Shift+M Merge
-                    g_activeScene->MergeSelectedArea(*g_cmdMgr);
+                    if (sel) g_activeScene->MergeSelectedArea(*g_cmdMgr);
                 } else if (key == GLFW_KEY_R) {
-                    g_activeScene->RotateSelectedArea90(*g_cmdMgr);
+                    if (sel) g_activeScene->RotateSelectedArea90(*g_cmdMgr);
                 } else if (key == GLFW_KEY_C) {
-                    g_activeScene->StartConnectMode();
+                    if (sel) g_activeScene->StartConnectMode();
                 } else if (key == GLFW_KEY_D && (mods & GLFW_MOD_SHIFT) != 0) {
-                    g_activeScene->DuplicateSelectedArea(*g_cmdMgr);
+                    if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
+                        g_activeScene->BatchDuplicate(*g_cmdMgr);
+                    } else if (sel) {
+                        g_activeScene->DuplicateSelectedArea(*g_cmdMgr);
+                    }
                 } else if ((key == GLFW_KEY_X && (mods & GLFW_MOD_SHIFT) == 0) || key == GLFW_KEY_DELETE) {
-                    g_activeScene->DeleteSelectedArea(*g_cmdMgr);
+                    if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
+                        g_activeScene->BatchDelete(*g_cmdMgr);
+                    } else if (sel) {
+                        g_activeScene->DeleteSelectedArea(*g_cmdMgr);
+                    }
                 } else if (key == GLFW_KEY_F) {
                     if (sel) g_camera.FocusOn(sel->GetCenter());
                 } else if (key == GLFW_KEY_SPACE) {
-                    if (g_activeScene->HasBSP()) {
+                    if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
+                        g_activeScene->BatchSnapToFloor(*g_cmdMgr);
+                    } else if (g_activeScene->HasBSP() && sel) {
                         g_cmdMgr->ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(g_activeScene, sel->GetID()));
                     }
                 } else if (key == GLFW_KEY_ESCAPE) {
-                    g_activeScene->SelectArea(0);
+                    g_activeScene->ClearSelection();
                 }
             } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {
                 if (key == GLFW_KEY_F) {
@@ -325,6 +365,8 @@ static void CursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
                 static_cast<float>(xpos), static_cast<float>(ypos),
                 ray, static_cast<float>(ypos - g_lastMouseY)
             );
+        } else if (g_activeScene->IsDrawAreaMode()) {
+            g_activeScene->UpdateDrawArea(ray);
         } else if (g_activeScene->IsBridgeMode()) {
             uint32_t edgeAreaId = 0;
             SelectedHandleType edgeHandle = HANDLE_NONE;

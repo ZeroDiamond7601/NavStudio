@@ -62,7 +62,21 @@ public:
     const std::string& GetLoadingError() const { return m_errorMessage; }
     void ClearLoadingError() { m_errorMessage.clear(); }
 
-    void SelectArea(uint32_t id);
+    // Selection & Multi-Selection
+    void SelectArea(uint32_t id, bool additive = false, bool toggle = false);
+    bool IsAreaSelected(uint32_t id) const;
+    const std::vector<uint32_t>& GetSelectedAreaIDs() const { return m_selectedAreaIds; }
+    void ClearSelection();
+    void SelectAllAreas();
+
+    // Multi-Selection Batch Actions
+    void BatchSetAttributes(uint8_t flags, class CommandManager& cmdMgr);
+    void BatchSetPlace(const std::string& placeName, class CommandManager& cmdMgr);
+    void BatchSnapToNeighbors(class CommandManager& cmdMgr);
+    void BatchSnapToFloor(class CommandManager& cmdMgr);
+    void BatchDuplicate(class CommandManager& cmdMgr);
+    void BatchDelete(class CommandManager& cmdMgr);
+
     void SetHoveredArea(uint32_t id);
     NavArea* GetSelectedArea();
     const NavArea* GetSelectedArea() const;
@@ -155,6 +169,18 @@ public:
     SelectedHandleType GetBridgeHoverEdge() const { return m_bridgeHoverEdge; }
     void SetBridgeHoverEdge(uint32_t areaId, SelectedHandleType edge);
     void OnBridgeClick(uint32_t areaId, SelectedHandleType edge, class CommandManager& cmdMgr);
+
+    // Draw Area Marquee Tool (2-Click rectangular area creation)
+    bool IsDrawAreaMode() const { return m_isDrawAreaMode; }
+    bool IsDrawAreaActive() const { return m_drawAreaActive; }
+    void StartDrawAreaMode();
+    void CancelDrawArea();
+    void ExitDrawAreaMode();
+    void ToggleDrawAreaMode();
+    const Vector3& GetDrawAreaStart() const { return m_drawAreaStart; }
+    const Vector3& GetDrawAreaCurrent() const { return m_drawAreaCurrent; }
+    void UpdateDrawArea(const Ray& ray);
+    void OnDrawAreaClick(const Ray& ray, class CommandManager& cmdMgr);
 
     // Interactive Handles (Gizmo Arrows, Edges, Corners)
     SelectedHandleType GetHoveredHandle() const { return m_hoveredHandle; }
@@ -254,6 +280,16 @@ private:
     SelectedHandleType m_bridgeFirstEdge{HANDLE_NONE};
     uint32_t m_bridgeHoverAreaId{0};
     SelectedHandleType m_bridgeHoverEdge{HANDLE_NONE};
+
+    // Draw Area Marquee Tool
+    bool m_isDrawAreaMode{false};
+    bool m_drawAreaActive{false};
+    Vector3 m_drawAreaStart{0.0f, 0.0f, 0.0f};
+    Vector3 m_drawAreaCurrent{0.0f, 0.0f, 0.0f};
+    float m_drawAreaElevation{0.0f};
+
+    // Multi-Selection
+    std::vector<uint32_t> m_selectedAreaIds;
 
     // Handles
     SelectedHandleType m_hoveredHandle{HANDLE_NONE};

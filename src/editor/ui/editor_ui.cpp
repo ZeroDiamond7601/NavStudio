@@ -575,6 +575,14 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
             if (hasSel) scene.ExtrudeSelectedEdge(cmdMgr);
         }
 
+        bool drawActive = scene.IsDrawAreaMode();
+        if (drawActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.45f, 0.15f, 1.0f));
+        if (ImGui::Button(drawActive ? "Cancel Draw Area [Esc]" : "Draw Area Box [N]", ImVec2(-1, 26))) {
+            scene.ToggleDrawAreaMode();
+        }
+        if (drawActive) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click to start rectangular area, move cursor, click to finish (Desktop marquee creation)");
+
         bool bridgeActive = scene.IsBridgeMode();
         if (bridgeActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.45f, 0.15f, 1.0f));
         if (ImGui::Button(bridgeActive ? "Cancel Bridge [Esc]" : "Bridge Edges [B]", ImVec2(-1, 26))) {
@@ -714,9 +722,10 @@ void EditorUI::RenderHierarchy(EditorScene& scene, Camera& camera) {
                             std::snprintf(label, sizeof(label), "Area #%u (%s)", id, place.c_str());
                         }
 
-                        bool isSelected = (scene.GetSelectedAreaID() == id);
+                        bool isSelected = scene.IsAreaSelected(id);
                         if (ImGui::Selectable(label, isSelected)) {
-                            scene.SelectArea(id);
+                            ImGuiIO& io = ImGui::GetIO();
+                            scene.SelectArea(id, io.KeyShift, io.KeyCtrl);
                             scene.SelectEntity(-1);
                         }
 
@@ -983,6 +992,94 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
     if (ImGui::Begin("Property Inspector")) {
         if (scene.GetSelectedEntityIndex() >= 0) {
             RenderEntityInspector(scene, camera);
+            ImGui::End();
+            return;
+        }
+
+        const auto& selIds = scene.GetSelectedAreaIDs();
+        if (selIds.size() > 1) {
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "Multi-Selection: %zu NavAreas", selIds.size());
+            ImGui::Separator();
+
+            // Batch Place Name
+            ImGui::Text("Batch Place Name:");
+            static char batchPlaceBuffer[64] = "";
+            ImGui::InputText("##BatchPlaceInput", batchPlaceBuffer, sizeof(batchPlaceBuffer));
+            if (ImGui::Button("Apply Place to All", ImVec2(-1, 24))) {
+                if (batchPlaceBuffer[0] != '\0') {
+                    scene.BatchSetPlace(batchPlaceBuffer, cmdMgr);
+                }
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Text("Batch Attributes / Flags:");
+
+            static bool batchCrouch = false;
+            static bool batchJump = false;
+            static bool batchPrecise = false;
+            static bool batchNoJump = false;
+
+            ImGui::Checkbox("Crouch##batch", &batchCrouch);
+            ImGui::Checkbox("Jump##batch", &batchJump);
+            ImGui::Checkbox("Precise##batch", &batchPrecise);
+            ImGui::Checkbox("No Jump##batch", &batchNoJump);
+
+            if (ImGui::Button("Apply Attributes to All", ImVec2(-1, 24))) {
+                uint8_t newFlags = 0;
+                if (batchCrouch) newFlags |= NAV_ATTR_CROUCH;
+                if (batchJump) newFlags |= NAV_ATTR_JUMP;
+                if (batchPrecise) newFlags |= NAV_ATTR_PRECISE;
+                if (batchNoJump) newFlags |= NAV_ATTR_NO_JUMP;
+                scene.BatchSetAttributes(newFlags, cmdMgr);
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Text("Batch Actions:");
+
+            if (ImGui::Button("Snap All Neighbors [Shift+S]", ImVec2(-1, 26))) {
+                scene.BatchSnapToNeighbors(cmdMgr);
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Closes micro-gaps and connects all selected areas to their neighbors");
+
+            bool hasBSP = scene.HasBSP();
+            if (!hasBSP) ImGui::BeginDisabled();
+            if (ImGui::Button("Snap All to Floor [Space]", ImVec2(-1, 26))) {
+                scene.BatchSnapToFloor(cmdMgr);
+            }
+            if (!hasBSP) ImGui::EndDisabled();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip(hasBSP ? "Snaps corner elevations of all selected areas onto BSP floor" : "Requires loaded BSP map");
+
+            if (ImGui::Button("Duplicate All [Shift+D]", ImVec2(-1, 26))) {
+                scene.BatchDuplicate(cmdMgr);
+            }
+
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.70f, 0.20f, 0.20f, 0.8f));
+            if (ImGui::Button("Delete All [X]", ImVec2(-1, 26))) {
+                scene.BatchDelete(cmdMgr);
+            }
+            ImGui::PopStyleColor();
+
+            if (ImGui::Button("Deselect All [Esc]", ImVec2(-1, 24))) {
+                scene.ClearSelection();
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            if (ImGui::CollapsingHeader("Selected Area IDs", ImGuiTreeNodeFlags_DefaultOpen)) {
+                std::string idSummary;
+                for (size_t i = 0; i < selIds.size(); ++i) {
+                    if (i > 0) idSummary += ", ";
+                    idSummary += "#" + std::to_string(selIds[i]);
+                    if (i > 40) {
+                        idSummary += " ... (" + std::to_string(selIds.size() - 40) + " more)";
+                        break;
+                    }
+                }
+                ImGui::TextWrapped("%s", idSummary.c_str());
+            }
+
             ImGui::End();
             return;
         }
@@ -1316,7 +1413,20 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
         const auto& entR = scene.GetEntityRenderer();
         int selEntIdx = scene.GetSelectedEntityIndex();
 
-        if (scene.IsBridgeMode()) {
+        if (scene.IsDrawAreaMode()) {
+            if (!scene.IsDrawAreaActive()) {
+                ImGui::TextColored(ImVec4(0.2f, 1.0f, 1.0f, 1.0f),
+                    "[DRAW AREA TOOL ACTIVE] Click 1st corner on floor or surface | Right-Click or Esc to cancel");
+            } else {
+                Vector3 p0 = scene.GetDrawAreaStart();
+                Vector3 p1 = scene.GetDrawAreaCurrent();
+                float w = std::abs(p1.x - p0.x);
+                float l = std::abs(p1.y - p0.y);
+                ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f),
+                    "[DRAW AREA TOOL ACTIVE] 1st Corner @ (%.0f, %.0f, %.0f) | Live Size: %.0f x %.0f | Click 2nd corner to create | Esc to cancel",
+                    p0.x, p0.y, p0.z, w, l);
+            }
+        } else if (scene.IsBridgeMode()) {
             uint32_t a1 = scene.GetBridgeFirstArea();
             if (a1 == 0) {
                 ImGui::TextColored(ImVec4(0.2f, 1.0f, 1.0f, 1.0f),
@@ -1332,6 +1442,9 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
                     bspName, selEnt->index, selEnt->classname.c_str(), selEnt->origin.x, selEnt->origin.y, selEnt->origin.z,
                     entCount, grid, snap ? "SNAP" : "FREE");
             }
+        } else if (scene.GetSelectedAreaIDs().size() > 1) {
+            ImGui::Text("Map: %s | Multi-Selection: %zu NavAreas Selected | Grid: %.0f [%s] | Esc to clear",
+                bspName, scene.GetSelectedAreaIDs().size(), grid, snap ? "SNAP" : "FREE");
         } else if (selId != 0 && scene.HasNAV()) {
             const NavArea* sel = scene.GetNAV().GetAreaByID(selId);
             if (sel) {
@@ -1401,8 +1514,9 @@ void EditorUI::RenderHelpModal() {
         ImGui::BulletText("Ctrl+S: Save current navigation mesh");
         ImGui::BulletText("F3: Toggle Entity 3D visualization");
         ImGui::BulletText("F4: Cycle BSP Shading Mode (Textured / Solid / Wireframe / Ghost)");
-        ImGui::BulletText("Left-Click: Select entity or NavArea");
-        ImGui::BulletText("F: Focus camera on selected entity or NavArea");
+        ImGui::BulletText("N: Draw Area Marquee Tool (Click 1st corner, move cursor, click 2nd corner to create)");
+        ImGui::BulletText("Shift + Click / Ctrl + Click: Multi-select NavAreas in 3D viewport or explorer");
+        ImGui::BulletText("Ctrl + A: Select All NavAreas");
         ImGui::BulletText("Escape: Clear selection / Cancel modal tool");
 
         ImGui::Spacing();

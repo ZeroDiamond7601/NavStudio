@@ -36,7 +36,8 @@ void NavRenderer::Clear() {
 bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t hoveredId,
                                uint32_t connectTargetId, int transformAxis,
                                SelectedHandleType hoveredHandle,
-                               SelectedHandleType selectedHandle) {
+                               SelectedHandleType selectedHandle,
+                               const std::vector<uint32_t>* selectedIds) {
     Clear();
     if (!nav.IsLoaded()) return false;
 
@@ -57,6 +58,14 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
 
         uint32_t id = area->GetID();
         bool isSelected = (id == selectedId);
+        if (!isSelected && selectedIds) {
+            for (uint32_t sid : *selectedIds) {
+                if (sid == id) {
+                    isSelected = true;
+                    break;
+                }
+            }
+        }
         bool isHovered = (id == hoveredId);
 
         // Determine area color based on selection and attributes with high contrast

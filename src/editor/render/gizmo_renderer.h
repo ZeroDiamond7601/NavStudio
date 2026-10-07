@@ -41,6 +41,10 @@ public:
                            float r, float g, float b, float a,
                            float lineWidth = 3.5f);
 
+    void RenderRectMarquee(const Shader& lineShader, const Matrix4& mvp,
+                           const Vector3& p0, const Vector3& p1,
+                           float r = 0.0f, float g = 0.9f, float b = 1.0f, float a = 1.0f);
+
 private:
     void BuildBuffers(const Vector3& center, const Vector3& camPos,
                       GizmoMode mode,

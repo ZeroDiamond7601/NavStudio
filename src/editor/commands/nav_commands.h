@@ -989,4 +989,145 @@ private:
     bool m_valid;
 };
 
+// Command: Group Multiple Commands as a Single Undoable Action
+class CmdCompound : public IEditCommand {
+public:
+    CmdCompound(std::vector<std::unique_ptr<IEditCommand>> commands, const std::string& name = "Batch Edit")
+        : m_commands(std::move(commands)), m_name(name) {}
+
+    void Execute() override {
+        for (auto& cmd : m_commands) {
+            if (cmd) cmd->Execute();
+        }
+    }
+
+    void Undo() override {
+        for (auto it = m_commands.rbegin(); it != m_commands.rend(); ++it) {
+            if (*it) (*it)->Undo();
+        }
+    }
+
+    const char* GetName() const override { return m_name.c_str(); }
+
+private:
+    std::vector<std::unique_ptr<IEditCommand>> m_commands;
+    std::string m_name;
+};
+
+// Command: Create New Area (from interactive Draw Area Marquee Tool)
+class CmdCreateArea : public IEditCommand {
+public:
+    CmdCreateArea(EditorScene* scene, const NavExtent& extent, float neZ, float swZ,
+                  uint8_t attributes = 0, const std::string& placeName = "")
+        : m_scene(scene), m_extent(extent), m_neZ(neZ), m_swZ(swZ),
+          m_attributes(attributes), m_placeName(placeName), m_createdId(0) {}
+
+    void Execute() override {
+        NavArea* area = m_scene->GetNAV().CreateArea(m_extent, m_neZ, m_swZ);
+        if (area) {
+            m_createdId = area->GetID();
+            area->SetAttributes(m_attributes);
+            if (!m_placeName.empty()) {
+                area->SetPlaceName(m_placeName);
+            }
+            m_scene->SelectArea(m_createdId);
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    void Undo() override {
+        if (m_createdId != 0) {
+            m_scene->GetNAV().RemoveArea(m_createdId);
+            m_scene->SelectArea(0);
+            m_scene->RebuildNavRenderer();
+            m_createdId = 0;
+        }
+    }
+
+    uint32_t GetCreatedID() const { return m_createdId; }
+    const char* GetName() const override { return "Create NavArea"; }
+
+private:
+    EditorScene* m_scene;
+    NavExtent m_extent;
+    float m_neZ{0.0f}, m_swZ{0.0f};
+    uint8_t m_attributes{0};
+    std::string m_placeName;
+    uint32_t m_createdId{0};
+};
+
+// Command: Batch Change Attributes for Multiple Areas
+class CmdBatchSetAttributes : public IEditCommand {
+public:
+    CmdBatchSetAttributes(EditorScene* scene, const std::vector<uint32_t>& areaIds, uint8_t newAttributes)
+        : m_scene(scene), m_areaIds(areaIds), m_newAttributes(newAttributes) {
+        for (uint32_t id : m_areaIds) {
+            NavArea* a = m_scene->GetNAV().GetAreaByID(id);
+            if (a) {
+                m_oldAttributes.push_back({ id, a->GetAttributes() });
+            }
+        }
+    }
+
+    void Execute() override {
+        for (uint32_t id : m_areaIds) {
+            NavArea* a = m_scene->GetNAV().GetAreaByID(id);
+            if (a) a->SetAttributes(m_newAttributes);
+        }
+        m_scene->RebuildNavRenderer();
+    }
+
+    void Undo() override {
+        for (const auto& item : m_oldAttributes) {
+            NavArea* a = m_scene->GetNAV().GetAreaByID(item.first);
+            if (a) a->SetAttributes(item.second);
+        }
+        m_scene->RebuildNavRenderer();
+    }
+
+    const char* GetName() const override { return "Batch Set Attributes"; }
+
+private:
+    EditorScene* m_scene;
+    std::vector<uint32_t> m_areaIds;
+    uint8_t m_newAttributes;
+    std::vector<std::pair<uint32_t, uint8_t>> m_oldAttributes;
+};
+
+// Command: Batch Set Place Name for Multiple Areas
+class CmdBatchSetPlace : public IEditCommand {
+public:
+    CmdBatchSetPlace(EditorScene* scene, const std::vector<uint32_t>& areaIds, const std::string& newPlace)
+        : m_scene(scene), m_areaIds(areaIds), m_newPlace(newPlace) {
+        for (uint32_t id : m_areaIds) {
+            NavArea* a = m_scene->GetNAV().GetAreaByID(id);
+            if (a) {
+                m_oldPlaces.push_back({ id, a->GetPlaceName() });
+            }
+        }
+    }
+
+    void Execute() override {
+        for (uint32_t id : m_areaIds) {
+            NavArea* a = m_scene->GetNAV().GetAreaByID(id);
+            if (a) a->SetPlaceName(m_newPlace);
+        }
+    }
+
+    void Undo() override {
+        for (const auto& item : m_oldPlaces) {
+            NavArea* a = m_scene->GetNAV().GetAreaByID(item.first);
+            if (a) a->SetPlaceName(item.second);
+        }
+    }
+
+    const char* GetName() const override { return "Batch Set Place Name"; }
+
+private:
+    EditorScene* m_scene;
+    std::vector<uint32_t> m_areaIds;
+    std::string m_newPlace;
+    std::vector<std::pair<uint32_t, std::string>> m_oldPlaces;
+};
+
 #endif // NAV_COMMANDS_H

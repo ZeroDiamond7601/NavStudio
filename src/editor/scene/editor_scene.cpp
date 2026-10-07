@@ -1,4 +1,5 @@
 #include "editor/scene/editor_scene.h"
+#include "editor/scene/scene_picker.h"
 #include "editor/commands/nav_commands.h"
 #include <cstdio>
 #include <fstream>
@@ -164,6 +165,10 @@ float EditorScene::SnapToNeighborEdge(uint32_t currentAreaId, float candidateVal
 }
 
 void EditorScene::SnapSelectedAreaToNeighbors(CommandManager& cmdMgr) {
+    if (m_selectedAreaIds.size() > 1) {
+        BatchSnapToNeighbors(cmdMgr);
+        return;
+    }
     NavArea* area = GetSelectedArea();
     if (!area || !m_nav || !m_nav->IsLoaded()) return;
     cmdMgr.ExecuteCommand(std::make_unique<CmdSnapAreaToNeighbors>(this, area->GetID(), m_meshSnapTolerance * 1.5f));
@@ -511,9 +516,63 @@ void EditorScene::UpdateAsyncLoading(float deltaTime) {
     }
 }
 
-void EditorScene::SelectArea(uint32_t id) {
-    if (m_selectedAreaId == id) return;
-    m_selectedAreaId = id;
+void EditorScene::SelectArea(uint32_t id, bool additive, bool toggle) {
+    if (additive) {
+        if (id != 0) {
+            auto it = std::find(m_selectedAreaIds.begin(), m_selectedAreaIds.end(), id);
+            if (it == m_selectedAreaIds.end()) {
+                m_selectedAreaIds.push_back(id);
+            }
+            m_selectedAreaId = id;
+        }
+    } else if (toggle) {
+        if (id != 0) {
+            auto it = std::find(m_selectedAreaIds.begin(), m_selectedAreaIds.end(), id);
+            if (it != m_selectedAreaIds.end()) {
+                m_selectedAreaIds.erase(it);
+                m_selectedAreaId = m_selectedAreaIds.empty() ? 0 : m_selectedAreaIds.back();
+            } else {
+                m_selectedAreaIds.push_back(id);
+                m_selectedAreaId = id;
+            }
+        }
+    } else {
+        m_selectedAreaIds.clear();
+        if (id != 0) {
+            m_selectedAreaIds.push_back(id);
+        }
+        m_selectedAreaId = id;
+    }
+
+    m_selectedHandle = HANDLE_NONE;
+    m_hoveredHandle = HANDLE_NONE;
+    RebuildNavRenderer();
+}
+
+bool EditorScene::IsAreaSelected(uint32_t id) const {
+    if (id == 0) return false;
+    for (uint32_t selId : m_selectedAreaIds) {
+        if (selId == id) return true;
+    }
+    return (m_selectedAreaId == id);
+}
+
+void EditorScene::ClearSelection() {
+    m_selectedAreaIds.clear();
+    m_selectedAreaId = 0;
+    m_selectedHandle = HANDLE_NONE;
+    m_hoveredHandle = HANDLE_NONE;
+    RebuildNavRenderer();
+}
+
+void EditorScene::SelectAllAreas() {
+    m_selectedAreaIds.clear();
+    if (m_nav && m_nav->IsLoaded()) {
+        for (const auto* area : m_nav->GetAreas()) {
+            if (area) m_selectedAreaIds.push_back(area->GetID());
+        }
+    }
+    m_selectedAreaId = m_selectedAreaIds.empty() ? 0 : m_selectedAreaIds.front();
     m_selectedHandle = HANDLE_NONE;
     m_hoveredHandle = HANDLE_NONE;
     RebuildNavRenderer();
@@ -557,7 +616,8 @@ void EditorScene::RebuildNavRenderer() {
             (m_transformMode == TRANSFORM_CONNECT) ? m_connectHoverAreaId : 0,
             axis,
             m_hoveredHandle,
-            (m_isDraggingHandle ? m_draggedHandle : m_selectedHandle)
+            (m_isDraggingHandle ? m_draggedHandle : m_selectedHandle),
+            &m_selectedAreaIds
         );
     }
 }
@@ -689,6 +749,11 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
                 }
             }
         }
+    }
+
+    // Draw Area Mode Visual Marquee Box
+    if (m_isDrawAreaMode && m_drawAreaActive) {
+        m_gizmoRenderer.RenderRectMarquee(lineShader, mvp, m_drawAreaStart, m_drawAreaCurrent, 0.0f, 0.9f, 1.0f, 1.0f);
     }
 }
 
@@ -1608,6 +1673,10 @@ void EditorScene::DisconnectSelectedFrom(uint32_t targetId, bool bidirectional, 
 }
 
 void EditorScene::DuplicateSelectedArea(CommandManager& cmdMgr) {
+    if (m_selectedAreaIds.size() > 1) {
+        BatchDuplicate(cmdMgr);
+        return;
+    }
     NavArea* area = GetSelectedArea();
     if (!area) return;
     auto dupCmd = std::make_unique<CmdDuplicateArea>(this, area->GetID());
@@ -1619,6 +1688,10 @@ void EditorScene::DuplicateSelectedArea(CommandManager& cmdMgr) {
 }
 
 void EditorScene::DeleteSelectedArea(CommandManager& cmdMgr) {
+    if (m_selectedAreaIds.size() > 1) {
+        BatchDelete(cmdMgr);
+        return;
+    }
     NavArea* area = GetSelectedArea();
     if (!area) return;
     cmdMgr.ExecuteCommand(std::make_unique<CmdDeleteArea>(this, area->GetID()));
@@ -1696,4 +1769,177 @@ bool EditorScene::LoadWAD(const std::string& wadPath) {
         m_bspRenderer.BuildFromBSP(*m_bsp, &m_textureManager);
     }
     return true;
+}
+
+void EditorScene::BatchSetAttributes(uint8_t flags, CommandManager& cmdMgr) {
+    if (m_selectedAreaIds.empty()) return;
+    cmdMgr.ExecuteCommand(std::make_unique<CmdBatchSetAttributes>(this, m_selectedAreaIds, flags));
+}
+
+void EditorScene::BatchSetPlace(const std::string& placeName, CommandManager& cmdMgr) {
+    if (m_selectedAreaIds.empty()) return;
+    cmdMgr.ExecuteCommand(std::make_unique<CmdBatchSetPlace>(this, m_selectedAreaIds, placeName));
+}
+
+void EditorScene::BatchSnapToNeighbors(CommandManager& cmdMgr) {
+    if (m_selectedAreaIds.empty()) return;
+    std::vector<std::unique_ptr<IEditCommand>> cmds;
+    for (uint32_t id : m_selectedAreaIds) {
+        cmds.push_back(std::make_unique<CmdSnapAreaToNeighbors>(this, id, m_meshSnapTolerance * 1.5f));
+    }
+    cmdMgr.ExecuteCommand(std::make_unique<CmdCompound>(std::move(cmds), "Batch Snap to Neighbors"));
+}
+
+void EditorScene::BatchSnapToFloor(CommandManager& cmdMgr) {
+    if (m_selectedAreaIds.empty() || !HasBSP()) return;
+    std::vector<std::unique_ptr<IEditCommand>> cmds;
+    for (uint32_t id : m_selectedAreaIds) {
+        cmds.push_back(std::make_unique<CmdSnapAreaToFloor>(this, id));
+    }
+    cmdMgr.ExecuteCommand(std::make_unique<CmdCompound>(std::move(cmds), "Batch Snap to Floor"));
+}
+
+void EditorScene::BatchDuplicate(CommandManager& cmdMgr) {
+    if (m_selectedAreaIds.empty()) return;
+    std::vector<std::unique_ptr<IEditCommand>> cmds;
+    for (uint32_t id : m_selectedAreaIds) {
+        cmds.push_back(std::make_unique<CmdDuplicateArea>(this, id));
+    }
+    cmdMgr.ExecuteCommand(std::make_unique<CmdCompound>(std::move(cmds), "Batch Duplicate Areas"));
+}
+
+void EditorScene::BatchDelete(CommandManager& cmdMgr) {
+    if (m_selectedAreaIds.empty()) return;
+    std::vector<std::unique_ptr<IEditCommand>> cmds;
+    for (uint32_t id : m_selectedAreaIds) {
+        cmds.push_back(std::make_unique<CmdDeleteArea>(this, id));
+    }
+    cmdMgr.ExecuteCommand(std::make_unique<CmdCompound>(std::move(cmds), "Batch Delete Areas"));
+    ClearSelection();
+}
+
+void EditorScene::StartDrawAreaMode() {
+    m_isDrawAreaMode = true;
+    m_drawAreaActive = false;
+    m_drawAreaStart = Vector3(0.0f, 0.0f, 0.0f);
+    m_drawAreaCurrent = Vector3(0.0f, 0.0f, 0.0f);
+    m_drawAreaElevation = 0.0f;
+    if (m_isBridgeMode) CancelBridgeMode();
+}
+
+void EditorScene::CancelDrawArea() {
+    if (m_drawAreaActive) {
+        m_drawAreaActive = false;
+    } else {
+        m_isDrawAreaMode = false;
+    }
+}
+
+void EditorScene::ExitDrawAreaMode() {
+    m_isDrawAreaMode = false;
+    m_drawAreaActive = false;
+}
+
+void EditorScene::ToggleDrawAreaMode() {
+    if (m_isDrawAreaMode) {
+        ExitDrawAreaMode();
+    } else {
+        StartDrawAreaMode();
+    }
+}
+
+void EditorScene::UpdateDrawArea(const Ray& ray) {
+    if (!m_drawAreaActive) return;
+
+    Vector3 hit;
+    if (!IntersectRayWithPlane(ray, Vector3(0.0f, 0.0f, m_drawAreaElevation), Vector3(0.0f, 0.0f, 1.0f), hit)) {
+        hit = ray.origin + ray.direction * 500.0f;
+        hit.z = m_drawAreaElevation;
+    }
+
+    if (m_gridSnap) {
+        hit.x = SnapValue(hit.x);
+        hit.y = SnapValue(hit.y);
+    }
+    if (m_meshSnap) {
+        hit.x = SnapToNeighborEdge(0, hit.x, true, std::min(m_drawAreaStart.y, hit.y), std::max(m_drawAreaStart.y, hit.y));
+        hit.y = SnapToNeighborEdge(0, hit.y, false, std::min(m_drawAreaStart.x, hit.x), std::max(m_drawAreaStart.x, hit.x));
+    }
+    hit.z = m_drawAreaElevation;
+    m_drawAreaCurrent = hit;
+}
+
+void EditorScene::OnDrawAreaClick(const Ray& ray, CommandManager& cmdMgr) {
+    if (!m_drawAreaActive) {
+        // Step 1: 1st Corner
+        Vector3 hitPoint;
+        bool hasHit = false;
+        if (HasBSP()) {
+            hasHit = ScenePicker::PickBSPFloor(*this, ray, &hitPoint);
+        }
+        if (!hasHit && HasNAV()) {
+            uint32_t hitAreaId = ScenePicker::PickNavArea(*this, ray, &hitPoint);
+            if (hitAreaId != 0) {
+                hasHit = true;
+            }
+        }
+        if (!hasHit) {
+            hasHit = IntersectRayWithPlane(ray, Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), hitPoint);
+        }
+        if (!hasHit) {
+            hitPoint = ray.origin + ray.direction * 500.0f;
+        }
+
+        if (m_gridSnap) {
+            hitPoint.x = SnapValue(hitPoint.x);
+            hitPoint.y = SnapValue(hitPoint.y);
+            hitPoint.z = SnapValue(hitPoint.z);
+        }
+        if (m_meshSnap) {
+            hitPoint.x = SnapToNeighborEdge(0, hitPoint.x, true, hitPoint.y - 16.0f, hitPoint.y + 16.0f);
+            hitPoint.y = SnapToNeighborEdge(0, hitPoint.y, false, hitPoint.x - 16.0f, hitPoint.x + 16.0f);
+        }
+
+        m_drawAreaStart = hitPoint;
+        m_drawAreaElevation = hitPoint.z;
+        m_drawAreaCurrent = hitPoint;
+        m_drawAreaActive = true;
+    } else {
+        // Step 2: 2nd Corner
+        UpdateDrawArea(ray);
+
+        float minX = std::min(m_drawAreaStart.x, m_drawAreaCurrent.x);
+        float maxX = std::max(m_drawAreaStart.x, m_drawAreaCurrent.x);
+        float minY = std::min(m_drawAreaStart.y, m_drawAreaCurrent.y);
+        float maxY = std::max(m_drawAreaStart.y, m_drawAreaCurrent.y);
+
+        if (maxX - minX >= 8.0f && maxY - minY >= 8.0f) {
+            float neZ = m_drawAreaElevation;
+            float swZ = m_drawAreaElevation;
+
+            if (HasBSP()) {
+                Vector3 startNE(maxX, maxY, m_drawAreaElevation + 64.0f);
+                Vector3 endNE(maxX, maxY, m_drawAreaElevation - 128.0f);
+                BSPTraceResult trNE;
+                if (GetBSP().TraceWorld(startNE, endNE, HULL_POINT, &trNE)) {
+                    neZ = trNE.endpos.z;
+                }
+
+                Vector3 startSW(minX, minY, m_drawAreaElevation + 64.0f);
+                Vector3 endSW(minX, minY, m_drawAreaElevation - 128.0f);
+                BSPTraceResult trSW;
+                if (GetBSP().TraceWorld(startSW, endSW, HULL_POINT, &trSW)) {
+                    swZ = trSW.endpos.z;
+                }
+            }
+
+            NavExtent extent(Vector3(minX, minY, std::min(swZ, neZ)),
+                             Vector3(maxX, maxY, std::max(swZ, neZ)));
+
+            auto cmd = std::make_unique<CmdCreateArea>(this, extent, neZ, swZ);
+            cmdMgr.ExecuteCommand(std::move(cmd));
+        }
+
+        m_drawAreaActive = false;
+    }
 }
