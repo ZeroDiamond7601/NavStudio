@@ -155,6 +155,8 @@ if(BUILD_EDITOR)
         src/editor/render/shader.cpp
         src/editor/render/bsp_renderer.cpp
         src/editor/render/texture_manager.cpp
+        src/editor/render/image_loader.cpp
+        src/editor/render/skybox_renderer.cpp
         src/editor/render/nav_renderer.cpp
         src/editor/render/gizmo_renderer.cpp
         src/editor/render/entity_renderer.cpp

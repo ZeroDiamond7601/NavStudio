@@ -351,6 +351,7 @@ void EditorScene::UnloadBSP() {
     }
     m_bspPath.clear();
     m_bspRenderer.Clear();
+    m_skyboxRenderer.Clear();
     m_entityRenderer.Clear();
     m_selectedEntityIndex = -1;
 }
@@ -533,6 +534,7 @@ void EditorScene::UpdateAsyncLoading(float deltaTime) {
                 m_bsp = std::move(m_loadCtx.loadedBsp);
                 m_bspPath = m_loadCtx.targetBspPath;
                 m_textureManager.LoadForBSP(*m_bsp, m_bspPath, m_gameDirectory);
+                m_skyboxRenderer.LoadFromBSP(*m_bsp, m_bspPath, m_gameDirectory);
                 m_bspRenderer.BuildFromBSP(*m_bsp, &m_textureManager);
                 m_entityRenderer.BuildFromBSP(*m_bsp);
                 m_selectedEntityIndex = -1;
@@ -722,6 +724,15 @@ static bool ProjectRayToAxis(const Ray& ray, const Vector3& axisOrigin, const Ve
     Vector3 hitPoint = ray.origin + ray.direction * s;
     outT = (hitPoint - axisOrigin).Dot(U);
     return true;
+}
+
+void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& view, const Matrix4& proj, const Vector3& camPos) {
+    if (m_showBSP && m_bspRenderer.GetShowSkybox() && m_skyboxRenderer.IsEnabled()) {
+        m_skyboxRenderer.Render(view, proj);
+    }
+
+    Matrix4 mvp = proj * view;
+    Render(meshShader, lineShader, mvp, camPos);
 }
 
 void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, const Vector3& camPos) {

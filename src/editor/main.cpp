@@ -635,8 +635,9 @@ int main(int argc, char* argv[]) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         float aspect = (displayH > 0) ? (static_cast<float>(displayW) / static_cast<float>(displayH)) : 1.0f;
-        Matrix4 mvp = g_camera.GetProjectionMatrix(aspect) * g_camera.GetViewMatrix();
-        scene.Render(meshShader, lineShader, mvp, g_camera.GetPosition());
+        Matrix4 view = g_camera.GetViewMatrix();
+        Matrix4 proj = g_camera.GetProjectionMatrix(aspect);
+        scene.Render(meshShader, lineShader, view, proj, g_camera.GetPosition());
 
         // Render ImGui Overlays and Dockspace
         ImGui_ImplOpenGL3_NewFrame();

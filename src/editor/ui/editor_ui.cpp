@@ -124,6 +124,8 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
         } else if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_G, false) && scene.HasBSP()) {
             m_showGenerateModal = true;
             m_generateStatusText.clear();
+        } else if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_K, false)) {
+            scene.SetShowSkybox(!scene.GetShowSkybox());
         }
     }
 
@@ -378,6 +380,66 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             bool showWireOnSolid = scene.GetShowWireframeOnSolid();
             if (ImGui::MenuItem("Show Brush Edge Outlines", nullptr, &showWireOnSolid)) {
                 scene.SetShowWireframeOnSolid(showWireOnSolid);
+            }
+
+            ImGui::Separator();
+            bool showSkybox = scene.GetShowSkybox();
+            if (ImGui::MenuItem("Show 3D Skybox", "Ctrl+Shift+K", &showSkybox)) {
+                scene.SetShowSkybox(showSkybox);
+            }
+            if (showSkybox) {
+                if (ImGui::BeginMenu("  Skybox Atmosphere & Settings")) {
+                    auto& skybox = scene.GetSkyboxRenderer();
+                    ImGui::TextDisabled("Sky: %s (%s)", skybox.GetSkyname().c_str(), skybox.IsUsingProcedural() ? "Procedural Atmosphere" : "Loaded Textures");
+                    ImGui::Separator();
+
+                    ImGui::Text("Atmosphere Preset:");
+                    auto curPreset = skybox.GetPreset();
+                    if (ImGui::MenuItem("Auto (From Map Skyname)", nullptr, curPreset == SKY_PRESET_AUTO)) {
+                        skybox.SetPreset(SKY_PRESET_AUTO);
+                    }
+                    if (ImGui::MenuItem("Sunny Desert (Dust / Mirage)", nullptr, curPreset == SKY_PRESET_DESERT)) {
+                        skybox.SetPreset(SKY_PRESET_DESERT);
+                    }
+                    if (ImGui::MenuItem("Assault Night & Stars", nullptr, curPreset == SKY_PRESET_NIGHT)) {
+                        skybox.SetPreset(SKY_PRESET_NIGHT);
+                    }
+                    if (ImGui::MenuItem("Overcast Daylight (Aztec / Office)", nullptr, curPreset == SKY_PRESET_OVERCAST)) {
+                        skybox.SetPreset(SKY_PRESET_OVERCAST);
+                    }
+                    if (ImGui::MenuItem("Warm Sunset Glow", nullptr, curPreset == SKY_PRESET_SUNSET)) {
+                        skybox.SetPreset(SKY_PRESET_SUNSET);
+                    }
+                    if (ImGui::MenuItem("Azure Clear Sky", nullptr, curPreset == SKY_PRESET_AZURE)) {
+                        skybox.SetPreset(SKY_PRESET_AZURE);
+                    }
+
+                    ImGui::Separator();
+                    float rot = skybox.GetRotationYaw();
+                    if (ImGui::SliderFloat("Rotation", &rot, 0.0f, 360.0f, "%.0f deg")) {
+                        skybox.SetRotationYaw(rot);
+                    }
+                    float exp = skybox.GetExposure();
+                    if (ImGui::SliderFloat("Brightness", &exp, 0.2f, 2.5f, "%.2fx")) {
+                        skybox.SetExposure(exp);
+                    }
+
+                    ImGui::Separator();
+                    bool skyWire = scene.GetShowSkyWireframe();
+                    if (ImGui::MenuItem("Draw Sky Brush Outlines", nullptr, &skyWire)) {
+                        scene.SetShowSkyWireframe(skyWire);
+                    }
+
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Load Custom Skybox Folder...")) {
+                        std::string folder = FileDialog::OpenFolder("Select Folder Containing Skybox TGA/BMP Textures");
+                        if (!folder.empty()) {
+                            skybox.LoadFromCustomFolder(folder, skybox.GetSkyname());
+                        }
+                    }
+
+                    ImGui::EndMenu();
+                }
             }
 
             ImGui::Separator();
@@ -1685,6 +1747,22 @@ void EditorUI::RenderBSPGlobalInspector(EditorScene& scene) {
     ImGui::Text("Faces:    %d", bsp.GetFaceCount());
     ImGui::Text("Textures: %d", bsp.GetTextureCount());
 
+    std::string skyname;
+    if (bsp.GetSkyname(skyname)) {
+        ImGui::Text("Skyname:  %s", skyname.c_str());
+    } else {
+        ImGui::TextDisabled("Skyname:  None");
+    }
+    const auto& skybox = scene.GetSkyboxRenderer();
+    ImGui::TextDisabled("Skybox:   %s [%s]",
+        skybox.GetSkyname().c_str(),
+        skybox.IsUsingProcedural() ? "Procedural Atmosphere" : "Loaded Textures");
+
+    bool showSky = scene.GetShowSkybox();
+    if (ImGui::Checkbox("Show 3D Skybox", &showSky)) {
+        scene.SetShowSkybox(showSky);
+    }
+
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Text("Quick Actions:");
@@ -1873,6 +1951,7 @@ void EditorUI::RenderHelpModal() {
         ImGui::BulletText("Ctrl+S: Save current navigation mesh");
         ImGui::BulletText("F3: Toggle Entity 3D visualization");
         ImGui::BulletText("F4: Cycle BSP Shading Mode (Textured / Solid / Wireframe / Ghost)");
+        ImGui::BulletText("Ctrl + Shift + K: Toggle 3D Skybox rendering");
         ImGui::BulletText("N: Draw Area Marquee Tool (Click 1st corner, move cursor, click 2nd corner to create)");
         ImGui::BulletText("Shift + Click / Ctrl + Click: Multi-select NavAreas in 3D viewport or explorer");
         ImGui::BulletText("Ctrl + A: Select All NavAreas");

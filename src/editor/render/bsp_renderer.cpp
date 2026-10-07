@@ -13,8 +13,14 @@ BSPRenderer::BSPRenderer()
     , m_wireVbo(0)
     , m_wireEbo(0)
     , m_wireIndexCount(0)
+    , m_skyWireVao(0)
+    , m_skyWireVbo(0)
+    , m_skyWireEbo(0)
+    , m_skyWireIndexCount(0)
     , m_loaded(false)
     , m_showWireframeOnSolid(true)
+    , m_showSkybox(true)
+    , m_showSkyWireframe(false)
     , m_faceCount(0)
 {
 }
@@ -34,6 +40,11 @@ void BSPRenderer::Clear() {
     if (m_wireEbo != 0) { glDeleteBuffers(1, &m_wireEbo); m_wireEbo = 0; }
     m_wireIndexCount = 0;
 
+    if (m_skyWireVao != 0) { glDeleteVertexArrays(1, &m_skyWireVao); m_skyWireVao = 0; }
+    if (m_skyWireVbo != 0) { glDeleteBuffers(1, &m_skyWireVbo); m_skyWireVbo = 0; }
+    if (m_skyWireEbo != 0) { glDeleteBuffers(1, &m_skyWireEbo); m_skyWireEbo = 0; }
+    m_skyWireIndexCount = 0;
+
     m_textureBatches.clear();
     m_loaded = false;
     m_faceCount = 0;
@@ -49,14 +60,17 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr)
     std::vector<BSPVertex> wireVertices;
     std::vector<uint32_t> wireIndices;
 
+    std::vector<BSPVertex> skyWireVertices;
+    std::vector<uint32_t> skyWireIndices;
+
     int numFaces = bsp.GetFaceCount();
     m_faceCount = static_cast<size_t>(numFaces);
 
     Vector3 poly[128];
 
-    // Temporary storage grouping triangle indices by OpenGL texture ID
-    std::unordered_map<GLuint, std::vector<uint32_t>> batchIndices;
-    std::unordered_map<GLuint, bool> batchTransparency;
+    // Temporary storage grouping triangle indices by (OpenGL texture ID, isSky)
+    std::map<std::pair<GLuint, bool>, std::vector<uint32_t>> batchIndices;
+    std::map<std::pair<GLuint, bool>, bool> batchTransparency;
 
     GLuint fallbackTexId = texMgr ? texMgr->GetCheckerboardTextureID() : 0;
 
@@ -83,6 +97,7 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr)
         float texH = 64.0f;
         GLuint texId = fallbackTexId;
         bool isTransparent = false;
+        bool isSky = false;
 
         const texinfo_t* ti = bsp.GetTexInfo(face->texinfo);
         if (ti) {
@@ -97,6 +112,11 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr)
 
             const char* texName = bsp.GetTextureName(ti->miptex);
             if (texName && texName[0] != '\0') {
+#if defined(_WIN32)
+                if (_strnicmp(texName, "sky", 3) == 0) isSky = true;
+#else
+                if (strncasecmp(texName, "sky", 3) == 0) isSky = true;
+#endif
                 if (texMgr) {
                     texId = texMgr->GetTextureID(texName);
                     LoadedTextureInfo tInfo;
@@ -141,7 +161,8 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr)
             solidVertices.push_back(vert);
         }
 
-        auto& batchList = batchIndices[texId];
+        auto batchKey = std::make_pair(texId, isSky);
+        auto& batchList = batchIndices[batchKey];
         for (int i = 1; i < vertCount - 1; ++i) {
             batchList.push_back(baseSolidVertex);
             batchList.push_back(baseSolidVertex + i);
@@ -149,7 +170,7 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr)
         }
 
         if (isTransparent) {
-            batchTransparency[texId] = true;
+            batchTransparency[batchKey] = true;
         }
 
         // Generate perimeter lines for wireframe
@@ -174,35 +195,68 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr)
             wireIndices.push_back(baseWireVertex + i);
             wireIndices.push_back(baseWireVertex + next);
         }
+
+        // Generate perimeter lines for sky wireframe
+        if (isSky) {
+            uint32_t baseSkyWireVertex = static_cast<uint32_t>(skyWireVertices.size());
+            for (int i = 0; i < vertCount; ++i) {
+                BSPVertex vert;
+                vert.x = poly[i].x;
+                vert.y = poly[i].y;
+                vert.z = poly[i].z;
+                vert.nx = norm.x;
+                vert.ny = norm.y;
+                vert.nz = norm.z;
+                vert.u = 0.0f;
+                vert.v = 0.0f;
+                vert.r = 0.2f;
+                vert.g = 0.75f;
+                vert.b = 1.0f;
+                vert.a = 1.0f;
+                skyWireVertices.push_back(vert);
+
+                uint32_t next = (i + 1 == vertCount) ? 0 : (i + 1);
+                skyWireIndices.push_back(baseSkyWireVertex + i);
+                skyWireIndices.push_back(baseSkyWireVertex + next);
+            }
+        }
     }
 
-    // Assemble index buffer: opaque batches first, then transparent batches
-    std::vector<std::pair<GLuint, bool>> orderedBatches;
+    // Assemble index buffer: non-sky opaque first, then transparent, then sky
+    std::vector<std::pair<std::pair<GLuint, bool>, bool>> orderedBatches;
     orderedBatches.reserve(batchIndices.size());
 
-    // 1. Opaque batches
+    // 1. Opaque non-sky batches
     for (const auto& kv : batchIndices) {
-        if (!batchTransparency[kv.first]) {
+        if (!kv.first.second && !batchTransparency[kv.first]) {
             orderedBatches.push_back({kv.first, false});
         }
     }
-    // 2. Transparent batches (masked cutouts like fences)
+    // 2. Transparent batches
     for (const auto& kv : batchIndices) {
-        if (batchTransparency[kv.first]) {
+        if (!kv.first.second && batchTransparency[kv.first]) {
             orderedBatches.push_back({kv.first, true});
+        }
+    }
+    // 3. Sky batches
+    for (const auto& kv : batchIndices) {
+        if (kv.first.second) {
+            orderedBatches.push_back({kv.first, batchTransparency[kv.first]});
         }
     }
 
     m_textureBatches.clear();
     m_textureBatches.reserve(orderedBatches.size());
 
-    for (const auto& pair : orderedBatches) {
-        GLuint texId = pair.first;
-        bool isTrans = pair.second;
-        const auto& indices = batchIndices[texId];
+    for (const auto& item : orderedBatches) {
+        GLuint texId = item.first.first;
+        bool isSky = item.first.second;
+        bool isTrans = item.second;
+        const auto& indices = batchIndices[item.first];
 
         BSPTextureBatch batch;
         batch.textureId = texId;
+        batch.isSky = isSky;
         batch.startIndex = static_cast<GLsizei>(solidIndices.size());
         batch.indexCount = static_cast<GLsizei>(indices.size());
         batch.isTransparent = isTrans;
@@ -216,6 +270,9 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr)
     }
     if (!wireIndices.empty()) {
         GenerateWireframeBuffers(wireVertices, wireIndices);
+    }
+    if (!skyWireIndices.empty()) {
+        GenerateSkyWireframeBuffers(skyWireVertices, skyWireIndices);
     }
 
     m_loaded = (m_indexCount > 0);
@@ -276,6 +333,30 @@ void BSPRenderer::GenerateWireframeBuffers(const std::vector<BSPVertex>& vertice
     m_wireIndexCount = static_cast<GLsizei>(lineIndices.size());
 }
 
+void BSPRenderer::GenerateSkyWireframeBuffers(const std::vector<BSPVertex>& vertices, const std::vector<uint32_t>& lineIndices) {
+    glGenVertexArrays(1, &m_skyWireVao);
+    glGenBuffers(1, &m_skyWireVbo);
+    glGenBuffers(1, &m_skyWireEbo);
+
+    glBindVertexArray(m_skyWireVao);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_skyWireVbo);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(BSPVertex), vertices.data(), GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_skyWireEbo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, lineIndices.size() * sizeof(uint32_t), lineIndices.data(), GL_STATIC_DRAW);
+
+    // aPos
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(BSPVertex), (void*)offsetof(BSPVertex, x));
+    glEnableVertexAttribArray(0);
+    // aColor
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(BSPVertex), (void*)offsetof(BSPVertex, r));
+    glEnableVertexAttribArray(1);
+
+    glBindVertexArray(0);
+    m_skyWireIndexCount = static_cast<GLsizei>(lineIndices.size());
+}
+
 void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, BSPRenderMode mode, const Vector3& camPos) {
     if (!m_loaded) return;
 
@@ -301,6 +382,10 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
         glActiveTexture(GL_TEXTURE0);
 
         for (const auto& batch : m_textureBatches) {
+            if (m_showSkybox && batch.isSky) {
+                // Skip sky surfaces so background 3D skybox is visible
+                continue;
+            }
             glBindTexture(GL_TEXTURE_2D, batch.textureId);
             glDrawElements(GL_TRIANGLES, batch.indexCount, GL_UNSIGNED_INT, (const void*)(static_cast<uintptr_t>(batch.startIndex) * sizeof(uint32_t)));
         }
@@ -327,6 +412,25 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
 
             glDisable(GL_BLEND);
         }
+
+        // Sky brush wireframe outlines (cyan)
+        if (m_showSkybox && m_showSkyWireframe && m_skyWireIndexCount > 0) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            lineShader.Bind();
+            lineShader.SetMat4("u_MVP", mvp);
+            lineShader.SetVec4("u_Color", 0.2f, 0.75f, 1.0f, 0.85f);
+
+            glLineWidth(1.5f);
+            glBindVertexArray(m_skyWireVao);
+            glDrawElements(GL_LINES, m_skyWireIndexCount, GL_UNSIGNED_INT, 0);
+            glBindVertexArray(0);
+            lineShader.Unbind();
+            glLineWidth(1.0f);
+
+            glDisable(GL_BLEND);
+        }
     } else if (mode == BSP_RENDER_SOLID) {
         meshShader.Bind();
         meshShader.SetMat4("u_MVP", mvp);
@@ -343,7 +447,12 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
         }
 
         glBindVertexArray(m_vao);
-        glDrawElements(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, 0);
+        for (const auto& batch : m_textureBatches) {
+            if (m_showSkybox && batch.isSky) {
+                continue;
+            }
+            glDrawElements(GL_TRIANGLES, batch.indexCount, GL_UNSIGNED_INT, (const void*)(static_cast<uintptr_t>(batch.startIndex) * sizeof(uint32_t)));
+        }
         glBindVertexArray(0);
         meshShader.Unbind();
 
@@ -360,6 +469,24 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
             glLineWidth(1.2f);
             glBindVertexArray(m_wireVao);
             glDrawElements(GL_LINES, m_wireIndexCount, GL_UNSIGNED_INT, 0);
+            glBindVertexArray(0);
+            lineShader.Unbind();
+            glLineWidth(1.0f);
+
+            glDisable(GL_BLEND);
+        }
+
+        if (m_showSkybox && m_showSkyWireframe && m_skyWireIndexCount > 0) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            lineShader.Bind();
+            lineShader.SetMat4("u_MVP", mvp);
+            lineShader.SetVec4("u_Color", 0.2f, 0.75f, 1.0f, 0.85f);
+
+            glLineWidth(1.5f);
+            glBindVertexArray(m_skyWireVao);
+            glDrawElements(GL_LINES, m_skyWireIndexCount, GL_UNSIGNED_INT, 0);
             glBindVertexArray(0);
             lineShader.Unbind();
             glLineWidth(1.0f);

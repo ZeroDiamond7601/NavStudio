@@ -14,6 +14,7 @@
 #include "editor/render/entity_renderer.h"
 #include "editor/render/texture_manager.h"
 #include "editor/render/gizmo_renderer.h"
+#include "editor/render/skybox_renderer.h"
 
 #include "editor/scene/editor_handles.h"
 #include <vector>
@@ -100,6 +101,7 @@ public:
     GizmoRenderer& GetGizmoRenderer() { return m_gizmoRenderer; }
     const GizmoRenderer& GetGizmoRenderer() const { return m_gizmoRenderer; }
 
+    void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& view, const Matrix4& proj, const Vector3& camPos);
     void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, const Vector3& camPos);
     void RebuildNavRenderer();
 
@@ -137,6 +139,15 @@ public:
 
     bool GetShowWireframeOnSolid() const { return m_bspRenderer.GetShowWireframeOnSolid(); }
     void SetShowWireframeOnSolid(bool show) { m_bspRenderer.SetShowWireframeOnSolid(show); }
+
+    bool GetShowSkybox() const { return m_bspRenderer.GetShowSkybox(); }
+    void SetShowSkybox(bool show) { m_bspRenderer.SetShowSkybox(show); m_skyboxRenderer.SetEnabled(show); }
+
+    bool GetShowSkyWireframe() const { return m_bspRenderer.GetShowSkyWireframe(); }
+    void SetShowSkyWireframe(bool show) { m_bspRenderer.SetShowSkyWireframe(show); }
+
+    SkyboxRenderer& GetSkyboxRenderer() { return m_skyboxRenderer; }
+    const SkyboxRenderer& GetSkyboxRenderer() const { return m_skyboxRenderer; }
 
     // Game Resources Directory & Textures
     const std::string& GetGameDirectory() const { return m_gameDirectory; }
@@ -302,6 +313,7 @@ private:
     GizmoRenderer m_gizmoRenderer;
     EntityRenderer m_entityRenderer;
     TextureManager m_textureManager;
+    SkyboxRenderer m_skyboxRenderer;
 
     std::string m_bspPath;
     std::string m_navPath;

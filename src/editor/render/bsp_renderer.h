@@ -27,6 +27,7 @@ struct BSPTextureBatch {
     GLsizei startIndex{0};
     GLsizei indexCount{0};
     bool isTransparent{false};
+    bool isSky{false};
 };
 
 class BSPRenderer {
@@ -47,9 +48,16 @@ public:
     bool GetShowWireframeOnSolid() const { return m_showWireframeOnSolid; }
     void SetShowWireframeOnSolid(bool show) { m_showWireframeOnSolid = show; }
 
+    bool GetShowSkybox() const { return m_showSkybox; }
+    void SetShowSkybox(bool show) { m_showSkybox = show; }
+
+    bool GetShowSkyWireframe() const { return m_showSkyWireframe; }
+    void SetShowSkyWireframe(bool show) { m_showSkyWireframe = show; }
+
 private:
     void GenerateBuffers(const std::vector<BSPVertex>& vertices, const std::vector<uint32_t>& indices);
     void GenerateWireframeBuffers(const std::vector<BSPVertex>& vertices, const std::vector<uint32_t>& lineIndices);
+    void GenerateSkyWireframeBuffers(const std::vector<BSPVertex>& vertices, const std::vector<uint32_t>& lineIndices);
 
     GLuint m_vao;
     GLuint m_vbo;
@@ -61,10 +69,17 @@ private:
     GLuint m_wireEbo;
     GLsizei m_wireIndexCount;
 
+    GLuint m_skyWireVao;
+    GLuint m_skyWireVbo;
+    GLuint m_skyWireEbo;
+    GLsizei m_skyWireIndexCount;
+
     std::vector<BSPTextureBatch> m_textureBatches;
 
     bool m_loaded;
     bool m_showWireframeOnSolid;
+    bool m_showSkybox;
+    bool m_showSkyWireframe;
     size_t m_faceCount;
 };
 
