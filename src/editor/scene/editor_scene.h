@@ -278,6 +278,7 @@ private:
     bool m_showBSP;
     bool m_showNAV;
     bool m_showConnections;
+    bool m_isModified{false};
     GizmoMode m_gizmoMode{GIZMO_MODE_COMBINED};
 
     // Recent files
