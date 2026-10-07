@@ -81,23 +81,101 @@ private:
 class CmdSnapAreaToFloor : public IEditCommand {
 public:
     CmdSnapAreaToFloor(EditorScene* scene, uint32_t areaId)
-        : m_scene(scene), m_areaId(areaId), m_oldNeZ(0), m_oldSwZ(0), m_newNeZ(0), m_newSwZ(0), m_valid(false) {
+        : m_scene(scene), m_areaId(areaId), m_valid(false) {
         if (!scene || !scene->HasBSP()) return;
         NavArea* area = m_scene->GetNAV().GetAreaByID(m_areaId);
         if (!area) return;
 
+        m_oldExt = area->GetExtent();
         m_oldNeZ = area->GetNEZ();
         m_oldSwZ = area->GetSWZ();
+        m_newExt = m_oldExt;
 
-        Vector3 ne = area->GetCorner(NAV_CORNER_NORTH_EAST);
-        Vector3 sw = area->GetCorner(NAV_CORNER_SOUTH_WEST);
+        Vector3 center = area->GetCenter();
 
-        Vector3 gNE, gSW;
-        bool hitNE = m_scene->GetBSP().GetGround(ne + Vector3(0, 0, 32.0f), &gNE, 1024.0f);
-        bool hitSW = m_scene->GetBSP().GetGround(sw + Vector3(0, 0, 32.0f), &gSW, 1024.0f);
+        // 1. Trace ground at area center using HULL_POINT
+        // Test multiple starting offsets in case current center is slightly embedded in floor or under ceiling
+        static const float kStartOffsets[] = { 48.0f, 16.0f, 4.0f, 0.0f, -8.0f, -32.0f };
+        bool hitCenter = false;
+        BSPTraceResult trCenter;
+        for (float off : kStartOffsets) {
+            Vector3 start(center.x, center.y, center.z + off);
+            Vector3 end(center.x, center.y, center.z - 4096.0f);
+            if (m_scene->GetBSP().TraceWorld(start, end, HULL_POINT, &trCenter)) {
+                if (!trCenter.startsolid && !trCenter.allsolid && trCenter.fraction > 0.0f) {
+                    hitCenter = true;
+                    break;
+                }
+            }
+        }
 
-        m_newNeZ = hitNE ? gNE.z : m_oldNeZ;
-        m_newSwZ = hitSW ? gSW.z : m_oldSwZ;
+        // If center trace missed, test each corner as fallback reference
+        if (!hitCenter) {
+            Vector3 testPts[4] = {
+                area->GetCorner(NAV_CORNER_NORTH_WEST),
+                area->GetCorner(NAV_CORNER_NORTH_EAST),
+                area->GetCorner(NAV_CORNER_SOUTH_EAST),
+                area->GetCorner(NAV_CORNER_SOUTH_WEST)
+            };
+            for (const auto& pt : testPts) {
+                Vector3 start(pt.x, pt.y, pt.z + 32.0f);
+                Vector3 end(pt.x, pt.y, pt.z - 4096.0f);
+                if (m_scene->GetBSP().TraceWorld(start, end, HULL_POINT, &trCenter)) {
+                    if (!trCenter.startsolid && !trCenter.allsolid && trCenter.fraction > 0.0f) {
+                        hitCenter = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Fallback: GetGround
+        if (!hitCenter) {
+            Vector3 gPos;
+            if (m_scene->GetBSP().GetGround(center + Vector3(0, 0, 32.0f), &gPos, 2048.0f, HULL_POINT)) {
+                trCenter.endpos = gPos;
+                trCenter.planeNormal = Vector3(0.0f, 0.0f, 1.0f);
+                hitCenter = true;
+            }
+        }
+
+        if (!hitCenter) return;
+
+        Vector3 planeNorm = trCenter.planeNormal;
+        if (std::abs(planeNorm.z) < 0.2f) {
+            planeNorm = Vector3(0.0f, 0.0f, 1.0f);
+        }
+
+        // Expected height on the floor plane:
+        auto PlaneZ = [&](float x, float y) -> float {
+            float dx = x - trCenter.endpos.x;
+            float dy = y - trCenter.endpos.y;
+            return trCenter.endpos.z - (planeNorm.x * dx + planeNorm.y * dy) / planeNorm.z;
+        };
+
+        // Sample each corner within a walkable step window (+/- 24 units) around the plane:
+        auto SampleCornerZ = [&](float x, float y) -> float {
+            float expZ = PlaneZ(x, y);
+            Vector3 cStart(x, y, expZ + 24.0f);
+            Vector3 cEnd(x, y, expZ - 24.0f);
+            BSPTraceResult trCorner;
+            if (m_scene->GetBSP().TraceWorld(cStart, cEnd, HULL_POINT, &trCorner)) {
+                if (!trCorner.startsolid && !trCorner.allsolid && trCorner.fraction > 0.0f) {
+                    return trCorner.endpos.z;
+                }
+            }
+            return expZ;
+        };
+
+        float nwZ = SampleCornerZ(m_oldExt.lo.x, m_oldExt.lo.y);
+        float neZ = SampleCornerZ(m_oldExt.hi.x, m_oldExt.lo.y);
+        float seZ = SampleCornerZ(m_oldExt.hi.x, m_oldExt.hi.y);
+        float swZ = SampleCornerZ(m_oldExt.lo.x, m_oldExt.hi.y);
+
+        m_newExt.lo.z = nwZ; // NW corner Z
+        m_newNeZ = neZ;      // NE corner Z
+        m_newExt.hi.z = seZ; // SE corner Z
+        m_newSwZ = swZ;      // SW corner Z
         m_valid = true;
     }
 
@@ -105,7 +183,10 @@ public:
         if (!m_valid) return;
         NavArea* area = m_scene->GetNAV().GetAreaByID(m_areaId);
         if (area) {
+            m_scene->GetNAV().GetGrid().RemoveArea(area);
+            area->SetExtent(m_newExt);
             area->SetCornerHeights(m_newNeZ, m_newSwZ);
+            m_scene->GetNAV().GetGrid().AddArea(area);
             m_scene->RebuildNavRenderer();
         }
     }
@@ -114,7 +195,10 @@ public:
         if (!m_valid) return;
         NavArea* area = m_scene->GetNAV().GetAreaByID(m_areaId);
         if (area) {
+            m_scene->GetNAV().GetGrid().RemoveArea(area);
+            area->SetExtent(m_oldExt);
             area->SetCornerHeights(m_oldNeZ, m_oldSwZ);
+            m_scene->GetNAV().GetGrid().AddArea(area);
             m_scene->RebuildNavRenderer();
         }
     }
@@ -124,11 +208,13 @@ public:
 private:
     EditorScene* m_scene;
     uint32_t m_areaId;
-    float m_oldNeZ;
-    float m_oldSwZ;
-    float m_newNeZ;
-    float m_newSwZ;
-    bool m_valid;
+    NavExtent m_oldExt;
+    NavExtent m_newExt;
+    float m_oldNeZ{0.0f};
+    float m_oldSwZ{0.0f};
+    float m_newNeZ{0.0f};
+    float m_newSwZ{0.0f};
+    bool m_valid{false};
 };
 
 // Command: Toggle Connection between Area A and Area B

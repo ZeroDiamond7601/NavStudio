@@ -1174,9 +1174,32 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
             scene.RebuildNavRenderer();
         }
 
-        float corners[2] = { area->GetNEZ(), area->GetSWZ() };
-        if (ImGui::DragFloat2("Heights (NE, SW)", corners, 0.5f, -65536.0f, 65536.0f, "%.1f")) {
-            area->SetCornerHeights(corners[0], corners[1]);
+        float corners[4] = {
+            area->GetCorner(NAV_CORNER_NORTH_WEST).z,
+            area->GetNEZ(),
+            area->GetCorner(NAV_CORNER_SOUTH_EAST).z,
+            area->GetSWZ()
+        };
+        if (ImGui::DragFloat4("Corners (NW,NE,SE,SW)", corners, 0.5f, -65536.0f, 65536.0f, "%.1f")) {
+            NavExtent newExt = extent;
+            newExt.lo.z = corners[0];
+            newExt.hi.z = corners[2];
+            scene.GetNAV().GetGrid().RemoveArea(area);
+            area->SetExtent(newExt);
+            area->SetCornerHeights(corners[1], corners[3]);
+            scene.GetNAV().GetGrid().AddArea(area);
+            scene.RebuildNavRenderer();
+        }
+
+        if (ImGui::Button("Flatten / Level Area Heights", ImVec2(-1, 22))) {
+            float avgZ = std::round((corners[0] + corners[1] + corners[2] + corners[3]) * 0.25f);
+            NavExtent newExt = extent;
+            newExt.lo.z = avgZ;
+            newExt.hi.z = avgZ;
+            scene.GetNAV().GetGrid().RemoveArea(area);
+            area->SetExtent(newExt);
+            area->SetCornerHeights(avgZ, avgZ);
+            scene.GetNAV().GetGrid().AddArea(area);
             scene.RebuildNavRenderer();
         }
 

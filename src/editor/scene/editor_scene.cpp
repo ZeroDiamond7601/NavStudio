@@ -1914,27 +1914,32 @@ void EditorScene::OnDrawAreaClick(const Ray& ray, CommandManager& cmdMgr) {
         float maxY = std::max(m_drawAreaStart.y, m_drawAreaCurrent.y);
 
         if (maxX - minX >= 8.0f && maxY - minY >= 8.0f) {
+            float nwZ = m_drawAreaElevation;
             float neZ = m_drawAreaElevation;
+            float seZ = m_drawAreaElevation;
             float swZ = m_drawAreaElevation;
 
             if (HasBSP()) {
-                Vector3 startNE(maxX, maxY, m_drawAreaElevation + 64.0f);
-                Vector3 endNE(maxX, maxY, m_drawAreaElevation - 128.0f);
-                BSPTraceResult trNE;
-                if (GetBSP().TraceWorld(startNE, endNE, HULL_POINT, &trNE)) {
-                    neZ = trNE.endpos.z;
-                }
+                auto SamplePointZ = [&](float x, float y) -> float {
+                    Vector3 start(x, y, m_drawAreaElevation + 48.0f);
+                    Vector3 end(x, y, m_drawAreaElevation - 128.0f);
+                    BSPTraceResult tr;
+                    if (GetBSP().TraceWorld(start, end, HULL_POINT, &tr)) {
+                        if (!tr.startsolid && !tr.allsolid && tr.fraction > 0.0f) {
+                            return tr.endpos.z;
+                        }
+                    }
+                    return m_drawAreaElevation;
+                };
 
-                Vector3 startSW(minX, minY, m_drawAreaElevation + 64.0f);
-                Vector3 endSW(minX, minY, m_drawAreaElevation - 128.0f);
-                BSPTraceResult trSW;
-                if (GetBSP().TraceWorld(startSW, endSW, HULL_POINT, &trSW)) {
-                    swZ = trSW.endpos.z;
-                }
+                nwZ = SamplePointZ(minX, minY);
+                neZ = SamplePointZ(maxX, minY);
+                seZ = SamplePointZ(maxX, maxY);
+                swZ = SamplePointZ(minX, maxY);
             }
 
-            NavExtent extent(Vector3(minX, minY, std::min(swZ, neZ)),
-                             Vector3(maxX, maxY, std::max(swZ, neZ)));
+            NavExtent extent(Vector3(minX, minY, nwZ),
+                             Vector3(maxX, maxY, seZ));
 
             auto cmd = std::make_unique<CmdCreateArea>(this, extent, neZ, swZ);
             cmdMgr.ExecuteCommand(std::move(cmd));
