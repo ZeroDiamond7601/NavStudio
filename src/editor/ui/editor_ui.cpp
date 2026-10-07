@@ -80,26 +80,46 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
         if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_O, false)) {
             std::string path = FileDialog::OpenFile(FileDialog::kBSPFilter, "Open GoldSrc BSP Map");
             if (!path.empty()) {
-                scene.StartAsyncLoad(path);
+                if (!CheckUnsavedChanges(scene, cmdMgr, PENDING_OPEN_BSP, path)) {
+                    cmdMgr.Clear();
+                    scene.StartAsyncLoad(path);
+                }
             }
         } else if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_O, false)) {
             std::string path = FileDialog::OpenFile(FileDialog::kNAVFilter, "Open Navigation Mesh");
             if (!path.empty()) {
-                scene.StartAsyncLoad(path);
+                if (!CheckUnsavedChanges(scene, cmdMgr, PENDING_OPEN_NAV, path)) {
+                    cmdMgr.Clear();
+                    scene.StartAsyncLoad(path);
+                }
             }
         } else if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_S, false) && scene.HasNAV()) {
-            if (!scene.GetNAVPath().empty()) {
-                scene.SaveNAV();
+            bool saved = false;
+            std::string saveTarget = scene.GetNAVPath();
+            if (!saveTarget.empty()) {
+                saved = scene.SaveNAV();
             } else {
                 std::string path = FileDialog::SaveFile(FileDialog::kNAVFilter, "nav", "Save Navigation Mesh");
                 if (!path.empty()) {
-                    scene.SaveNAV(path);
+                    saved = scene.SaveNAV(path);
+                    saveTarget = path;
                 }
+            }
+            if (saved) {
+                cmdMgr.MarkSaved();
+                scene.SetModified(false);
+                m_showSaveSuccessModal = true;
+                m_saveSuccessMessage = "Navigation mesh saved successfully:\n" + saveTarget;
             }
         } else if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_S, false) && scene.HasNAV()) {
             std::string path = FileDialog::SaveFile(FileDialog::kNAVFilter, "nav", "Save Navigation Mesh As");
             if (!path.empty()) {
-                scene.SaveNAV(path);
+                if (scene.SaveNAV(path)) {
+                    cmdMgr.MarkSaved();
+                    scene.SetModified(false);
+                    m_showSaveSuccessModal = true;
+                    m_saveSuccessMessage = "Navigation mesh saved successfully:\n" + path;
+                }
             }
         } else if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_G, false) && scene.HasBSP()) {
             m_showGenerateModal = true;
@@ -161,6 +181,9 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     if (m_showBatchGenerateModal) {
         RenderBatchGenerateModal(scene);
     }
+
+    RenderUnsavedModal(scene, cmdMgr);
+    RenderSaveSuccessModal();
 }
 
 void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
@@ -169,13 +192,19 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             if (ImGui::MenuItem("Open BSP Map...", "Ctrl+O")) {
                 std::string path = FileDialog::OpenFile(FileDialog::kBSPFilter, "Open GoldSrc BSP Map");
                 if (!path.empty()) {
-                    scene.StartAsyncLoad(path);
+                    if (!CheckUnsavedChanges(scene, cmdMgr, PENDING_OPEN_BSP, path)) {
+                        cmdMgr.Clear();
+                        scene.StartAsyncLoad(path);
+                    }
                 }
             }
             if (ImGui::MenuItem("Open NAV Mesh...", "Ctrl+Shift+O")) {
                 std::string path = FileDialog::OpenFile(FileDialog::kNAVFilter, "Open Navigation Mesh");
                 if (!path.empty()) {
-                    scene.StartAsyncLoad(path);
+                    if (!CheckUnsavedChanges(scene, cmdMgr, PENDING_OPEN_NAV, path)) {
+                        cmdMgr.Clear();
+                        scene.StartAsyncLoad(path);
+                    }
                 }
             }
 
@@ -190,7 +219,10 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                         std::string nameOnly = (lastSlash != std::string::npos) ? label.substr(lastSlash + 1) : label;
                         std::string itemText = nameOnly + "  (" + label + ")";
                         if (ImGui::MenuItem(itemText.c_str())) {
-                            scene.StartAsyncLoad(rPath);
+                            if (!CheckUnsavedChanges(scene, cmdMgr, PENDING_RECENT, rPath)) {
+                                cmdMgr.Clear();
+                                scene.StartAsyncLoad(rPath);
+                            }
                         }
                     }
                     ImGui::Separator();
@@ -214,24 +246,53 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Save NAV Mesh", "Ctrl+S", false, scene.HasNAV())) {
-                if (!scene.GetNAVPath().empty()) {
-                    scene.SaveNAV();
+                bool saved = false;
+                std::string saveTarget = scene.GetNAVPath();
+                if (!saveTarget.empty()) {
+                    saved = scene.SaveNAV();
                 } else {
                     std::string path = FileDialog::SaveFile(FileDialog::kNAVFilter, "nav", "Save Navigation Mesh");
                     if (!path.empty()) {
-                        scene.SaveNAV(path);
+                        saved = scene.SaveNAV(path);
+                        saveTarget = path;
                     }
+                }
+                if (saved) {
+                    cmdMgr.MarkSaved();
+                    scene.SetModified(false);
+                    m_showSaveSuccessModal = true;
+                    m_saveSuccessMessage = "Navigation mesh saved successfully:\n" + saveTarget;
                 }
             }
             if (ImGui::MenuItem("Save NAV Mesh As...", "Ctrl+Shift+S", false, scene.HasNAV())) {
                 std::string path = FileDialog::SaveFile(FileDialog::kNAVFilter, "nav", "Save Navigation Mesh As");
                 if (!path.empty()) {
-                    scene.SaveNAV(path);
+                    if (scene.SaveNAV(path)) {
+                        cmdMgr.MarkSaved();
+                        scene.SetModified(false);
+                        m_showSaveSuccessModal = true;
+                        m_saveSuccessMessage = "Navigation mesh saved successfully:\n" + path;
+                    }
+                }
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Unload NAV Mesh", "Ctrl+U", false, scene.HasNAV())) {
+                if (!CheckUnsavedChanges(scene, cmdMgr, PENDING_UNLOAD_NAV)) {
+                    cmdMgr.Clear();
+                    scene.UnloadNAV();
+                }
+            }
+            if (ImGui::MenuItem("Unload BSP Map", nullptr, false, scene.HasBSP())) {
+                if (!CheckUnsavedChanges(scene, cmdMgr, PENDING_UNLOAD_BSP)) {
+                    cmdMgr.Clear();
+                    scene.UnloadBSP();
                 }
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
-                m_requestQuit = true;
+                if (!CheckUnsavedChanges(scene, cmdMgr, PENDING_QUIT)) {
+                    m_requestQuit = true;
+                }
             }
             ImGui::EndMenu();
         }
@@ -255,6 +316,14 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 
             ImGui::Separator();
             NavArea* sel = scene.GetSelectedArea();
+            bool drawActive = scene.IsDrawAreaMode();
+            if (ImGui::MenuItem("Draw Area Box...", "N", &drawActive)) {
+                scene.ToggleDrawAreaMode();
+            }
+            bool fillActive = scene.IsFillAreaMode();
+            if (ImGui::MenuItem("Fill Area / Room...", "F", &fillActive)) {
+                scene.ToggleFillAreaMode();
+            }
             bool bridgeActive = scene.IsBridgeMode();
             if (ImGui::MenuItem("Bridge Two Edges...", "B", &bridgeActive)) {
                 scene.ToggleBridgeMode();
@@ -590,6 +659,14 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         }
         if (bridgeActive) ImGui::PopStyleColor();
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click edge A then edge B to create an intermediate connecting NavArea between them");
+
+        bool fillActive = scene.IsFillAreaMode();
+        if (fillActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.45f, 0.15f, 1.0f));
+        if (ImGui::Button(fillActive ? "Cancel Fill Area [Esc]" : "Fill Area / Room [F]", ImVec2(-1, 26))) {
+            scene.ToggleFillAreaMode();
+        }
+        if (fillActive) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click on any floor surface to auto-generate connected NavMesh filling the room or area");
 
         if (ImGui::Button("Snap to Neighbors [Shift+S]", ImVec2(-1, 26))) {
             if (hasSel) scene.SnapSelectedAreaToNeighbors(cmdMgr);
@@ -1439,21 +1516,24 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
         if (scene.IsDrawAreaMode()) {
             if (!scene.IsDrawAreaActive()) {
                 ImGui::TextColored(ImVec4(0.2f, 1.0f, 1.0f, 1.0f),
-                    "[DRAW AREA TOOL ACTIVE] Click 1st corner on floor or surface | Right-Click or Esc to cancel");
+                    "[DRAW AREA TOOL ACTIVE] Click 1st corner on floor/slope | Hold Right-Click to fly/freelook | Esc to cancel");
             } else {
                 Vector3 p0 = scene.GetDrawAreaStart();
                 Vector3 p1 = scene.GetDrawAreaCurrent();
                 float w = std::abs(p1.x - p0.x);
                 float l = std::abs(p1.y - p0.y);
                 ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f),
-                    "[DRAW AREA TOOL ACTIVE] 1st Corner @ (%.0f, %.0f, %.0f) | Live Size: %.0f x %.0f | Click 2nd corner to create | Esc to cancel",
+                    "[DRAW AREA TOOL ACTIVE] 1st Corner @ (%.0f, %.0f, %.0f) | Live Size: %.0f x %.0f | Click 2nd corner to finish | Esc to cancel",
                     p0.x, p0.y, p0.z, w, l);
             }
+        } else if (scene.IsFillAreaMode()) {
+            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.5f, 1.0f),
+                "[FILL AREA TOOL ACTIVE] Click any floor or room surface in 3D viewport to auto-generate NavMesh | Esc to cancel");
         } else if (scene.IsBridgeMode()) {
             uint32_t a1 = scene.GetBridgeFirstArea();
             if (a1 == 0) {
                 ImGui::TextColored(ImVec4(0.2f, 1.0f, 1.0f, 1.0f),
-                    "[BRIDGE TOOL ACTIVE] Step 1: Click the FIRST edge on any NavArea in 3D viewport | Right-Click or Esc to cancel");
+                    "[BRIDGE TOOL ACTIVE] Step 1: Click FIRST edge on any NavArea in 3D viewport | Esc to cancel");
             } else {
                 ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f),
                     "[BRIDGE TOOL ACTIVE] Step 2: First edge selected on Area #%u. Now click SECOND edge on another NavArea to bridge | Esc to cancel", a1);
@@ -1994,6 +2074,140 @@ void EditorUI::RenderBatchGenerateModal(EditorScene& /*scene*/) {
             ImGui::CloseCurrentPopup();
         }
 
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::PromptQuit(EditorScene& scene, CommandManager& cmdMgr) {
+    if (!CheckUnsavedChanges(scene, cmdMgr, PENDING_QUIT)) {
+        m_requestQuit = true;
+    }
+}
+
+bool EditorUI::CheckUnsavedChanges(EditorScene& scene, CommandManager& cmdMgr, PendingAction action, const std::string& path) {
+    if (scene.HasNAV() && (cmdMgr.HasUnsavedChanges() || scene.IsModified())) {
+        m_pendingAction = action;
+        m_pendingPath = path;
+        m_showUnsavedModal = true;
+        return true;
+    }
+    return false;
+}
+
+void EditorUI::ExecutePendingAction(EditorScene& scene, CommandManager& cmdMgr) {
+    PendingAction act = m_pendingAction;
+    std::string p = m_pendingPath;
+    m_pendingAction = PENDING_NONE;
+    m_pendingPath.clear();
+
+    switch (act) {
+        case PENDING_QUIT:
+            m_requestQuit = true;
+            break;
+        case PENDING_OPEN_BSP:
+            if (!p.empty()) {
+                cmdMgr.Clear();
+                scene.StartAsyncLoad(p);
+            }
+            break;
+        case PENDING_OPEN_NAV:
+            if (!p.empty()) {
+                cmdMgr.Clear();
+                scene.StartAsyncLoad(p);
+            }
+            break;
+        case PENDING_RECENT:
+            if (!p.empty()) {
+                cmdMgr.Clear();
+                scene.StartAsyncLoad(p);
+            }
+            break;
+        case PENDING_UNLOAD_NAV:
+            cmdMgr.Clear();
+            scene.UnloadNAV();
+            break;
+        case PENDING_UNLOAD_BSP:
+            cmdMgr.Clear();
+            scene.UnloadBSP();
+            break;
+        default:
+            break;
+    }
+}
+
+void EditorUI::RenderUnsavedModal(EditorScene& scene, CommandManager& cmdMgr) {
+    if (m_showUnsavedModal) {
+        ImGui::OpenPopup("Unsaved Changes##Modal");
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(440, 0), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("Unsaved Changes##Modal", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
+        ImGui::Spacing();
+        ImGui::TextWrapped("The current navigation mesh has unsaved changes.\nDo you want to save before proceeding?");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Save##ModalBtn", ImVec2(120, 28))) {
+            bool saved = false;
+            std::string saveTarget = scene.GetNAVPath();
+            if (!saveTarget.empty()) {
+                saved = scene.SaveNAV();
+            } else {
+                std::string path = FileDialog::SaveFile(FileDialog::kNAVFilter, "nav", "Save Navigation Mesh");
+                if (!path.empty()) {
+                    saved = scene.SaveNAV(path);
+                    saveTarget = path;
+                }
+            }
+            if (saved) {
+                cmdMgr.MarkSaved();
+                scene.SetModified(false);
+                m_showUnsavedModal = false;
+                ImGui::CloseCurrentPopup();
+                ExecutePendingAction(scene, cmdMgr);
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Don't Save##ModalBtn", ImVec2(120, 28))) {
+            m_showUnsavedModal = false;
+            ImGui::CloseCurrentPopup();
+            ExecutePendingAction(scene, cmdMgr);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel##ModalBtn", ImVec2(100, 28))) {
+            m_pendingAction = PENDING_NONE;
+            m_pendingPath.clear();
+            m_showUnsavedModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderSaveSuccessModal() {
+    if (m_showSaveSuccessModal) {
+        ImGui::OpenPopup("Save Successful##Modal");
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal("Save Successful##Modal", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
+        ImGui::Spacing();
+        ImGui::TextWrapped("%s", m_saveSuccessMessage.c_str());
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("OK##SaveOkBtn", ImVec2(100, 26))) {
+            m_showSaveSuccessModal = false;
+            ImGui::CloseCurrentPopup();
+        }
         ImGui::EndPopup();
     }
 }

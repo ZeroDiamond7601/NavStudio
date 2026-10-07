@@ -266,6 +266,7 @@ bool EditorScene::LoadNAV(const std::string& navPath) {
     m_navPath = navPath;
     m_selectedAreaId = 0;
     m_hoveredAreaId = 0;
+    m_isModified = false;
     AddRecentFile(navPath);
     RebuildNavRenderer();
     return true;
@@ -284,6 +285,7 @@ bool EditorScene::SaveNAV(const std::string& navPath) {
     }
 
     m_navPath = path;
+    m_isModified = false;
     return true;
 }
 
@@ -309,8 +311,40 @@ bool EditorScene::GenerateNavMesh(const NavGenerateOptions& options) {
     }
     m_selectedAreaId = 0;
     m_hoveredAreaId = 0;
+    m_isModified = true;
     RebuildNavRenderer();
     return true;
+}
+
+void EditorScene::UnloadNAV() {
+    ClearSelection();
+    if (m_isBridgeMode) CancelBridgeMode();
+    if (m_isDrawAreaMode) CancelDrawArea();
+    if (m_isFillAreaMode) CancelFillAreaMode();
+    if (m_transformMode != TRANSFORM_NONE) CancelTransform();
+    if (m_isDraggingHandle) m_isDraggingHandle = false;
+
+    if (m_nav) {
+        m_nav->Unload();
+    }
+    m_navPath.clear();
+    m_selectedAreaId = 0;
+    m_hoveredAreaId = 0;
+    m_selectedAreaIds.clear();
+    m_navRenderer.Clear();
+    m_isModified = false;
+}
+
+void EditorScene::UnloadBSP() {
+    UnloadNAV();
+
+    if (m_bsp) {
+        m_bsp->Unload();
+    }
+    m_bspPath.clear();
+    m_bspRenderer.Clear();
+    m_entityRenderer.Clear();
+    m_selectedEntityIndex = -1;
 }
 
 void EditorScene::StartAsyncLoad(const std::string& bspOrNavPath, const std::string& explicitNavPath) {
@@ -753,7 +787,13 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
 
     // Draw Area Mode Visual Marquee Box
     if (m_isDrawAreaMode && m_drawAreaActive) {
-        m_gizmoRenderer.RenderRectMarquee(lineShader, mvp, m_drawAreaStart, m_drawAreaCurrent, 0.0f, 0.9f, 1.0f, 1.0f);
+        float minX = std::min(m_drawAreaStart.x, m_drawAreaCurrent.x);
+        float maxX = std::max(m_drawAreaStart.x, m_drawAreaCurrent.x);
+        float minY = std::min(m_drawAreaStart.y, m_drawAreaCurrent.y);
+        float maxY = std::max(m_drawAreaStart.y, m_drawAreaCurrent.y);
+        m_gizmoRenderer.RenderRectMarquee4(lineShader, mvp, minX, maxX, minY, maxY,
+                                          m_drawAreaNwZ, m_drawAreaNeZ, m_drawAreaSeZ, m_drawAreaSwZ,
+                                          0.0f, 0.9f, 1.0f, 1.0f);
     }
 }
 
@@ -1852,9 +1892,15 @@ void EditorScene::UpdateDrawArea(const Ray& ray) {
     if (!m_drawAreaActive) return;
 
     Vector3 hit;
-    if (!IntersectRayWithPlane(ray, Vector3(0.0f, 0.0f, m_drawAreaElevation), Vector3(0.0f, 0.0f, 1.0f), hit)) {
-        hit = ray.origin + ray.direction * 500.0f;
-        hit.z = m_drawAreaElevation;
+    bool hasHit = false;
+    if (HasBSP()) {
+        hasHit = ScenePicker::PickBSPFloor(*this, ray, &hit);
+    }
+    if (!hasHit) {
+        if (!IntersectRayWithPlane(ray, Vector3(0.0f, 0.0f, m_drawAreaElevation), Vector3(0.0f, 0.0f, 1.0f), hit)) {
+            hit = ray.origin + ray.direction * 500.0f;
+            hit.z = m_drawAreaElevation;
+        }
     }
 
     if (m_gridSnap) {
@@ -1865,8 +1911,61 @@ void EditorScene::UpdateDrawArea(const Ray& ray) {
         hit.x = SnapToNeighborEdge(0, hit.x, true, std::min(m_drawAreaStart.y, hit.y), std::max(m_drawAreaStart.y, hit.y));
         hit.y = SnapToNeighborEdge(0, hit.y, false, std::min(m_drawAreaStart.x, hit.x), std::max(m_drawAreaStart.x, hit.x));
     }
-    hit.z = m_drawAreaElevation;
     m_drawAreaCurrent = hit;
+
+    float minX = std::min(m_drawAreaStart.x, m_drawAreaCurrent.x);
+    float maxX = std::max(m_drawAreaStart.x, m_drawAreaCurrent.x);
+    float minY = std::min(m_drawAreaStart.y, m_drawAreaCurrent.y);
+    float maxY = std::max(m_drawAreaStart.y, m_drawAreaCurrent.y);
+
+    m_drawAreaNwZ = m_drawAreaElevation;
+    m_drawAreaNeZ = m_drawAreaElevation;
+    m_drawAreaSeZ = m_drawAreaElevation;
+    m_drawAreaSwZ = m_drawAreaElevation;
+
+    if (HasBSP() && maxX - minX >= 4.0f && maxY - minY >= 4.0f) {
+        Vector3 center((minX + maxX) * 0.5f, (minY + maxY) * 0.5f, (m_drawAreaStart.z + m_drawAreaCurrent.z) * 0.5f);
+        float topZ = std::max(m_drawAreaStart.z, m_drawAreaCurrent.z) + 64.0f;
+        float botZ = std::min(m_drawAreaStart.z, m_drawAreaCurrent.z) - 256.0f;
+
+        BSPTraceResult trCenter;
+        bool hitCenter = false;
+        if (GetBSP().TraceWorld(Vector3(center.x, center.y, topZ), Vector3(center.x, center.y, botZ), HULL_POINT, &trCenter)) {
+            if (!trCenter.startsolid && !trCenter.allsolid && trCenter.fraction > 0.0f) {
+                hitCenter = true;
+            }
+        }
+
+        Vector3 planeNorm = hitCenter ? trCenter.planeNormal : Vector3(0.0f, 0.0f, 1.0f);
+        if (std::abs(planeNorm.z) < 0.2f) {
+            planeNorm = Vector3(0.0f, 0.0f, 1.0f);
+        }
+
+        Vector3 refPos = hitCenter ? trCenter.endpos : center;
+        auto PlaneZ = [&](float x, float y) -> float {
+            float dx = x - refPos.x;
+            float dy = y - refPos.y;
+            return refPos.z - (planeNorm.x * dx + planeNorm.y * dy) / planeNorm.z;
+        };
+
+        auto SampleCornerZ = [&](float x, float y) -> float {
+            float expZ = PlaneZ(x, y);
+            Vector3 cStart(x, y, expZ + 32.0f);
+            Vector3 cEnd(x, y, expZ - 48.0f);
+            BSPTraceResult tr;
+            if (GetBSP().TraceWorld(cStart, cEnd, HULL_POINT, &tr)) {
+                if (!tr.startsolid && !tr.allsolid && tr.fraction > 0.0f) {
+                    return tr.endpos.z;
+                }
+            }
+            return expZ;
+        };
+
+        m_drawAreaNwZ = SampleCornerZ(minX, minY);
+        m_drawAreaNeZ = SampleCornerZ(maxX, minY);
+        m_drawAreaSeZ = SampleCornerZ(maxX, maxY);
+        m_drawAreaSwZ = SampleCornerZ(minX, maxY);
+    }
 }
 
 void EditorScene::OnDrawAreaClick(const Ray& ray, CommandManager& cmdMgr) {
@@ -1903,6 +2002,10 @@ void EditorScene::OnDrawAreaClick(const Ray& ray, CommandManager& cmdMgr) {
         m_drawAreaStart = hitPoint;
         m_drawAreaElevation = hitPoint.z;
         m_drawAreaCurrent = hitPoint;
+        m_drawAreaNwZ = hitPoint.z;
+        m_drawAreaNeZ = hitPoint.z;
+        m_drawAreaSeZ = hitPoint.z;
+        m_drawAreaSwZ = hitPoint.z;
         m_drawAreaActive = true;
     } else {
         // Step 2: 2nd Corner
@@ -1914,37 +2017,53 @@ void EditorScene::OnDrawAreaClick(const Ray& ray, CommandManager& cmdMgr) {
         float maxY = std::max(m_drawAreaStart.y, m_drawAreaCurrent.y);
 
         if (maxX - minX >= 8.0f && maxY - minY >= 8.0f) {
-            float nwZ = m_drawAreaElevation;
-            float neZ = m_drawAreaElevation;
-            float seZ = m_drawAreaElevation;
-            float swZ = m_drawAreaElevation;
+            NavExtent extent(Vector3(minX, minY, m_drawAreaNwZ),
+                             Vector3(maxX, maxY, m_drawAreaSeZ));
 
-            if (HasBSP()) {
-                auto SamplePointZ = [&](float x, float y) -> float {
-                    Vector3 start(x, y, m_drawAreaElevation + 48.0f);
-                    Vector3 end(x, y, m_drawAreaElevation - 128.0f);
-                    BSPTraceResult tr;
-                    if (GetBSP().TraceWorld(start, end, HULL_POINT, &tr)) {
-                        if (!tr.startsolid && !tr.allsolid && tr.fraction > 0.0f) {
-                            return tr.endpos.z;
-                        }
-                    }
-                    return m_drawAreaElevation;
-                };
-
-                nwZ = SamplePointZ(minX, minY);
-                neZ = SamplePointZ(maxX, minY);
-                seZ = SamplePointZ(maxX, maxY);
-                swZ = SamplePointZ(minX, maxY);
-            }
-
-            NavExtent extent(Vector3(minX, minY, nwZ),
-                             Vector3(maxX, maxY, seZ));
-
-            auto cmd = std::make_unique<CmdCreateArea>(this, extent, neZ, swZ);
+            auto cmd = std::make_unique<CmdCreateArea>(this, extent, m_drawAreaNeZ, m_drawAreaSwZ);
             cmdMgr.ExecuteCommand(std::move(cmd));
+            m_isModified = true;
         }
 
         m_drawAreaActive = false;
     }
+}
+
+void EditorScene::StartFillAreaMode() {
+    ExitDrawAreaMode();
+    CancelBridgeMode();
+    CancelTransform();
+    m_isFillAreaMode = true;
+}
+
+void EditorScene::ExitFillAreaMode() {
+    m_isFillAreaMode = false;
+}
+
+void EditorScene::ToggleFillAreaMode() {
+    if (m_isFillAreaMode) {
+        ExitFillAreaMode();
+    } else {
+        StartFillAreaMode();
+    }
+}
+
+size_t EditorScene::FloodFillAreaAt(const Ray& ray, CommandManager& cmdMgr) {
+    if (!HasBSP()) return 0;
+
+    Vector3 seedPos;
+    if (!ScenePicker::PickBSPFloor(*this, ray, &seedPos)) {
+        return 0;
+    }
+
+    NavGenerateOptions opts;
+    opts.stepSize = (m_gridSize >= 16.0f && m_gridSize <= 64.0f) ? m_gridSize : 25.0f;
+    opts.mergeAreas = true;
+    opts.generateCrouch = true;
+
+    auto cmd = std::make_unique<CmdFloodFill>(this, seedPos, opts);
+    cmdMgr.ExecuteCommand(std::move(cmd));
+    m_isModified = true;
+
+    return m_selectedAreaIds.size();
 }

@@ -48,6 +48,11 @@ public:
     bool LoadNAV(const std::string& navPath);
     bool SaveNAV(const std::string& navPath = "");
     bool GenerateNavMesh(const NavGenerateOptions& options = NavGenerateOptions());
+    void UnloadNAV();
+    void UnloadBSP();
+
+    bool IsModified() const { return m_isModified; }
+    void SetModified(bool mod) { m_isModified = mod; }
 
     // Asynchronous loading with progress and stage tracking
     void StartAsyncLoad(const std::string& bspOrNavPath, const std::string& explicitNavPath = "");
@@ -181,6 +186,18 @@ public:
     const Vector3& GetDrawAreaCurrent() const { return m_drawAreaCurrent; }
     void UpdateDrawArea(const Ray& ray);
     void OnDrawAreaClick(const Ray& ray, class CommandManager& cmdMgr);
+    float GetDrawAreaNwZ() const { return m_drawAreaNwZ; }
+    float GetDrawAreaNeZ() const { return m_drawAreaNeZ; }
+    float GetDrawAreaSeZ() const { return m_drawAreaSeZ; }
+    float GetDrawAreaSwZ() const { return m_drawAreaSwZ; }
+
+    // Fill Area Tool (Click any floor to auto-fill room/surface with NavMesh)
+    bool IsFillAreaMode() const { return m_isFillAreaMode; }
+    void StartFillAreaMode();
+    void ExitFillAreaMode();
+    void ToggleFillAreaMode();
+    void CancelFillAreaMode() { ExitFillAreaMode(); }
+    size_t FloodFillAreaAt(const Ray& ray, class CommandManager& cmdMgr);
 
     // Interactive Handles (Gizmo Arrows, Edges, Corners)
     SelectedHandleType GetHoveredHandle() const { return m_hoveredHandle; }
@@ -287,6 +304,13 @@ private:
     Vector3 m_drawAreaStart{0.0f, 0.0f, 0.0f};
     Vector3 m_drawAreaCurrent{0.0f, 0.0f, 0.0f};
     float m_drawAreaElevation{0.0f};
+    float m_drawAreaNwZ{0.0f};
+    float m_drawAreaNeZ{0.0f};
+    float m_drawAreaSeZ{0.0f};
+    float m_drawAreaSwZ{0.0f};
+
+    // Fill Area Tool
+    bool m_isFillAreaMode{false};
 
     // Multi-Selection
     std::vector<uint32_t> m_selectedAreaIds;

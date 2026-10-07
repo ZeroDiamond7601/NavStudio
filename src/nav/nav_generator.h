@@ -56,6 +56,16 @@ public:
         NavGenerateProgressCallback progress = nullptr
     );
 
+    // Flood-fill / local area generation seeded from a specific starting ground position
+    static size_t FloodFillFromSeed(
+        const BSPFile& bsp,
+        NavMesh& nav,
+        const Vector3& seedPos,
+        const NavGenerateOptions& options = NavGenerateOptions(),
+        size_t maxNodes = 1500,
+        std::vector<uint32_t>* outCreatedAreaIds = nullptr
+    );
+
     // Batch generation item
     struct BatchItem {
         std::string bspPath;

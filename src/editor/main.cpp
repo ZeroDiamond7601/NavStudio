@@ -23,11 +23,22 @@
 static Camera g_camera;
 static EditorScene* g_activeScene = nullptr;
 static CommandManager* g_cmdMgr = nullptr;
+static EditorUI* g_editorUI = nullptr;
 static bool g_isRightMouseDown = false;
 static bool g_isAltDown = false;
 static double g_lastMouseX = 0.0;
 static double g_lastMouseY = 0.0;
 static bool g_firstMouse = true;
+
+static void WindowCloseCallback(GLFWwindow* window) {
+    if (g_activeScene && g_activeScene->HasNAV() &&
+        (g_cmdMgr->HasUnsavedChanges() || g_activeScene->IsModified())) {
+        glfwSetWindowShouldClose(window, GLFW_FALSE);
+        if (g_editorUI) {
+            g_editorUI->PromptQuit(*g_activeScene, *g_cmdMgr);
+        }
+    }
+}
 
 static void DropCallback(GLFWwindow* /*window*/, int count, const char** paths) {
     if (!g_activeScene || count <= 0 || !paths) return;
@@ -54,11 +65,17 @@ static void DropCallback(GLFWwindow* /*window*/, int count, const char** paths) 
     }
 
     if (!bspPath.empty()) {
-        std::printf("[DragDrop] Loading BSP map: %s\n", bspPath.c_str());
-        g_activeScene->StartAsyncLoad(bspPath, navPath);
+        if (!g_editorUI || !g_editorUI->CheckUnsavedChanges(*g_activeScene, *g_cmdMgr, EditorUI::PENDING_OPEN_BSP, bspPath)) {
+            g_cmdMgr->Clear();
+            std::printf("[DragDrop] Loading BSP map: %s\n", bspPath.c_str());
+            g_activeScene->StartAsyncLoad(bspPath, navPath);
+        }
     } else if (!navPath.empty()) {
-        std::printf("[DragDrop] Loading NAV mesh: %s\n", navPath.c_str());
-        g_activeScene->StartAsyncLoad(navPath);
+        if (!g_editorUI || !g_editorUI->CheckUnsavedChanges(*g_activeScene, *g_cmdMgr, EditorUI::PENDING_OPEN_NAV, navPath)) {
+            g_cmdMgr->Clear();
+            std::printf("[DragDrop] Loading NAV mesh: %s\n", navPath.c_str());
+            g_activeScene->StartAsyncLoad(navPath);
+        }
     }
 }
 
@@ -68,12 +85,12 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
 
     if (button == GLFW_MOUSE_BUTTON_RIGHT) {
         if (action == GLFW_PRESS) {
-            if (g_activeScene && g_activeScene->IsDrawAreaMode()) {
-                g_activeScene->CancelDrawArea();
-                return;
-            }
             if (g_activeScene && g_activeScene->IsBridgeMode()) {
                 g_activeScene->CancelBridgeMode();
+                return;
+            }
+            if (g_activeScene && g_activeScene->IsFillAreaMode()) {
+                g_activeScene->ExitFillAreaMode();
                 return;
             }
             if (g_activeScene && g_activeScene->GetTransformMode() != EditorScene::TRANSFORM_NONE) {
@@ -107,6 +124,15 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
             // Draw Area Mode Left Click: Click 1st corner, then 2nd corner
             if (g_activeScene->IsDrawAreaMode()) {
                 g_activeScene->OnDrawAreaClick(ray, *g_cmdMgr);
+                return;
+            }
+
+            // Fill Area Mode Left Click: Click floor to generate room NavMesh
+            if (g_activeScene->IsFillAreaMode()) {
+                size_t created = g_activeScene->FloodFillAreaAt(ray, *g_cmdMgr);
+                if (created > 0) {
+                    std::printf("[NavStudio] Flood-fill generated %zu areas\n", created);
+                }
                 return;
             }
 
@@ -188,6 +214,13 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
         return;
     }
 
+    // When in drawing mode, WASD keys navigate the camera
+    if (g_activeScene && g_activeScene->IsDrawAreaMode()) {
+        if (key == GLFW_KEY_W || key == GLFW_KEY_A || key == GLFW_KEY_S || key == GLFW_KEY_D) {
+            return;
+        }
+    }
+
     if (action == GLFW_PRESS) {
         auto mode = g_activeScene->GetTransformMode();
 
@@ -234,11 +267,17 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 g_activeScene->ToggleBridgeMode();
             } else if (key == GLFW_KEY_N && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // N: Draw Area Tool
                 g_activeScene->ToggleDrawAreaMode();
+            } else if (key == GLFW_KEY_F && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0 &&
+                       g_activeScene->GetSelectedAreaID() == 0 && g_activeScene->GetSelectedAreaIDs().empty() &&
+                       g_activeScene->GetSelectedEntityIndex() < 0) { // F: Fill Area Tool (when nothing selected)
+                g_activeScene->ToggleFillAreaMode();
             } else if (key == GLFW_KEY_A && (mods & GLFW_MOD_CONTROL) != 0) { // Ctrl+A: Select All
                 g_activeScene->SelectAllAreas();
             } else if (key == GLFW_KEY_ESCAPE) {
                 if (g_activeScene->IsDrawAreaMode()) {
                     g_activeScene->CancelDrawArea();
+                } else if (g_activeScene->IsFillAreaMode()) {
+                    g_activeScene->ExitFillAreaMode();
                 } else if (g_activeScene->IsBridgeMode()) {
                     g_activeScene->CancelBridgeMode();
                 } else if (!g_activeScene->GetSelectedAreaIDs().empty() || g_activeScene->GetSelectedAreaID() != 0) {
@@ -421,7 +460,7 @@ static void ScrollCallback(GLFWwindow* /*window*/, double /*xoffset*/, double yo
 }
 
 static void ProcessInput(GLFWwindow* window, float deltaTime) {
-    if (g_isRightMouseDown || g_camera.GetMode() == CAMERA_MODE_TOPDOWN_2D) {
+    if (g_isRightMouseDown || g_camera.GetMode() == CAMERA_MODE_TOPDOWN_2D || (g_activeScene && g_activeScene->IsDrawAreaMode())) {
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) g_camera.ProcessKeyboard(0, deltaTime);
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) g_camera.ProcessKeyboard(1, deltaTime);
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) g_camera.ProcessKeyboard(2, deltaTime);
@@ -510,6 +549,8 @@ int main(int argc, char* argv[]) {
     g_cmdMgr = &cmdMgr;
     EditorUI editorUI;
     editorUI.Init();
+    g_editorUI = &editorUI;
+    glfwSetWindowCloseCallback(window, WindowCloseCallback);
 
     // Load initial map if passed via arguments
     if (argc > 1) {

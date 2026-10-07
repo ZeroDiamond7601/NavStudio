@@ -199,10 +199,8 @@ NavArea* BuildArea(NavGenNode* node, int width, int height, NavMesh& outNav) {
     extent.hi.x = seNode->pos.x;
     extent.hi.y = seNode->pos.y;
 
-    float minZ = std::min({nwNode->pos.z, neNode->pos.z, swNode->pos.z, seNode->pos.z}) - 2.0f;
-    float maxZ = std::max({nwNode->pos.z, neNode->pos.z, swNode->pos.z, seNode->pos.z}) + 2.0f;
-    extent.lo.z = minZ;
-    extent.hi.z = maxZ;
+    extent.lo.z = nwNode->pos.z;
+    extent.hi.z = seNode->pos.z;
 
     NavArea* area = outNav.CreateArea(extent, neNode->pos.z, swNode->pos.z);
     if (!area) return nullptr;
@@ -705,6 +703,215 @@ NavGenerateResult NavGenerator::GenerateToFile(
     }
 
     return result;
+}
+
+size_t NavGenerator::FloodFillFromSeed(
+    const BSPFile& bsp,
+    NavMesh& nav,
+    const Vector3& seedPos,
+    const NavGenerateOptions& options,
+    size_t maxNodes,
+    std::vector<uint32_t>* outCreatedAreaIds
+) {
+    if (!bsp.IsLoaded()) return 0;
+
+    float step = options.stepSize;
+    float sx = std::round(seedPos.x / step) * step;
+    float sy = std::round(seedPos.y / step) * step;
+
+    Vector3 groundPos;
+    BSPTraceResult groundTr;
+    Vector3 gStart(sx, sy, seedPos.z + 24.0f);
+    Vector3 gEnd(sx, sy, seedPos.z - 200.0f);
+    if (!bsp.TraceWorld(gStart, gEnd, HULL_POINT, &groundTr) || groundTr.fraction >= 1.0f || groundTr.startsolid || groundTr.allsolid) {
+        if (!bsp.GetGround(Vector3(sx, sy, seedPos.z + 18.0f), &groundPos, 500.0f)) {
+            return 0;
+        }
+        groundTr.planeNormal = Vector3(0.0f, 0.0f, 1.0f);
+    } else {
+        groundPos = groundTr.endpos;
+    }
+
+    NodeMap nodeMap(step);
+    std::queue<NavGenNode*> openQueue;
+
+    NavGenNode* seedNode = nodeMap.CreateNode(groundPos, groundTr.planeNormal);
+    openQueue.push(seedNode);
+
+    size_t exploredCount = 0;
+    while (!openQueue.empty() && exploredCount < maxNodes) {
+        NavGenNode* curr = openQueue.front();
+        openQueue.pop();
+        exploredCount++;
+
+        for (int dir = 0; dir < NUM_NAV_DIRECTIONS; ++dir) {
+            if (curr->to[dir]) continue;
+
+            float targetX = curr->pos.x;
+            float targetY = curr->pos.y;
+
+            switch (dir) {
+                case NAV_DIR_NORTH: targetY -= step; break;
+                case NAV_DIR_EAST:  targetX += step; break;
+                case NAV_DIR_SOUTH: targetY += step; break;
+                case NAV_DIR_WEST:  targetX -= step; break;
+            }
+
+            Vector3 cStart(targetX, targetY, curr->pos.z + options.maxStepHeight + 2.0f);
+            Vector3 cEnd(targetX, targetY, curr->pos.z - options.maxDrop);
+
+            BSPTraceResult gTr;
+            if (!bsp.TraceWorld(cStart, cEnd, HULL_POINT, &gTr) || gTr.fraction >= 1.0f || gTr.startsolid || gTr.allsolid) {
+                continue;
+            }
+
+            if (gTr.planeNormal.z < options.maxSlopeNormalZ) {
+                continue;
+            }
+
+            Vector3 candGround = gTr.endpos;
+            float dz = candGround.z - curr->pos.z;
+            if (dz > options.maxStepHeight || dz < -options.maxDrop) {
+                continue;
+            }
+
+            BSPTraceResult trHead;
+            bsp.TraceWorld(candGround + Vector3(0, 0, 2.0f), candGround + Vector3(0, 0, 200.0f), HULL_POINT, &trHead);
+            float clearance = trHead.endpos.z - candGround.z;
+            if (clearance < options.crouchHeight - 2.0f) {
+                continue;
+            }
+
+            bool isCrouch = (clearance < options.humanHeight - 8.0f);
+            float stepZ = std::max(curr->pos.z, candGround.z);
+            bool traversalClear = false;
+
+            if (!isCrouch && (curr->attributes & NAV_ATTR_CROUCH) == 0) {
+                BSPTraceResult trStand;
+                Vector3 sStart(curr->pos.x, curr->pos.y, stepZ + 36.0f);
+                Vector3 sEnd(candGround.x, candGround.y, stepZ + 36.0f);
+                bsp.TraceWorld(sStart, sEnd, HULL_HUMAN, &trStand);
+                if (trStand.fraction >= 1.0f && !trStand.startsolid && !trStand.allsolid) {
+                    traversalClear = true;
+                }
+            }
+
+            if (!traversalClear && options.generateCrouch && clearance >= options.crouchHeight - 2.0f) {
+                BSPTraceResult trCrouch;
+                Vector3 cSt(curr->pos.x, curr->pos.y, stepZ + 18.0f);
+                Vector3 cEn(candGround.x, candGround.y, stepZ + 18.0f);
+                bsp.TraceWorld(cSt, cEn, HULL_HEAD, &trCrouch);
+                if (trCrouch.fraction >= 1.0f && !trCrouch.startsolid && !trCrouch.allsolid) {
+                    traversalClear = true;
+                    isCrouch = true;
+                }
+            }
+
+            if (!traversalClear) continue;
+
+            uint8_t attributes = 0;
+            if (options.generateCrouch && isCrouch) {
+                attributes |= NAV_ATTR_CROUCH;
+            }
+
+            NavGenNode* neighbor = nodeMap.FindNode(candGround, 18.0f);
+            if (neighbor) {
+                curr->to[dir] = neighbor;
+                if (std::fabs(dz) <= options.maxStepHeight) {
+                    NavDirType opp = static_cast<NavDirType>((dir + 2) % 4);
+                    neighbor->to[opp] = curr;
+                }
+            } else {
+                NavGenNode* newNode = nodeMap.CreateNode(candGround, gTr.planeNormal);
+                newNode->attributes = attributes;
+                curr->to[dir] = newNode;
+                if (std::fabs(dz) <= options.maxStepHeight) {
+                    NavDirType opp = static_cast<NavDirType>((dir + 2) % 4);
+                    newNode->to[opp] = curr;
+                }
+                openQueue.push(newNode);
+            }
+        }
+    }
+
+    // Area Formation
+    std::vector<NavArea*> newAreas;
+    int tryWidth = 30;
+    int tryHeight = 30;
+    while (tryWidth > 0 && tryHeight > 0) {
+        for (NavGenNode* node : nodeMap.GetAllNodes()) {
+            if (node->isCovered) continue;
+            if (TestArea(node, tryWidth, tryHeight)) {
+                NavArea* a = BuildArea(node, tryWidth, tryHeight, nav);
+                if (a) newAreas.push_back(a);
+            }
+        }
+        if (tryWidth >= tryHeight) tryWidth--;
+        else tryHeight--;
+    }
+
+    for (NavGenNode* node : nodeMap.GetAllNodes()) {
+        if (!node->isCovered && node->IsClosedCell()) {
+            NavArea* a = BuildArea(node, 1, 1, nav);
+            if (a) newAreas.push_back(a);
+        }
+    }
+
+    if (newAreas.empty()) return 0;
+
+    // Connect new areas to each other
+    for (NavArea* area : newAreas) {
+        if (!area) continue;
+        for (NavGenNode* n : nodeMap.GetAllNodes()) {
+            if (!n || n->area != area) continue;
+            for (int d = 0; d < NUM_NAV_DIRECTIONS; ++d) {
+                NavGenNode* adj = n->to[d];
+                if (adj && adj->area && adj->area != area) {
+                    if (!area->IsConnected(adj->area, d)) {
+                        area->ConnectTo(adj->area, static_cast<NavDirType>(d));
+                    }
+                }
+            }
+        }
+    }
+
+    // Connect border nodes to pre-existing areas in navmesh
+    for (NavArea* area : newAreas) {
+        if (!area) continue;
+        const NavExtent& ext = area->GetExtent();
+        for (int d = 0; d < NUM_NAV_DIRECTIONS; ++d) {
+            Vector3 checkPos = area->GetCenter();
+            switch (d) {
+                case NAV_DIR_NORTH: checkPos.y = ext.lo.y - step * 0.5f; break;
+                case NAV_DIR_EAST:  checkPos.x = ext.hi.x + step * 0.5f; break;
+                case NAV_DIR_SOUTH: checkPos.y = ext.hi.y + step * 0.5f; break;
+                case NAV_DIR_WEST:  checkPos.x = ext.lo.x - step * 0.5f; break;
+            }
+            NavArea* existing = nav.GetNearestArea(checkPos, step * 1.5f);
+            if (existing && existing != area) {
+                if (std::find(newAreas.begin(), newAreas.end(), existing) == newAreas.end()) {
+                    if (std::fabs(existing->GetCenter().z - area->GetCenter().z) <= options.maxStepHeight) {
+                        if (!area->IsConnected(existing, d)) {
+                            area->ConnectTo(existing, static_cast<NavDirType>(d));
+                        }
+                        NavDirType opp = static_cast<NavDirType>((d + 2) % 4);
+                        if (!existing->IsConnected(area, opp)) {
+                            existing->ConnectTo(area, opp);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (outCreatedAreaIds) {
+        outCreatedAreaIds->clear();
+        for (NavArea* a : newAreas) {
+            if (a) outCreatedAreaIds->push_back(a->GetID());
+        }
+    }
+
+    return newAreas.size();
 }
 
 NavGenerator::BatchResult NavGenerator::GenerateBatch(

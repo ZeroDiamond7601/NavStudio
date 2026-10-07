@@ -15,7 +15,7 @@ public:
 
 class CommandManager {
 public:
-    CommandManager() : m_historyIndex(0) {}
+    CommandManager() : m_historyIndex(0), m_savedHistoryIndex(0) {}
 
     void ExecuteCommand(std::unique_ptr<IEditCommand> cmd) {
         if (!cmd) return;
@@ -53,6 +53,15 @@ public:
     void Clear() {
         m_history.clear();
         m_historyIndex = 0;
+        m_savedHistoryIndex = 0;
+    }
+
+    void MarkSaved() {
+        m_savedHistoryIndex = m_historyIndex;
+    }
+
+    bool HasUnsavedChanges() const {
+        return m_historyIndex != m_savedHistoryIndex;
     }
 
     const char* GetUndoName() const {
@@ -68,6 +77,7 @@ public:
 private:
     std::vector<std::unique_ptr<IEditCommand>> m_history;
     size_t m_historyIndex;
+    size_t m_savedHistoryIndex;
 };
 
 #endif // COMMAND_H

@@ -1216,4 +1216,49 @@ private:
     std::vector<std::pair<uint32_t, std::string>> m_oldPlaces;
 };
 
+// Command: Flood-fill navigation mesh from seed point on map geometry
+class CmdFloodFill : public IEditCommand {
+public:
+    CmdFloodFill(EditorScene* scene, const Vector3& seedPos, const NavGenerateOptions& options = NavGenerateOptions())
+        : m_scene(scene), m_seedPos(seedPos), m_options(options) {}
+
+    void Execute() override {
+        if (!m_scene->HasBSP()) return;
+        m_createdAreaIds.clear();
+        m_scene->GetNAV().SetLoaded(true);
+        size_t count = NavGenerator::FloodFillFromSeed(
+            m_scene->GetBSP(),
+            m_scene->GetNAV(),
+            m_seedPos,
+            m_options,
+            1500,
+            &m_createdAreaIds
+        );
+        if (count > 0) {
+            m_scene->ClearSelection();
+            for (uint32_t id : m_createdAreaIds) {
+                m_scene->SelectArea(id, true, false);
+            }
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    void Undo() override {
+        for (uint32_t id : m_createdAreaIds) {
+            m_scene->GetNAV().RemoveArea(id);
+        }
+        m_createdAreaIds.clear();
+        m_scene->ClearSelection();
+        m_scene->RebuildNavRenderer();
+    }
+
+    const char* GetName() const override { return "Flood Fill NavMesh"; }
+
+private:
+    EditorScene* m_scene;
+    Vector3 m_seedPos;
+    NavGenerateOptions m_options;
+    std::vector<uint32_t> m_createdAreaIds;
+};
+
 #endif // NAV_COMMANDS_H

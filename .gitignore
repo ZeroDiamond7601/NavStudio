@@ -44,3 +44,6 @@ scratch/
 # Third-party dependencies
 third_party/
 
+# Helper scripts
+push.bat
+

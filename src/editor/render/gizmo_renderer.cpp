@@ -475,22 +475,28 @@ void GizmoRenderer::RenderLineSegment(const Shader& lineShader, const Matrix4& m
 void GizmoRenderer::RenderRectMarquee(const Shader& lineShader, const Matrix4& mvp,
                                       const Vector3& p0, const Vector3& p1,
                                       float r, float g, float b, float a) {
+    float minX = std::min(p0.x, p1.x), maxX = std::max(p0.x, p1.x);
+    float minY = std::min(p0.y, p1.y), maxY = std::max(p0.y, p1.y);
+    float avgZ = (p0.z + p1.z) * 0.5f;
+    RenderRectMarquee4(lineShader, mvp, minX, maxX, minY, maxY, avgZ, avgZ, avgZ, avgZ, r, g, b, a);
+}
+
+void GizmoRenderer::RenderRectMarquee4(const Shader& lineShader, const Matrix4& mvp,
+                                       float minX, float maxX, float minY, float maxY,
+                                       float nwZ, float neZ, float seZ, float swZ,
+                                       float r, float g, float b, float a) {
     if (m_vao == 0) {
         glGenVertexArrays(1, &m_vao);
         glGenBuffers(1, &m_vbo);
         glGenBuffers(1, &m_ebo);
     }
 
-    float minX = std::min(p0.x, p1.x), maxX = std::max(p0.x, p1.x);
-    float minY = std::min(p0.y, p1.y), maxY = std::max(p0.y, p1.y);
-    float z = (p0.z + p1.z) * 0.5f + 1.5f;
-
-    // 4 corners of rectangle
+    // 4 corners of rectangle conforming to slope
     GizmoVertex v[4] = {
-        { minX, maxY, z, r, g, b, a }, // NW
-        { maxX, maxY, z, r, g, b, a }, // NE
-        { maxX, minY, z, r, g, b, a }, // SE
-        { minX, minY, z, r, g, b, a }  // SW
+        { minX, minY, nwZ + 1.5f, r, g, b, a }, // NW
+        { maxX, minY, neZ + 1.5f, r, g, b, a }, // NE
+        { maxX, maxY, seZ + 1.5f, r, g, b, a }, // SE
+        { minX, maxY, swZ + 1.5f, r, g, b, a }  // SW
     };
     uint32_t indices[8] = {
         0, 1, // NW -> NE

@@ -16,6 +16,20 @@ public:
 
     bool IsMouseOverUI() const { return m_mouseOverUI; }
     bool RequestQuit() const { return m_requestQuit; }
+    void PromptQuit(EditorScene& scene, CommandManager& cmdMgr);
+
+    enum PendingAction {
+        PENDING_NONE = 0,
+        PENDING_QUIT,
+        PENDING_OPEN_BSP,
+        PENDING_OPEN_NAV,
+        PENDING_RECENT,
+        PENDING_UNLOAD_NAV,
+        PENDING_UNLOAD_BSP
+    };
+
+    bool CheckUnsavedChanges(EditorScene& scene, CommandManager& cmdMgr, PendingAction action, const std::string& path = "");
+    void ExecutePendingAction(EditorScene& scene, CommandManager& cmdMgr);
 
 private:
     void RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
@@ -33,6 +47,8 @@ private:
     void RenderEntityInspector(EditorScene& scene, Camera& camera);
     void RenderGenerateModal(EditorScene& scene);
     void RenderBatchGenerateModal(EditorScene& scene);
+    void RenderUnsavedModal(EditorScene& scene, CommandManager& cmdMgr);
+    void RenderSaveSuccessModal();
 
     bool m_mouseOverUI;
     bool m_requestQuit;
@@ -64,6 +80,12 @@ private:
     int m_connectTargetInputId{0};
     int m_connectDirSelection{0};
     bool m_connectBidirectional{true};
+
+    PendingAction m_pendingAction{PENDING_NONE};
+    std::string m_pendingPath;
+    bool m_showUnsavedModal{false};
+    bool m_showSaveSuccessModal{false};
+    std::string m_saveSuccessMessage;
 };
 
 #endif // EDITOR_UI_H

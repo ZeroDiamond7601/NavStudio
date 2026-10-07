@@ -45,6 +45,11 @@ public:
                            const Vector3& p0, const Vector3& p1,
                            float r = 0.0f, float g = 0.9f, float b = 1.0f, float a = 1.0f);
 
+    void RenderRectMarquee4(const Shader& lineShader, const Matrix4& mvp,
+                            float minX, float maxX, float minY, float maxY,
+                            float nwZ, float neZ, float seZ, float swZ,
+                            float r = 0.0f, float g = 0.9f, float b = 1.0f, float a = 1.0f);
+
 private:
     void BuildBuffers(const Vector3& center, const Vector3& camPos,
                       GizmoMode mode,
