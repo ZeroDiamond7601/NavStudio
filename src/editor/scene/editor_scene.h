@@ -110,7 +110,15 @@ public:
     NavMesh& GetNAV() { return *m_nav; }
 
     const std::string& GetBSPPath() const { return m_bspPath; }
-    const std::string& GetNAVPath() const { return m_navPath; }
+    std::string GetNAVPath() const {
+        if (!m_navPath.empty()) return m_navPath;
+        if (!m_bspPath.empty()) {
+            size_t dotPos = m_bspPath.find_last_of('.');
+            if (dotPos != std::string::npos) return m_bspPath.substr(0, dotPos) + ".nav";
+            return m_bspPath + ".nav";
+        }
+        return "";
+    }
 
     bool HasBSP() const { return m_bsp && m_bsp->IsLoaded(); }
     bool HasNAV() const { return m_nav && m_nav->IsLoaded(); }

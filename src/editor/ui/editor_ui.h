@@ -51,6 +51,9 @@ private:
     void RenderSaveSuccessModal();
     void RenderAnalyzerModal();
     void RenderOptimizeModal();
+    void RenderNavMeshGlobalInspector(EditorScene& scene, CommandManager& cmdMgr);
+    void RenderBSPGlobalInspector(EditorScene& scene);
+    void RenderStatsOverlay(const EditorScene& scene, const Camera& camera);
 
     bool m_mouseOverUI;
     bool m_requestQuit;
@@ -93,6 +96,7 @@ private:
     EditorScene::AnalyzerStats m_analyzerStats;
     bool m_showOptimizeModal{false};
     EditorScene::OptimizeMeshStats m_optimizeStats;
+    bool m_showStatsOverlay{true};
 };
 
 #endif // EDITOR_UI_H

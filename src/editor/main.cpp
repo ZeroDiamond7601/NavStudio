@@ -184,17 +184,27 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     return;
                 }
 
-                // Test entity picking first, then NavArea
-                int hitEntity = ScenePicker::PickEntity(*g_activeScene, ray);
-                if (hitEntity >= 0) {
+                // Pick entity and NavArea with accurate distance comparison
+                float entDist = std::numeric_limits<float>::max();
+                int hitEntity = ScenePicker::PickEntity(*g_activeScene, ray, &entDist);
+
+                Vector3 navHit(0, 0, 0);
+                uint32_t hitArea = ScenePicker::PickNavArea(*g_activeScene, ray, &navHit);
+                float navDist = (hitArea != 0) ? (navHit - ray.origin).Length() : std::numeric_limits<float>::max();
+
+                bool additive = (mods & GLFW_MOD_SHIFT) != 0;
+                bool toggle = (mods & GLFW_MOD_CONTROL) != 0;
+
+                // If NavArea is hit and is closer to camera or within threshold, pick NavArea
+                if (hitArea != 0 && (hitEntity < 0 || navDist <= entDist + 16.0f)) {
+                    g_activeScene->SelectArea(hitArea, additive, toggle);
+                    g_activeScene->SelectEntity(-1);
+                } else if (hitEntity >= 0) {
                     g_activeScene->SelectEntity(hitEntity);
                     g_activeScene->ClearSelection();
                 } else {
-                    uint32_t hitArea = ScenePicker::PickNavArea(*g_activeScene, ray);
-                    bool additive = (mods & GLFW_MOD_SHIFT) != 0;
-                    bool toggle = (mods & GLFW_MOD_CONTROL) != 0;
-                    g_activeScene->SelectArea(hitArea, additive, toggle);
-                    if (hitArea != 0) {
+                    if (!additive && !toggle) {
+                        g_activeScene->ClearSelection();
                         g_activeScene->SelectEntity(-1);
                     }
                 }
@@ -486,9 +496,33 @@ static void ProcessInput(GLFWwindow* window, float deltaTime) {
     }
 }
 
+static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
+    static std::string lastTitle = "";
+    std::string title = "NavStudio v1.4.0";
+    if (scene.HasBSP() || scene.HasNAV()) {
+        std::string map = "";
+        if (scene.HasBSP()) {
+            map = scene.GetBSP().GetMapName();
+        } else if (!scene.GetNAVPath().empty()) {
+            size_t slash = scene.GetNAVPath().find_last_of("/\\");
+            map = (slash != std::string::npos) ? scene.GetNAVPath().substr(slash + 1) : scene.GetNAVPath();
+        }
+        if (!map.empty()) {
+            title += " - " + map;
+        }
+        if (scene.IsModified()) {
+            title += " *";
+        }
+    }
+    if (title != lastTitle) {
+        glfwSetWindowTitle(window, title.c_str());
+        lastTitle = title;
+    }
+}
+
 int main(int argc, char* argv[]) {
     std::printf("====================================================\n");
-    std::printf("  NavStudio - AMXX NavMesh & BSP 3D Editor\n");
+    std::printf("  NavStudio v1.4.0\n");
     std::printf("====================================================\n");
 
     if (!glfwInit()) {
@@ -505,7 +539,7 @@ int main(int argc, char* argv[]) {
 
     int initialWidth = 1440;
     int initialHeight = 900;
-    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio - AMXX NavMesh & BSP Editor", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.4.0", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "[Error] Failed to create GLFW window\n");
         glfwTerminate();
@@ -587,6 +621,7 @@ int main(int argc, char* argv[]) {
 
         glfwPollEvents();
         ProcessInput(window, deltaTime);
+        UpdateAppTitle(window, scene);
 
         // Update background scene loading and stage progress
         scene.UpdateAsyncLoading(deltaTime);

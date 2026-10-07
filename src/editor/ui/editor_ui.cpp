@@ -156,6 +156,10 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     RenderStatusBar(scene, camera);
     RenderTransformHUD(scene, cmdMgr);
 
+    if (m_showStatsOverlay) {
+        RenderStatsOverlay(scene, camera);
+    }
+
     if (scene.IsLoading()) {
         RenderLoadingModal(scene);
     } else if (scene.HasLoadingError()) {
@@ -473,6 +477,9 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                 camera.SetPosition(Vector3(0.0f, -500.0f, 300.0f));
                 camera.SetTarget(Vector3(0.0f, 0.0f, 0.0f));
             }
+
+            ImGui::Separator();
+            ImGui::MenuItem("Performance & FPS Overlay", nullptr, &m_showStatsOverlay);
 
             ImGui::EndMenu();
         }
@@ -1224,7 +1231,13 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
 
         NavArea* area = scene.GetSelectedArea();
         if (!area) {
-            ImGui::TextDisabled("No object or area selected.\nClick a NavArea or Entity in the 3D viewport or explorer.");
+            if (scene.HasNAV()) {
+                RenderNavMeshGlobalInspector(scene, cmdMgr);
+            } else if (scene.HasBSP()) {
+                RenderBSPGlobalInspector(scene);
+            } else {
+                ImGui::TextDisabled("No object or area selected.\nClick a NavArea or Entity in the 3D viewport or explorer.");
+            }
             ImGui::End();
             return;
         }
@@ -1554,6 +1567,136 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
     ImGui::End();
 }
 
+void EditorUI::RenderNavMeshGlobalInspector(EditorScene& scene, CommandManager& cmdMgr) {
+    const auto& nav = scene.GetNAV();
+    ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "Navigation Mesh Overview");
+    ImGui::Separator();
+
+    std::string navPath = scene.GetNAVPath();
+    if (!navPath.empty()) {
+        size_t slash = navPath.find_last_of("/\\");
+        std::string filename = (slash != std::string::npos) ? navPath.substr(slash + 1) : navPath;
+        ImGui::Text("File: %s", filename.c_str());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", navPath.c_str());
+    } else {
+        ImGui::TextDisabled("Unsaved Navigation Mesh (In-Memory)");
+    }
+
+    ImGui::Text("Format Version: %u (Sub: %u)", nav.GetVersion(), nav.GetSubVersion());
+    ImGui::Text("Recorded BSP Size: %u bytes", nav.GetBspSize());
+    ImGui::Separator();
+
+    ImGui::Text("Total Areas:    %zu", nav.GetAreaCount());
+    ImGui::Text("Total Ladders:  %zu", nav.GetLadders().size());
+    ImGui::Text("Places Defined: %zu", nav.GetPlaceNames().size());
+
+    // Mesh Extents / World Bounds
+    if (nav.GetAreaCount() > 0) {
+        float minX = 1e9f, minY = 1e9f, minZ = 1e9f;
+        float maxX = -1e9f, maxY = -1e9f, maxZ = -1e9f;
+        for (const auto* a : nav.GetAreas()) {
+            if (!a) continue;
+            const auto& ext = a->GetExtent();
+            minX = std::min(minX, ext.lo.x);
+            minY = std::min(minY, ext.lo.y);
+            minZ = std::min(minZ, ext.lo.z);
+            maxX = std::max(maxX, ext.hi.x);
+            maxY = std::max(maxY, ext.hi.y);
+            maxZ = std::max(maxZ, ext.hi.z);
+        }
+        ImGui::Spacing();
+        ImGui::Text("Mesh Bounds:");
+        ImGui::TextDisabled("  Min: (%.0f, %.0f, %.0f)", minX, minY, minZ);
+        ImGui::TextDisabled("  Max: (%.0f, %.0f, %.0f)", maxX, maxY, maxZ);
+        ImGui::TextDisabled("  Span: %.0f x %.0f x %.0f", maxX - minX, maxY - minY, maxZ - minZ);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Text("Global Mesh Actions:");
+
+    if (ImGui::Button("Auto-Flag Obstacles & Crouch...", ImVec2(-1, 26))) {
+        m_analyzerStats = scene.AutoAnalyzeFlags(cmdMgr, false);
+        m_showAnalyzerModal = true;
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Scans all map areas for low clearance, narrow doorways, and step ledges");
+
+    if (ImGui::Button("Optimize Mesh (Merge Coplanar)...", ImVec2(-1, 26))) {
+        m_optimizeStats = scene.OptimizeMesh(cmdMgr, false);
+        m_showOptimizeModal = true;
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Combines adjacent coplanar areas sharing identical height and attributes");
+
+    if (ImGui::Button("Select All Areas [Ctrl+A]", ImVec2(-1, 24))) {
+        scene.SelectAllAreas();
+    }
+
+    bool hasBSP = scene.HasBSP();
+    if (!hasBSP) ImGui::BeginDisabled();
+    if (ImGui::Button("Snap All Areas to Floor", ImVec2(-1, 24))) {
+        scene.SelectAllAreas();
+        scene.BatchSnapToFloor(cmdMgr);
+    }
+    if (!hasBSP) ImGui::EndDisabled();
+
+    if (ImGui::Button("Save NAV Mesh [Ctrl+S]", ImVec2(-1, 26))) {
+        bool saved = false;
+        std::string saveTarget = scene.GetNAVPath();
+        if (!saveTarget.empty()) {
+            saved = scene.SaveNAV();
+        } else {
+            std::string path = FileDialog::SaveFile(FileDialog::kNAVFilter, "nav", "Save Navigation Mesh");
+            if (!path.empty()) {
+                saved = scene.SaveNAV(path);
+                saveTarget = path;
+            }
+        }
+        if (saved) {
+            cmdMgr.MarkSaved();
+            scene.SetModified(false);
+            m_showSaveSuccessModal = true;
+            m_saveSuccessMessage = "Navigation mesh saved successfully:\n" + saveTarget;
+        }
+    }
+
+    // Place Directory Collapsing Header
+    const auto& places = nav.GetPlaceNames();
+    if (!places.empty()) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        if (ImGui::CollapsingHeader("Place Directory", ImGuiTreeNodeFlags_DefaultOpen)) {
+            for (size_t p = 0; p < places.size(); ++p) {
+                ImGui::BulletText("[%zu] %s", p + 1, places[p].c_str());
+            }
+        }
+    }
+}
+
+void EditorUI::RenderBSPGlobalInspector(EditorScene& scene) {
+    const auto& bsp = scene.GetBSP();
+    ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "BSP Map Overview");
+    ImGui::Separator();
+
+    ImGui::Text("Map Name: %s", bsp.GetMapName().c_str());
+    ImGui::Text("Entities: %zu", scene.GetEntityRenderer().GetEntityCount());
+    ImGui::Text("Models:   %d", bsp.GetModelCount());
+    ImGui::Text("Leaves:   %d", bsp.GetLeafCount());
+    ImGui::Text("Planes:   %d", bsp.GetPlaneCount());
+    ImGui::Text("Faces:    %d", bsp.GetFaceCount());
+    ImGui::Text("Textures: %d", bsp.GetTextureCount());
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Text("Quick Actions:");
+    if (ImGui::Button("Auto-Generate NAV [Ctrl+G]", ImVec2(-1, 26))) {
+        m_showGenerateModal = true;
+        m_generateStatusText.clear();
+    }
+    if (ImGui::Button("Batch Generate NAVs...", ImVec2(-1, 26))) {
+        m_showBatchGenerateModal = true;
+    }
+}
+
 void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x, viewport->WorkPos.y + viewport->WorkSize.y - 24.0f));
@@ -1632,9 +1775,61 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
                     bspName, areaCount, grid, snap ? "SNAP" : "FREE", camera.GetPosition().x, camera.GetPosition().y, camera.GetPosition().z);
             }
         }
+
+        // Live FPS Counter right-aligned on status bar
+        float fps = ImGui::GetIO().Framerate;
+        float frameMs = (fps > 0.0f) ? (1000.0f / fps) : 0.0f;
+        char fpsStr[64];
+        std::snprintf(fpsStr, sizeof(fpsStr), "FPS: %.0f (%.1f ms)", fps, frameMs);
+        float fpsWidth = ImGui::CalcTextSize(fpsStr).x + 16.0f;
+        if (ImGui::GetWindowWidth() > fpsWidth + 300.0f) {
+            ImGui::SameLine(ImGui::GetWindowWidth() - fpsWidth);
+            ImVec4 fpsColor = (fps >= 55.0f) ? ImVec4(0.3f, 1.0f, 0.5f, 1.0f)
+                            : (fps >= 30.0f) ? ImVec4(1.0f, 0.85f, 0.2f, 1.0f)
+                            : ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
+            ImGui::TextColored(fpsColor, "%s", fpsStr);
+        }
     }
     ImGui::End();
     ImGui::PopStyleColor();
+}
+
+void EditorUI::RenderStatsOverlay(const EditorScene& scene, const Camera& camera) {
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImVec2 overlayPos(viewport->WorkPos.x + viewport->WorkSize.x - 210.0f, viewport->WorkPos.y + 35.0f);
+    ImGui::SetNextWindowPos(overlayPos, ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.65f);
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                            ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove;
+
+    if (ImGui::Begin("StatsOverlay", nullptr, flags)) {
+        float fps = ImGui::GetIO().Framerate;
+        float ms = (fps > 0.0f) ? (1000.0f / fps) : 0.0f;
+
+        ImVec4 fpsColor = (fps >= 55.0f) ? ImVec4(0.2f, 1.0f, 0.4f, 1.0f)
+                        : (fps >= 30.0f) ? ImVec4(1.0f, 0.85f, 0.2f, 1.0f)
+                        : ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
+
+        ImGui::TextColored(fpsColor, "FPS: %.1f", fps);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(%.1f ms)", ms);
+
+        ImGui::Separator();
+        size_t areaCount = scene.HasNAV() ? scene.GetNAV().GetAreaCount() : 0;
+        size_t ladderCount = scene.HasNAV() ? scene.GetNAV().GetLadders().size() : 0;
+        size_t entCount = scene.GetEntityRenderer().GetEntityCount();
+        ImGui::Text("NavAreas:  %zu", areaCount);
+        ImGui::Text("Ladders:   %zu", ladderCount);
+        ImGui::Text("Entities:  %zu", entCount);
+
+        const Vector3& camPos = camera.GetPosition();
+        ImGui::Separator();
+        ImGui::TextDisabled("Camera: (%.0f, %.0f, %.0f)", camPos.x, camPos.y, camPos.z);
+        ImGui::TextDisabled("Grid: %.0f [%s]", scene.GetGridSize(), scene.GetGridSnap() ? "SNAP" : "FREE");
+    }
+    ImGui::End();
 }
 
 void EditorUI::RenderHelpModal() {

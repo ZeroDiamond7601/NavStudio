@@ -226,11 +226,28 @@ SelectedHandleType ScenePicker::PickAreaHandles(
     const NavArea* selArea = nullptr;
     const EditorEntity* selEnt = nullptr;
 
-    if (scene.HasNAV() && scene.GetSelectedAreaID() != 0) {
-        selArea = scene.GetSelectedArea();
-        if (selArea) {
-            c = selArea->GetCenter();
-            c.z += 4.0f;
+    const auto& selIds = scene.GetSelectedAreaIDs();
+    if (scene.HasNAV() && !selIds.empty()) {
+        if (selIds.size() > 1) {
+            Vector3 cluster(0.0f, 0.0f, 0.0f);
+            size_t validCount = 0;
+            for (uint32_t sid : selIds) {
+                const NavArea* a = scene.GetNAV().GetAreaByID(sid);
+                if (a) {
+                    cluster += a->GetCenter();
+                    validCount++;
+                }
+            }
+            if (validCount > 0) {
+                c = cluster * (1.0f / static_cast<float>(validCount));
+                c.z += 4.0f;
+            }
+        } else {
+            selArea = scene.GetNAV().GetAreaByID(selIds.front());
+            if (selArea) {
+                c = selArea->GetCenter();
+                c.z += 4.0f;
+            }
         }
     } else if (scene.GetSelectedEntityIndex() >= 0) {
         selEnt = scene.GetSelectedEntity();
@@ -239,7 +256,7 @@ SelectedHandleType ScenePicker::PickAreaHandles(
         }
     }
 
-    if (!selArea && !selEnt) return HANDLE_NONE;
+    if (!selArea && selIds.empty() && !selEnt) return HANDLE_NONE;
 
     Matrix4 viewProj = projMatrix * viewMatrix;
     Matrix4 invView = viewMatrix.Inverse();

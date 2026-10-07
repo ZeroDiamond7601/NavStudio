@@ -316,7 +316,16 @@ NavGenerateResult NavGenerator::Generate(
         float sy = std::round(cand.y / options.stepSize) * options.stepSize;
 
         Vector3 groundPos;
-        if (bsp.GetGround(Vector3(sx, sy, cand.z + 18.0f), &groundPos, 500.0f)) {
+        BSPTraceResult groundTr;
+        Vector3 gStart(sx, sy, cand.z + 36.0f);
+        Vector3 gEnd(sx, sy, cand.z - 500.0f);
+        if (bsp.TraceWorld(gStart, gEnd, HULL_POINT, &groundTr) && groundTr.fraction < 1.0f && !groundTr.startsolid && !groundTr.allsolid) {
+            groundPos = groundTr.endpos;
+            if (!nodeMap.FindNode(groundPos, 18.0f)) {
+                NavGenNode* seedNode = nodeMap.CreateNode(groundPos, groundTr.planeNormal);
+                openQueue.push(seedNode);
+            }
+        } else if (bsp.GetGround(Vector3(sx, sy, cand.z + 18.0f), &groundPos, 500.0f, HULL_POINT)) {
             if (!nodeMap.FindNode(groundPos, 18.0f)) {
                 NavGenNode* seedNode = nodeMap.CreateNode(groundPos, Vector3(0, 0, 1));
                 openQueue.push(seedNode);
@@ -357,30 +366,22 @@ NavGenerateResult NavGenerator::Generate(
                 case NAV_DIR_WEST:  targetX -= options.stepSize; break;
             }
 
-            // Determine ceiling height at current node to ensure traceStart doesn't enter an upper floor/ceiling
-            float currCeilZ = curr->pos.z + 120.0f;
-            BSPTraceResult trCurrCeil;
-            if (bsp.TraceWorld(curr->pos + Vector3(0, 0, 2.0f), curr->pos + Vector3(0, 0, 200.0f), HULL_POINT, &trCurrCeil)) {
-                currCeilZ = trCurrCeil.endpos.z;
-            }
+            // Downward floor trace using HULL_POINT for exact floor elevation
+            Vector3 gStart(targetX, targetY, curr->pos.z + options.maxJumpHeight + 4.0f);
+            Vector3 gEnd(targetX, targetY, curr->pos.z - options.maxDrop);
 
-            float traceStartZ = std::min(curr->pos.z + options.maxJumpHeight, currCeilZ - 4.0f);
-            traceStartZ = std::max(traceStartZ, curr->pos.z + 8.0f);
-            Vector3 traceStart(targetX, targetY, traceStartZ);
-
-            Vector3 groundPos;
-            if (!bsp.GetGround(traceStart, &groundPos, options.maxDrop)) {
+            BSPTraceResult groundTr;
+            if (!bsp.TraceWorld(gStart, gEnd, HULL_POINT, &groundTr) || groundTr.fraction >= 1.0f || groundTr.startsolid || groundTr.allsolid) {
                 continue;
             }
 
+            Vector3 groundPos = groundTr.endpos;
             float dz = groundPos.z - curr->pos.z;
             if (dz > options.maxJumpHeight || dz < -options.maxDrop) {
                 continue;
             }
 
-            // Slope check using point trace to get accurate floor normal without ceiling interference
-            BSPTraceResult groundTr;
-            bsp.TraceWorld(groundPos + Vector3(0, 0, 2.0f), groundPos - Vector3(0, 0, 10.0f), HULL_POINT, &groundTr);
+            // Slope check
             if (groundTr.planeNormal.z < options.maxSlopeNormalZ) {
                 continue;
             }
@@ -393,17 +394,19 @@ NavGenerateResult NavGenerator::Generate(
                 continue;
             }
 
-            // Vertical headroom clearance from floor to ceiling
+            // Vertical headroom clearance from floor upward
             BSPTraceResult trHead;
-            bsp.TraceWorld(groundPos + Vector3(0, 0, 2.0f), groundPos + Vector3(0, 0, 200.0f), HULL_POINT, &trHead);
-            float clearance = trHead.endpos.z - groundPos.z;
+            bsp.TraceWorld(groundPos + Vector3(0, 0, 2.0f), groundPos + Vector3(0, 0, options.humanHeight + 10.0f), HULL_POINT, &trHead);
+            float clearance = (trHead.fraction < 1.0f && !trHead.startsolid && !trHead.allsolid)
+                                ? (trHead.endpos.z - groundPos.z)
+                                : (options.humanHeight + 10.0f);
 
-            // Reject if space cannot fit even a crouching player (standard duck height: 36 units)
+            // Reject if space cannot fit even a crouching player
             if (clearance < options.crouchHeight - 2.0f) {
                 continue;
             }
 
-            bool isCrouch = (clearance < options.humanHeight - 8.0f);
+            bool isCrouch = (clearance < options.humanHeight - 6.0f);
 
             // Traversal check from curr to groundPos
             float stepZ = std::max(curr->pos.z, groundPos.z);
@@ -411,10 +414,10 @@ NavGenerateResult NavGenerator::Generate(
 
             // Try standing traversal first if both current and target nodes have standing headroom
             if (!isCrouch && (curr->attributes & NAV_ATTR_CROUCH) == 0) {
-                // Standing hull: HULL_HUMAN is 72 units tall, center is 36 units above feet
+                // Standing hull: center at stepZ + 38.0f (+2 units above floor to avoid floor brush clipping)
                 BSPTraceResult trStand;
-                Vector3 sStart(curr->pos.x, curr->pos.y, stepZ + 36.0f);
-                Vector3 sEnd(groundPos.x, groundPos.y, stepZ + 36.0f);
+                Vector3 sStart(curr->pos.x, curr->pos.y, stepZ + 38.0f);
+                Vector3 sEnd(groundPos.x, groundPos.y, stepZ + 38.0f);
                 bsp.TraceWorld(sStart, sEnd, HULL_HUMAN, &trStand);
                 if (trStand.fraction >= 1.0f && !trStand.startsolid && !trStand.allsolid) {
                     traversalClear = true;
@@ -423,14 +426,24 @@ NavGenerateResult NavGenerator::Generate(
 
             // If standing traversal failed or if low clearance is present, test crouch traversal
             if (!traversalClear && options.generateCrouch && clearance >= options.crouchHeight - 2.0f) {
-                // Crouching hull: HULL_HEAD is 36 units tall, center is 18 units above feet
+                // Crouching hull: center at stepZ + 20.0f (+2 units above floor)
                 BSPTraceResult trCrouch;
-                Vector3 cStart(curr->pos.x, curr->pos.y, stepZ + 18.0f);
-                Vector3 cEnd(groundPos.x, groundPos.y, stepZ + 18.0f);
+                Vector3 cStart(curr->pos.x, curr->pos.y, stepZ + 20.0f);
+                Vector3 cEnd(groundPos.x, groundPos.y, stepZ + 20.0f);
                 bsp.TraceWorld(cStart, cEnd, HULL_HEAD, &trCrouch);
                 if (trCrouch.fraction >= 1.0f && !trCrouch.startsolid && !trCrouch.allsolid) {
                     traversalClear = true;
                     isCrouch = true;
+                }
+            }
+
+            // Fallback: If hull swept trace clipped a minor step or doorway bevel, check feet and waist clearance rays
+            if (!traversalClear) {
+                BSPTraceResult trFeet, trWaist;
+                bsp.TraceWorld(curr->pos + Vector3(0, 0, 18.0f), groundPos + Vector3(0, 0, 18.0f), HULL_POINT, &trFeet);
+                bsp.TraceWorld(curr->pos + Vector3(0, 0, 38.0f), groundPos + Vector3(0, 0, 38.0f), HULL_POINT, &trWaist);
+                if (trFeet.fraction >= 1.0f && trWaist.fraction >= 1.0f && !trFeet.startsolid && !trWaist.startsolid) {
+                    traversalClear = true;
                 }
             }
 
@@ -788,8 +801,8 @@ size_t NavGenerator::FloodFillFromSeed(
 
             if (!isCrouch && (curr->attributes & NAV_ATTR_CROUCH) == 0) {
                 BSPTraceResult trStand;
-                Vector3 sStart(curr->pos.x, curr->pos.y, stepZ + 36.0f);
-                Vector3 sEnd(candGround.x, candGround.y, stepZ + 36.0f);
+                Vector3 sStart(curr->pos.x, curr->pos.y, stepZ + 38.0f);
+                Vector3 sEnd(candGround.x, candGround.y, stepZ + 38.0f);
                 bsp.TraceWorld(sStart, sEnd, HULL_HUMAN, &trStand);
                 if (trStand.fraction >= 1.0f && !trStand.startsolid && !trStand.allsolid) {
                     traversalClear = true;
@@ -798,12 +811,22 @@ size_t NavGenerator::FloodFillFromSeed(
 
             if (!traversalClear && options.generateCrouch && clearance >= options.crouchHeight - 2.0f) {
                 BSPTraceResult trCrouch;
-                Vector3 cSt(curr->pos.x, curr->pos.y, stepZ + 18.0f);
-                Vector3 cEn(candGround.x, candGround.y, stepZ + 18.0f);
+                Vector3 cSt(curr->pos.x, curr->pos.y, stepZ + 20.0f);
+                Vector3 cEn(candGround.x, candGround.y, stepZ + 20.0f);
                 bsp.TraceWorld(cSt, cEn, HULL_HEAD, &trCrouch);
                 if (trCrouch.fraction >= 1.0f && !trCrouch.startsolid && !trCrouch.allsolid) {
                     traversalClear = true;
                     isCrouch = true;
+                }
+            }
+
+            // Fallback: Check feet and waist clearance rays
+            if (!traversalClear) {
+                BSPTraceResult trFeet, trWaist;
+                bsp.TraceWorld(curr->pos + Vector3(0, 0, 18.0f), candGround + Vector3(0, 0, 18.0f), HULL_POINT, &trFeet);
+                bsp.TraceWorld(curr->pos + Vector3(0, 0, 38.0f), candGround + Vector3(0, 0, 38.0f), HULL_POINT, &trWaist);
+                if (trFeet.fraction >= 1.0f && trWaist.fraction >= 1.0f && !trFeet.startsolid && !trWaist.startsolid) {
+                    traversalClear = true;
                 }
             }
 

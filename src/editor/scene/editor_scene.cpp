@@ -274,6 +274,14 @@ bool EditorScene::LoadNAV(const std::string& navPath) {
 
 bool EditorScene::SaveNAV(const std::string& navPath) {
     std::string path = navPath.empty() ? m_navPath : navPath;
+    if (path.empty() && !m_bspPath.empty()) {
+        size_t dotPos = m_bspPath.find_last_of('.');
+        if (dotPos != std::string::npos) {
+            path = m_bspPath.substr(0, dotPos) + ".nav";
+        } else {
+            path = m_bspPath + ".nav";
+        }
+    }
     if (path.empty()) {
         std::fprintf(stderr, "[EditorScene] Cannot save NAV: no target path specified\n");
         return false;
@@ -529,6 +537,15 @@ void EditorScene::UpdateAsyncLoading(float deltaTime) {
                 m_entityRenderer.BuildFromBSP(*m_bsp);
                 m_selectedEntityIndex = -1;
                 AddRecentFile(m_bspPath);
+
+                if (m_navPath.empty()) {
+                    size_t dotPos = m_bspPath.find_last_of('.');
+                    if (dotPos != std::string::npos) {
+                        m_navPath = m_bspPath.substr(0, dotPos) + ".nav";
+                    } else {
+                        m_navPath = m_bspPath + ".nav";
+                    }
+                }
             }
 
             if (m_loadCtx.loadedNav) {
@@ -631,13 +648,25 @@ void EditorScene::SetSelectedHandle(SelectedHandleType h) {
 }
 
 NavArea* EditorScene::GetSelectedArea() {
-    if (m_selectedAreaId == 0 || !m_nav || !m_nav->IsLoaded()) return nullptr;
+    if (!m_nav || !m_nav->IsLoaded()) return nullptr;
+    if (m_selectedAreaId == 0) {
+        if (!m_selectedAreaIds.empty()) {
+            m_selectedAreaId = m_selectedAreaIds.front();
+        } else {
+            return nullptr;
+        }
+    }
     return m_nav->GetAreaByID(m_selectedAreaId);
 }
 
 const NavArea* EditorScene::GetSelectedArea() const {
-    if (m_selectedAreaId == 0 || !m_nav || !m_nav->IsLoaded()) return nullptr;
-    return m_nav->GetAreaByID(m_selectedAreaId);
+    if (!m_nav || !m_nav->IsLoaded()) return nullptr;
+    uint32_t id = m_selectedAreaId;
+    if (id == 0 && !m_selectedAreaIds.empty()) {
+        id = m_selectedAreaIds.front();
+    }
+    if (id == 0) return nullptr;
+    return m_nav->GetAreaByID(id);
 }
 
 void EditorScene::RebuildNavRenderer() {

@@ -154,37 +154,7 @@ static int HandleBatch(int argc, char* argv[]) {
     return (res.failed > 0) ? 1 : 0;
 }
 
-int main(int argc, char* argv[]) {
-    std::cout << "=========================================================\n";
-    std::cout << " NavMesh Core - CS 1.6 BSP & NAV Verification & Generator\n";
-    std::cout << "=========================================================\n\n";
-
-    if (argc < 2 || std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h" ||
-        std::string(argv[1]) == "-v" || std::string(argv[1]) == "--version") {
-        PrintHelp();
-        return 0;
-    }
-
-    std::string firstArg = argv[1];
-    if (firstArg == "generate" || firstArg == "-g") {
-        return HandleGenerate(argc, argv);
-    }
-    if (firstArg == "batch" || firstArg == "mass" || firstArg == "generate-all") {
-        return HandleBatch(argc, argv);
-    }
-
-    std::string bspPath = "";
-    std::string navPath = "";
-
-    for (int i = 1; i < argc; i++) {
-        std::string arg = argv[i];
-        if (arg.size() > 4) {
-            std::string ext = arg.substr(arg.size() - 4);
-            if (ext == ".bsp") bspPath = arg;
-            else if (ext == ".nav") navPath = arg;
-        }
-    }
-
+static int HandleInspect(std::string bspPath, std::string navPath) {
     if (!bspPath.empty() && navPath.empty()) {
         navPath = bspPath.substr(0, bspPath.size() - 4) + ".nav";
     } else if (!navPath.empty() && bspPath.empty()) {
@@ -326,3 +296,99 @@ int main(int argc, char* argv[]) {
     std::cout << "\n[COMPLETED] Operation finished.\n";
     return 0;
 }
+
+int main(int argc, char* argv[]) {
+    std::cout << "=========================================================\n";
+    std::cout << " NavStudio CLI v1.4.0 - CS 1.6 BSP & NAV Tool\n";
+    std::cout << "=========================================================\n\n";
+
+    if (argc < 2) {
+        // Interactive Console Session (keeps console open when double-clicked in Windows Explorer)
+        std::cout << "Interactive Mode (Console opened with no arguments)\n\n";
+        std::cout << "Select an action:\n";
+        std::cout << "  [1] Generate Navigation Mesh for a BSP map\n";
+        std::cout << "  [2] Batch Generate Navigation Meshes for a directory\n";
+        std::cout << "  [3] Inspect & Verify a BSP or NAV file\n";
+        std::cout << "  [4] View Help & Command-Line Usage\n";
+        std::cout << "  [0] Exit\n\n";
+        std::cout << "Enter choice [0-4]: ";
+
+        std::string choice;
+        if (!std::getline(std::cin, choice) || choice == "0" || choice == "q" || choice == "exit") {
+            return 0;
+        }
+
+        auto CleanPath = [](std::string p) {
+            while (!p.empty() && (p.front() == ' ' || p.front() == '"' || p.front() == '\'')) p.erase(p.begin());
+            while (!p.empty() && (p.back() == ' ' || p.back() == '"' || p.back() == '\'')) p.pop_back();
+            return p;
+        };
+
+        if (choice == "1") {
+            std::cout << "\nEnter path to .bsp file (or drag-and-drop file here): ";
+            std::string path;
+            std::getline(std::cin, path);
+            path = CleanPath(path);
+            if (!path.empty()) {
+                char* customArgv[] = { argv[0], (char*)"generate", (char*)path.c_str() };
+                HandleGenerate(3, customArgv);
+            }
+        } else if (choice == "2") {
+            std::cout << "\nEnter directory path containing .bsp files: ";
+            std::string dirPath;
+            std::getline(std::cin, dirPath);
+            dirPath = CleanPath(dirPath);
+            if (!dirPath.empty()) {
+                char* customArgv[] = { argv[0], (char*)"batch", (char*)dirPath.c_str() };
+                HandleBatch(3, customArgv);
+            }
+        } else if (choice == "3") {
+            std::cout << "\nEnter path to .bsp or .nav file: ";
+            std::string path;
+            std::getline(std::cin, path);
+            path = CleanPath(path);
+            if (!path.empty()) {
+                std::string bspP = (path.size() > 4 && path.substr(path.size() - 4) == ".bsp") ? path : "";
+                std::string navP = (path.size() > 4 && path.substr(path.size() - 4) == ".nav") ? path : "";
+                HandleInspect(bspP, navP);
+            }
+        } else {
+            PrintHelp();
+        }
+
+        std::cout << "\nPress Enter to exit...";
+        std::string dummy;
+        std::getline(std::cin, dummy);
+        return 0;
+    }
+
+    if (std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h" ||
+        std::string(argv[1]) == "-v" || std::string(argv[1]) == "--version") {
+        PrintHelp();
+        return 0;
+    }
+
+    std::string firstArg = argv[1];
+    if (firstArg == "generate" || firstArg == "-g") {
+        return HandleGenerate(argc, argv);
+    }
+    if (firstArg == "batch" || firstArg == "mass" || firstArg == "generate-all") {
+        return HandleBatch(argc, argv);
+    }
+
+    std::string bspPath = "";
+    std::string navPath = "";
+
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg.size() > 4) {
+            std::string ext = arg.substr(arg.size() - 4);
+            if (ext == ".bsp") bspPath = arg;
+            else if (ext == ".nav") navPath = arg;
+        }
+    }
+
+    return HandleInspect(bspPath, navPath);
+}
+
+
