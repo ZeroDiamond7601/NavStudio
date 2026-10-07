@@ -5,7 +5,13 @@
 #include "editor/scene/editor_scene.h"
 #include "editor/scene/editor_handles.h"
 #include "nav/nav_area.h"
+#include "nav/nav_generator.h"
 #include <vector>
+#include <algorithm>
+#include <cmath>
+#include <string>
+#include <utility>
+#include <memory>
 
 // Command: Change Area Attribute Flags (Crouch, Jump, Precise, etc.)
 class CmdSetAreaAttributes : public IEditCommand {
@@ -1259,6 +1265,387 @@ private:
     Vector3 m_seedPos;
     NavGenerateOptions m_options;
     std::vector<uint32_t> m_createdAreaIds;
+};
+
+// Command: Batch Modify Attributes from Automated Analyzer
+class CmdAnalyzeAreaFlags : public IEditCommand {
+public:
+    CmdAnalyzeAreaFlags(EditorScene* scene,
+                        const std::vector<std::pair<uint32_t, uint8_t>>& oldFlags,
+                        const std::vector<std::pair<uint32_t, uint8_t>>& newFlags)
+        : m_scene(scene), m_oldFlags(oldFlags), m_newFlags(newFlags) {}
+
+    void Execute() override {
+        for (const auto& item : m_newFlags) {
+            NavArea* a = m_scene->GetNAV().GetAreaByID(item.first);
+            if (a) a->SetAttributes(item.second);
+        }
+        m_scene->SetModified(true);
+        m_scene->RebuildNavRenderer();
+    }
+
+    void Undo() override {
+        for (const auto& item : m_oldFlags) {
+            NavArea* a = m_scene->GetNAV().GetAreaByID(item.first);
+            if (a) a->SetAttributes(item.second);
+        }
+        m_scene->SetModified(true);
+        m_scene->RebuildNavRenderer();
+    }
+
+    const char* GetName() const override { return "Auto-Analyze Area Flags"; }
+
+private:
+    EditorScene* m_scene;
+    std::vector<std::pair<uint32_t, uint8_t>> m_oldFlags;
+    std::vector<std::pair<uint32_t, uint8_t>> m_newFlags;
+};
+
+// Command: Split / Slice Area along Arbitrary Coordinate (Knife / Cutter Tool K)
+class CmdSplitAreaKnife : public IEditCommand {
+public:
+    CmdSplitAreaKnife(EditorScene* scene, uint32_t areaId, float splitCoord, bool splitAlongY)
+        : m_scene(scene), m_areaId(areaId), m_splitCoord(splitCoord), m_splitAlongY(splitAlongY),
+          m_createdId(0), m_valid(false) {
+        NavArea* area = m_scene->GetNAV().GetAreaByID(areaId);
+        if (!area) return;
+
+        m_oldExt = area->GetExtent();
+        m_neZ = area->GetNEZ();
+        m_swZ = area->GetSWZ();
+        m_attributes = area->GetAttributes();
+        m_place = area->GetPlace();
+        m_placeName = area->GetPlaceName();
+
+        for (int d = 0; d < 4; ++d) {
+            for (const auto& conn : area->GetAdjacentList(static_cast<NavDirType>(d))) {
+                if (conn.area) {
+                    m_outgoing.push_back({ conn.area->GetID(), static_cast<NavDirType>(d) });
+                }
+            }
+        }
+        for (const NavArea* other : m_scene->GetNAV().GetAreas()) {
+            if (other && other->GetID() != areaId) {
+                for (int d = 0; d < 4; ++d) {
+                    if (other->IsConnected(area, d)) {
+                        m_incoming.push_back({ other->GetID(), static_cast<NavDirType>(d) });
+                    }
+                }
+            }
+        }
+        m_valid = true;
+    }
+
+    void Execute() override {
+        if (!m_valid) return;
+        NavArea* area1 = m_scene->GetNAV().GetAreaByID(m_areaId);
+        if (!area1) return;
+
+        NavExtent ext1 = m_oldExt;
+        NavExtent ext2 = m_oldExt;
+        float neZ1 = 0.0f, swZ1 = 0.0f;
+        float neZ2 = 0.0f, swZ2 = 0.0f;
+
+        float zNW = m_oldExt.lo.z;
+        float zNE = m_neZ;
+        float zSW = m_swZ;
+        float zSE = m_oldExt.hi.z;
+
+        if (m_splitAlongY) {
+            float dy = m_oldExt.hi.y - m_oldExt.lo.y;
+            float s = (dy > 0.001f) ? (m_splitCoord - m_oldExt.lo.y) / dy : 0.5f;
+            s = std::max(0.01f, std::min(0.99f, s));
+
+            float cutWestZ = (1.0f - s) * zNW + s * zSW;
+            float cutEastZ = (1.0f - s) * zNE + s * zSE;
+
+            ext1.hi.y = m_oldExt.lo.y + s * dy;
+            ext2.lo.y = ext1.hi.y;
+
+            ext1.lo.z = zNW;
+            ext1.hi.z = cutEastZ;
+            neZ1 = zNE;
+            swZ1 = cutWestZ;
+
+            ext2.lo.z = cutWestZ;
+            ext2.hi.z = zSE;
+            neZ2 = cutEastZ;
+            swZ2 = zSW;
+        } else {
+            float dx = m_oldExt.hi.x - m_oldExt.lo.x;
+            float t = (dx > 0.001f) ? (m_splitCoord - m_oldExt.lo.x) / dx : 0.5f;
+            t = std::max(0.01f, std::min(0.99f, t));
+
+            float cutNorthZ = (1.0f - t) * zNW + t * zNE;
+            float cutSouthZ = (1.0f - t) * zSW + t * zSE;
+
+            ext1.hi.x = m_oldExt.lo.x + t * dx;
+            ext2.lo.x = ext1.hi.x;
+
+            ext1.lo.z = zNW;
+            ext1.hi.z = cutSouthZ;
+            neZ1 = cutNorthZ;
+            swZ1 = zSW;
+
+            ext2.lo.z = cutNorthZ;
+            ext2.hi.z = zSE;
+            neZ2 = zNE;
+            swZ2 = cutSouthZ;
+        }
+
+        m_scene->GetNAV().GetGrid().RemoveArea(area1);
+        area1->SetExtent(ext1);
+        area1->SetCornerHeights(neZ1, swZ1);
+        m_scene->GetNAV().GetGrid().AddArea(area1);
+
+        NavArea* area2 = m_scene->GetNAV().CreateArea(ext2, neZ2, swZ2);
+        if (area2) {
+            m_createdId = area2->GetID();
+            area2->SetAttributes(m_attributes);
+            area2->SetPlace(m_place);
+            area2->SetPlaceName(m_placeName);
+
+            if (m_splitAlongY) {
+                m_scene->GetNAV().ConnectAreas(m_areaId, m_createdId, true, NAV_DIR_SOUTH);
+            } else {
+                m_scene->GetNAV().ConnectAreas(m_areaId, m_createdId, true, NAV_DIR_EAST);
+            }
+
+            for (const auto& out : m_outgoing) {
+                m_scene->GetNAV().ConnectAreas(m_areaId, out.targetId, false, out.dir);
+                m_scene->GetNAV().ConnectAreas(m_createdId, out.targetId, false, out.dir);
+            }
+            for (const auto& in : m_incoming) {
+                m_scene->GetNAV().ConnectAreas(in.targetId, m_areaId, false, in.dir);
+                m_scene->GetNAV().ConnectAreas(in.targetId, m_createdId, false, in.dir);
+            }
+
+            m_scene->SelectArea(m_areaId);
+            m_scene->SetModified(true);
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    void Undo() override {
+        if (!m_valid || m_createdId == 0) return;
+        m_scene->GetNAV().RemoveArea(m_createdId);
+
+        NavArea* area1 = m_scene->GetNAV().GetAreaByID(m_areaId);
+        if (area1) {
+            m_scene->GetNAV().GetGrid().RemoveArea(area1);
+            area1->SetExtent(m_oldExt);
+            area1->SetCornerHeights(m_neZ, m_swZ);
+            m_scene->GetNAV().GetGrid().AddArea(area1);
+
+            for (const auto& out : m_outgoing) {
+                m_scene->GetNAV().ConnectAreas(m_areaId, out.targetId, false, out.dir);
+            }
+            for (const auto& in : m_incoming) {
+                m_scene->GetNAV().ConnectAreas(in.targetId, m_areaId, false, in.dir);
+            }
+            m_scene->SelectArea(m_areaId);
+            m_scene->SetModified(true);
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    uint32_t GetCreatedID() const { return m_createdId; }
+    const char* GetName() const override { return "Split Area (Knife)"; }
+
+private:
+    struct SavedConn { uint32_t targetId; NavDirType dir; };
+    EditorScene* m_scene;
+    uint32_t m_areaId;
+    float m_splitCoord;
+    bool m_splitAlongY;
+    uint32_t m_createdId;
+    NavExtent m_oldExt;
+    float m_neZ{0.0f}, m_swZ{0.0f};
+    uint8_t m_attributes{0};
+    uint16_t m_place{0};
+    std::string m_placeName;
+    std::vector<SavedConn> m_outgoing;
+    std::vector<SavedConn> m_incoming;
+    bool m_valid{false};
+};
+
+// Command: Batch Extrude Multiple Areas
+class CmdBatchExtrude : public IEditCommand {
+public:
+    CmdBatchExtrude(EditorScene* scene, const std::vector<uint32_t>& srcIds, SelectedHandleType edgeHandle, float length = 64.0f)
+        : m_scene(scene), m_srcIds(srcIds), m_edge(edgeHandle), m_length(length) {}
+
+    void Execute() override {
+        m_createdIds.clear();
+        for (uint32_t srcId : m_srcIds) {
+            NavArea* src = m_scene->GetNAV().GetAreaByID(srcId);
+            if (!src) continue;
+
+            NavExtent srcExt = src->GetExtent();
+            NavExtent newExt;
+            NavDirType dirFromSrc = NAV_DIR_NORTH;
+
+            if (m_edge == HANDLE_EDGE_NORTH) {
+                newExt.lo = Vector3(srcExt.lo.x, srcExt.hi.y, srcExt.lo.z);
+                newExt.hi = Vector3(srcExt.hi.x, srcExt.hi.y + m_length, srcExt.hi.z);
+                dirFromSrc = NAV_DIR_NORTH;
+            } else if (m_edge == HANDLE_EDGE_SOUTH) {
+                newExt.lo = Vector3(srcExt.lo.x, srcExt.lo.y - m_length, srcExt.lo.z);
+                newExt.hi = Vector3(srcExt.hi.x, srcExt.lo.y, srcExt.hi.z);
+                dirFromSrc = NAV_DIR_SOUTH;
+            } else if (m_edge == HANDLE_EDGE_EAST) {
+                newExt.lo = Vector3(srcExt.hi.x, srcExt.lo.y, srcExt.lo.z);
+                newExt.hi = Vector3(srcExt.hi.x + m_length, srcExt.hi.y, srcExt.hi.z);
+                dirFromSrc = NAV_DIR_EAST;
+            } else if (m_edge == HANDLE_EDGE_WEST) {
+                newExt.lo = Vector3(srcExt.lo.x - m_length, srcExt.lo.y, srcExt.lo.z);
+                newExt.hi = Vector3(srcExt.lo.x, srcExt.hi.y, srcExt.hi.z);
+                dirFromSrc = NAV_DIR_WEST;
+            } else {
+                newExt.lo = Vector3(srcExt.lo.x, srcExt.hi.y, srcExt.lo.z);
+                newExt.hi = Vector3(srcExt.hi.x, srcExt.hi.y + m_length, srcExt.hi.z);
+                dirFromSrc = NAV_DIR_NORTH;
+            }
+
+            NavArea* created = m_scene->GetNAV().CreateArea(newExt, src->GetNEZ(), src->GetSWZ());
+            if (created) {
+                uint32_t cId = created->GetID();
+                m_createdIds.push_back(cId);
+                created->SetAttributes(src->GetAttributes());
+                created->SetPlace(src->GetPlace());
+                created->SetPlaceName(src->GetPlaceName());
+
+                m_scene->GetNAV().ConnectAreas(srcId, cId, true, dirFromSrc);
+            }
+        }
+
+        if (!m_createdIds.empty()) {
+            m_scene->ClearSelection();
+            for (uint32_t cid : m_createdIds) {
+                m_scene->SelectArea(cid, true, false);
+            }
+            m_scene->SetModified(true);
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    void Undo() override {
+        for (uint32_t cid : m_createdIds) {
+            m_scene->GetNAV().RemoveArea(cid);
+        }
+        m_createdIds.clear();
+        m_scene->ClearSelection();
+        for (uint32_t sid : m_srcIds) {
+            m_scene->SelectArea(sid, true, false);
+        }
+        m_scene->SetModified(true);
+        m_scene->RebuildNavRenderer();
+    }
+
+    const char* GetName() const override { return "Batch Extrude Areas"; }
+
+private:
+    EditorScene* m_scene;
+    std::vector<uint32_t> m_srcIds;
+    SelectedHandleType m_edge;
+    float m_length;
+    std::vector<uint32_t> m_createdIds;
+};
+
+// Record for coplanar area simplification
+struct OptimizeMergeRecord {
+    uint32_t keepId{0};
+    uint32_t removeId{0};
+    NavExtent oldExtKeep;
+    float oldNeZKeep{0.0f};
+    float oldSwZKeep{0.0f};
+    NavExtent oldExtRemove;
+    float oldNeZRemove{0.0f};
+    float oldSwZRemove{0.0f};
+    uint8_t removeAttr{0};
+    uint16_t removePlace{0};
+    std::string removePlaceName;
+    NavExtent mergedExt;
+    float mergedNeZ{0.0f};
+    float mergedSwZ{0.0f};
+
+    struct SavedConn { uint32_t targetId; NavDirType dir; };
+    std::vector<SavedConn> removeOutgoing;
+    std::vector<SavedConn> removeIncoming;
+};
+
+// Command: Batch Optimize Navigation Mesh (Coplanar Area Simplification)
+class CmdOptimizeMesh : public IEditCommand {
+public:
+    CmdOptimizeMesh(EditorScene* scene, std::vector<OptimizeMergeRecord> records)
+        : m_scene(scene), m_records(std::move(records)) {}
+
+    void Execute() override {
+        for (const auto& rec : m_records) {
+            NavArea* keep = m_scene->GetNAV().GetAreaByID(rec.keepId);
+            if (!keep) continue;
+
+            m_scene->GetNAV().GetGrid().RemoveArea(keep);
+            keep->SetExtent(rec.mergedExt);
+            keep->SetCornerHeights(rec.mergedNeZ, rec.mergedSwZ);
+            m_scene->GetNAV().GetGrid().AddArea(keep);
+
+            m_scene->GetNAV().RemoveArea(rec.removeId);
+
+            for (const auto& out : rec.removeOutgoing) {
+                if (out.targetId != rec.keepId && out.targetId != rec.removeId) {
+                    m_scene->GetNAV().ConnectAreas(rec.keepId, out.targetId, false, out.dir);
+                }
+            }
+            for (const auto& in : rec.removeIncoming) {
+                if (in.targetId != rec.keepId && in.targetId != rec.removeId) {
+                    m_scene->GetNAV().ConnectAreas(in.targetId, rec.keepId, false, in.dir);
+                }
+            }
+        }
+        m_scene->SetModified(true);
+        m_scene->RebuildNavRenderer();
+    }
+
+    void Undo() override {
+        for (auto it = m_records.rbegin(); it != m_records.rend(); ++it) {
+            const auto& rec = *it;
+            NavArea* keep = m_scene->GetNAV().GetAreaByID(rec.keepId);
+            if (keep) {
+                m_scene->GetNAV().GetGrid().RemoveArea(keep);
+                keep->SetExtent(rec.oldExtKeep);
+                keep->SetCornerHeights(rec.oldNeZKeep, rec.oldSwZKeep);
+                m_scene->GetNAV().GetGrid().AddArea(keep);
+            }
+
+            NavArea* recreated = m_scene->GetNAV().CreateArea(rec.oldExtRemove, rec.oldNeZRemove, rec.oldSwZRemove);
+            if (recreated) {
+                m_scene->GetNAV().GetGrid().RemoveArea(recreated);
+                recreated->SetID(rec.removeId);
+                m_scene->GetNAV().GetGrid().AddArea(recreated);
+
+                recreated->SetAttributes(rec.removeAttr);
+                recreated->SetPlace(rec.removePlace);
+                recreated->SetPlaceName(rec.removePlaceName);
+
+                for (const auto& out : rec.removeOutgoing) {
+                    m_scene->GetNAV().ConnectAreas(rec.removeId, out.targetId, false, out.dir);
+                }
+                for (const auto& in : rec.removeIncoming) {
+                    m_scene->GetNAV().ConnectAreas(in.targetId, rec.removeId, false, in.dir);
+                }
+            }
+        }
+        m_scene->SetModified(true);
+        m_scene->RebuildNavRenderer();
+    }
+
+    size_t GetMergedCount() const { return m_records.size(); }
+    const char* GetName() const override { return "Optimize Mesh (Merge Coplanar Areas)"; }
+
+private:
+    EditorScene* m_scene;
+    std::vector<OptimizeMergeRecord> m_records;
 };
 
 #endif // NAV_COMMANDS_H

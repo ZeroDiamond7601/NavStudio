@@ -710,13 +710,29 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
 
     // 3D Transform Gizmo (Blender / Hammer style cones, rings, boxes)
     SelectedHandleType activeHandle = m_isDraggingHandle ? m_draggedHandle : m_selectedHandle;
-    if (m_selectedAreaId != 0 && m_nav && m_nav->IsLoaded()) {
-        const NavArea* sel = m_nav->GetAreaByID(m_selectedAreaId);
-        if (sel) {
-            Vector3 center = sel->GetCenter();
-            center.z += 4.0f;
-            m_gizmoRenderer.Render(lineShader, mvp, center, camPos, m_gizmoMode, m_hoveredHandle, activeHandle);
+    if (m_nav && m_nav->IsLoaded() && (!m_selectedAreaIds.empty() || m_selectedAreaId != 0)) {
+        Vector3 center(0.0f, 0.0f, 0.0f);
+        if (m_selectedAreaIds.size() > 1) {
+            float count = 0.0f;
+            for (uint32_t id : m_selectedAreaIds) {
+                const NavArea* a = m_nav->GetAreaByID(id);
+                if (a) {
+                    center += a->GetCenter();
+                    count += 1.0f;
+                }
+            }
+            if (count > 0.0f) {
+                center *= (1.0f / count);
+            }
+        } else {
+            uint32_t aid = (m_selectedAreaId != 0) ? m_selectedAreaId : m_selectedAreaIds[0];
+            const NavArea* sel = m_nav->GetAreaByID(aid);
+            if (sel) {
+                center = sel->GetCenter();
+            }
         }
+        center.z += 4.0f;
+        m_gizmoRenderer.Render(lineShader, mvp, center, camPos, m_gizmoMode, m_hoveredHandle, activeHandle);
     } else if (m_selectedEntityIndex >= 0 && m_entityRenderer.IsLoaded()) {
         const EditorEntity* selEnt = m_entityRenderer.GetEntity(m_selectedEntityIndex);
         if (selEnt) {
@@ -795,6 +811,23 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
                                           m_drawAreaNwZ, m_drawAreaNeZ, m_drawAreaSeZ, m_drawAreaSwZ,
                                           0.0f, 0.9f, 1.0f, 1.0f);
     }
+
+    // Knife Tool Mode Slicing Guideline Preview
+    if (m_isKnifeMode && m_knifeHoverAreaId != 0 && m_nav && m_nav->IsLoaded()) {
+        const NavArea* knifeArea = m_nav->GetAreaByID(m_knifeHoverAreaId);
+        if (knifeArea) {
+            const NavExtent& ext = knifeArea->GetExtent();
+            if (m_knifeSplitAlongY) {
+                Vector3 p0(ext.lo.x, m_knifeSplitCoord, knifeArea->GetZ(ext.lo.x, m_knifeSplitCoord) + 1.5f);
+                Vector3 p1(ext.hi.x, m_knifeSplitCoord, knifeArea->GetZ(ext.hi.x, m_knifeSplitCoord) + 1.5f);
+                m_gizmoRenderer.RenderLineSegment(lineShader, mvp, p0, p1, 1.0f, 0.45f, 0.1f, 1.0f, 4.0f);
+            } else {
+                Vector3 p0(m_knifeSplitCoord, ext.lo.y, knifeArea->GetZ(m_knifeSplitCoord, ext.lo.y) + 1.5f);
+                Vector3 p1(m_knifeSplitCoord, ext.hi.y, knifeArea->GetZ(m_knifeSplitCoord, ext.hi.y) + 1.5f);
+                m_gizmoRenderer.RenderLineSegment(lineShader, mvp, p0, p1, 1.0f, 0.45f, 0.1f, 1.0f, 4.0f);
+            }
+        }
+    }
 }
 
 void EditorScene::StartDragHandle(SelectedHandleType handle, float screenX, float screenY, const Ray& ray) {
@@ -808,7 +841,33 @@ void EditorScene::StartDragHandle(SelectedHandleType handle, float screenX, floa
     m_dragStartScreenX = screenX;
     m_dragStartScreenY = screenY;
 
-    if (area) {
+    m_multiDragStates.clear();
+    if (m_selectedAreaIds.size() > 1 && m_nav && m_nav->IsLoaded()) {
+        Vector3 sumCenter(0.0f, 0.0f, 0.0f);
+        float count = 0.0f;
+        for (uint32_t aid : m_selectedAreaIds) {
+            NavArea* a = m_nav->GetAreaByID(aid);
+            if (a) {
+                MultiDragState s;
+                s.areaId = aid;
+                s.startExtent = a->GetExtent();
+                s.startNeZ = a->GetNEZ();
+                s.startSwZ = a->GetSWZ();
+                m_multiDragStates.push_back(s);
+                sumCenter += a->GetCenter();
+                count += 1.0f;
+            }
+        }
+        if (count > 0.0f) {
+            m_dragStartCenter = sumCenter * (1.0f / count);
+            m_dragStartCenter.z += 4.0f;
+        }
+        if (area) {
+            m_dragStartExtent = area->GetExtent();
+            m_dragStartNeZ = area->GetNEZ();
+            m_dragStartSwZ = area->GetSWZ();
+        }
+    } else if (area) {
         m_dragStartExtent = area->GetExtent();
         m_dragStartNeZ = area->GetNEZ();
         m_dragStartSwZ = area->GetSWZ();
@@ -926,7 +985,18 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
         float tCur = 0.0f;
         if (ProjectRayToAxis(ray, m_dragStartCenter, Vector3(1.0f, 0.0f, 0.0f), tCur)) {
             float deltaX = tCur - m_dragStartAxisT;
-            if (area) {
+            if (m_multiDragStates.size() > 1 && m_nav && m_nav->IsLoaded()) {
+                float shiftX = SnapValue(deltaX);
+                for (const auto& s : m_multiDragStates) {
+                    NavArea* a = m_nav->GetAreaByID(s.areaId);
+                    if (!a) continue;
+                    NavExtent nExt = s.startExtent;
+                    nExt.lo.x += shiftX; nExt.hi.x += shiftX;
+                    m_nav->GetGrid().RemoveArea(a);
+                    a->SetExtent(nExt);
+                    m_nav->GetGrid().AddArea(a);
+                }
+            } else if (area) {
                 float origCenterX = (m_dragStartExtent.lo.x + m_dragStartExtent.hi.x) * 0.5f;
                 float targetCenterX = SnapValue(origCenterX + deltaX);
                 float shiftX = targetCenterX - origCenterX;
@@ -945,7 +1015,18 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
         float tCur = 0.0f;
         if (ProjectRayToAxis(ray, m_dragStartCenter, Vector3(0.0f, 1.0f, 0.0f), tCur)) {
             float deltaYAxis = tCur - m_dragStartAxisT;
-            if (area) {
+            if (m_multiDragStates.size() > 1 && m_nav && m_nav->IsLoaded()) {
+                float shiftY = SnapValue(deltaYAxis);
+                for (const auto& s : m_multiDragStates) {
+                    NavArea* a = m_nav->GetAreaByID(s.areaId);
+                    if (!a) continue;
+                    NavExtent nExt = s.startExtent;
+                    nExt.lo.y += shiftY; nExt.hi.y += shiftY;
+                    m_nav->GetGrid().RemoveArea(a);
+                    a->SetExtent(nExt);
+                    m_nav->GetGrid().AddArea(a);
+                }
+            } else if (area) {
                 float origCenterY = (m_dragStartExtent.lo.y + m_dragStartExtent.hi.y) * 0.5f;
                 float targetCenterY = SnapValue(origCenterY + deltaYAxis);
                 float shiftY = targetCenterY - origCenterY;
@@ -964,7 +1045,19 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
         float tCur = 0.0f;
         if (ProjectRayToAxis(ray, m_dragStartCenter, Vector3(0.0f, 0.0f, 1.0f), tCur)) {
             float deltaZ = tCur - m_dragStartAxisT;
-            if (area) {
+            if (m_multiDragStates.size() > 1 && m_nav && m_nav->IsLoaded()) {
+                float shiftZ = SnapValue(deltaZ);
+                for (const auto& s : m_multiDragStates) {
+                    NavArea* a = m_nav->GetAreaByID(s.areaId);
+                    if (!a) continue;
+                    NavExtent nExt = s.startExtent;
+                    nExt.lo.z += shiftZ; nExt.hi.z += shiftZ;
+                    m_nav->GetGrid().RemoveArea(a);
+                    a->SetExtent(nExt);
+                    a->SetCornerHeights(s.startNeZ + shiftZ, s.startSwZ + shiftZ);
+                    m_nav->GetGrid().AddArea(a);
+                }
+            } else if (area) {
                 float origZ = (m_dragStartExtent.lo.z + m_dragStartExtent.hi.z + m_dragStartNeZ + m_dragStartSwZ) * 0.25f;
                 float targetZ = SnapValue(origZ + deltaZ);
                 float shiftZ = targetZ - origZ;
@@ -981,7 +1074,20 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
             }
         }
     } else if (m_draggedHandle == HANDLE_GIZMO_CENTER) {
-        if (area) {
+        if (m_multiDragStates.size() > 1 && m_nav && m_nav->IsLoaded()) {
+            float shiftX = SnapValue(groundDelta.x);
+            float shiftY = SnapValue(groundDelta.y);
+            for (const auto& s : m_multiDragStates) {
+                NavArea* a = m_nav->GetAreaByID(s.areaId);
+                if (!a) continue;
+                NavExtent nExt = s.startExtent;
+                nExt.lo.x += shiftX; nExt.hi.x += shiftX;
+                nExt.lo.y += shiftY; nExt.hi.y += shiftY;
+                m_nav->GetGrid().RemoveArea(a);
+                a->SetExtent(nExt);
+                m_nav->GetGrid().AddArea(a);
+            }
+        } else if (area) {
             float origCenterX = (m_dragStartExtent.lo.x + m_dragStartExtent.hi.x) * 0.5f;
             float origCenterY = (m_dragStartExtent.lo.y + m_dragStartExtent.hi.y) * 0.5f;
             float targetCenterX = SnapValue(origCenterX + groundDelta.x);
@@ -1004,7 +1110,20 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
         Vector3 curHit = m_dragStartPlaneHit;
         if (IntersectRayWithPlane(ray, m_dragStartCenter, Vector3(0.0f, 0.0f, 1.0f), curHit)) {
             Vector3 delta = curHit - m_dragStartPlaneHit;
-            if (area) {
+            if (m_multiDragStates.size() > 1 && m_nav && m_nav->IsLoaded()) {
+                float shiftX = SnapValue(delta.x);
+                float shiftY = SnapValue(delta.y);
+                for (const auto& s : m_multiDragStates) {
+                    NavArea* a = m_nav->GetAreaByID(s.areaId);
+                    if (!a) continue;
+                    NavExtent nExt = s.startExtent;
+                    nExt.lo.x += shiftX; nExt.hi.x += shiftX;
+                    nExt.lo.y += shiftY; nExt.hi.y += shiftY;
+                    m_nav->GetGrid().RemoveArea(a);
+                    a->SetExtent(nExt);
+                    m_nav->GetGrid().AddArea(a);
+                }
+            } else if (area) {
                 float origCenterX = (m_dragStartExtent.lo.x + m_dragStartExtent.hi.x) * 0.5f;
                 float origCenterY = (m_dragStartExtent.lo.y + m_dragStartExtent.hi.y) * 0.5f;
                 float targetCenterX = SnapValue(origCenterX + delta.x);
@@ -1028,7 +1147,21 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
         Vector3 curHit = m_dragStartPlaneHit;
         if (IntersectRayWithPlane(ray, m_dragStartCenter, Vector3(0.0f, 1.0f, 0.0f), curHit)) {
             Vector3 delta = curHit - m_dragStartPlaneHit;
-            if (area) {
+            if (m_multiDragStates.size() > 1 && m_nav && m_nav->IsLoaded()) {
+                float shiftX = SnapValue(delta.x);
+                float shiftZ = SnapValue(delta.z);
+                for (const auto& s : m_multiDragStates) {
+                    NavArea* a = m_nav->GetAreaByID(s.areaId);
+                    if (!a) continue;
+                    NavExtent nExt = s.startExtent;
+                    nExt.lo.x += shiftX; nExt.hi.x += shiftX;
+                    nExt.lo.z += shiftZ; nExt.hi.z += shiftZ;
+                    m_nav->GetGrid().RemoveArea(a);
+                    a->SetExtent(nExt);
+                    a->SetCornerHeights(s.startNeZ + shiftZ, s.startSwZ + shiftZ);
+                    m_nav->GetGrid().AddArea(a);
+                }
+            } else if (area) {
                 float origCenterX = (m_dragStartExtent.lo.x + m_dragStartExtent.hi.x) * 0.5f;
                 float origMidZ = (m_dragStartExtent.lo.z + m_dragStartExtent.hi.z + m_dragStartNeZ + m_dragStartSwZ) * 0.25f;
                 float targetCenterX = SnapValue(origCenterX + delta.x);
@@ -1053,7 +1186,21 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
         Vector3 curHit = m_dragStartPlaneHit;
         if (IntersectRayWithPlane(ray, m_dragStartCenter, Vector3(1.0f, 0.0f, 0.0f), curHit)) {
             Vector3 delta = curHit - m_dragStartPlaneHit;
-            if (area) {
+            if (m_multiDragStates.size() > 1 && m_nav && m_nav->IsLoaded()) {
+                float shiftY = SnapValue(delta.y);
+                float shiftZ = SnapValue(delta.z);
+                for (const auto& s : m_multiDragStates) {
+                    NavArea* a = m_nav->GetAreaByID(s.areaId);
+                    if (!a) continue;
+                    NavExtent nExt = s.startExtent;
+                    nExt.lo.y += shiftY; nExt.hi.y += shiftY;
+                    nExt.lo.z += shiftZ; nExt.hi.z += shiftZ;
+                    m_nav->GetGrid().RemoveArea(a);
+                    a->SetExtent(nExt);
+                    a->SetCornerHeights(s.startNeZ + shiftZ, s.startSwZ + shiftZ);
+                    m_nav->GetGrid().AddArea(a);
+                }
+            } else if (area) {
                 float origCenterY = (m_dragStartExtent.lo.y + m_dragStartExtent.hi.y) * 0.5f;
                 float origMidZ = (m_dragStartExtent.lo.z + m_dragStartExtent.hi.z + m_dragStartNeZ + m_dragStartSwZ) * 0.25f;
                 float targetCenterY = SnapValue(origCenterY + delta.y);
@@ -1435,6 +1582,36 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
 bool EditorScene::EndDragHandle(CommandManager& cmdMgr) {
     if (!m_isDraggingHandle) return false;
 
+    if (m_multiDragStates.size() > 1 && m_nav && m_nav->IsLoaded()) {
+        std::vector<std::unique_ptr<IEditCommand>> cmds;
+        for (const auto& state : m_multiDragStates) {
+            NavArea* a = m_nav->GetAreaByID(state.areaId);
+            if (a) {
+                NavExtent curExt = a->GetExtent();
+                float curNeZ = a->GetNEZ();
+                float curSwZ = a->GetSWZ();
+                if (curExt.lo != state.startExtent.lo || curExt.hi != state.startExtent.hi ||
+                    curNeZ != state.startNeZ || curSwZ != state.startSwZ) {
+                    m_nav->GetGrid().RemoveArea(a);
+                    a->SetExtent(state.startExtent);
+                    a->SetCornerHeights(state.startNeZ, state.startSwZ);
+                    m_nav->GetGrid().AddArea(a);
+
+                    cmds.push_back(std::make_unique<CmdTransformArea>(this, state.areaId,
+                        state.startExtent, state.startNeZ, state.startSwZ,
+                        curExt, curNeZ, curSwZ, "Multi-Area Transform"));
+                }
+            }
+        }
+        m_multiDragStates.clear();
+        m_isDraggingHandle = false;
+        m_draggedHandle = HANDLE_NONE;
+        if (!cmds.empty()) {
+            cmdMgr.ExecuteCommand(std::make_unique<CmdCompound>(std::move(cmds), "Multi-Area Transform"));
+        }
+        return true;
+    }
+
     NavArea* area = GetSelectedArea();
     if (area) {
         NavExtent newExt = area->GetExtent();
@@ -1450,6 +1627,7 @@ bool EditorScene::EndDragHandle(CommandManager& cmdMgr) {
             newExt, newNeZ, newSwZ, cmdName));
     }
 
+    m_multiDragStates.clear();
     m_isDraggingHandle = false;
     m_draggedHandle = HANDLE_NONE;
     return true;
@@ -1775,8 +1953,10 @@ void EditorScene::SplitSelectedArea(CommandManager& cmdMgr) {
     float width = area->GetExtent().hi.x - area->GetExtent().lo.x;
     float length = area->GetExtent().hi.y - area->GetExtent().lo.y;
     bool splitAlongY = (length >= width);
+    float splitCoord = splitAlongY ? (area->GetExtent().lo.y + area->GetExtent().hi.y) * 0.5f
+                                   : (area->GetExtent().lo.x + area->GetExtent().hi.x) * 0.5f;
 
-    cmdMgr.ExecuteCommand(std::make_unique<CmdSplitArea>(this, area->GetID(), splitAlongY));
+    cmdMgr.ExecuteCommand(std::make_unique<CmdSplitAreaKnife>(this, area->GetID(), splitCoord, splitAlongY));
 }
 
 void EditorScene::MergeSelectedArea(CommandManager& cmdMgr) {
@@ -2066,4 +2246,389 @@ size_t EditorScene::FloodFillAreaAt(const Ray& ray, CommandManager& cmdMgr) {
     m_isModified = true;
 
     return m_selectedAreaIds.size();
+}
+
+void EditorScene::BatchExtrude(CommandManager& cmdMgr, SelectedHandleType edge, float length) {
+    if (m_selectedAreaIds.empty()) return;
+    if (edge < HANDLE_EDGE_NORTH || edge > HANDLE_EDGE_WEST) {
+        edge = HANDLE_EDGE_NORTH;
+    }
+    if (length <= 0.0f) {
+        length = (m_gridSize >= 4.0f) ? m_gridSize : 64.0f;
+    }
+    cmdMgr.ExecuteCommand(std::make_unique<CmdBatchExtrude>(this, m_selectedAreaIds, edge, length));
+}
+
+EditorScene::AnalyzerStats EditorScene::AutoAnalyzeFlags(CommandManager& cmdMgr, bool selectedOnly) {
+    AnalyzerStats stats;
+    if (!m_nav || !m_nav->IsLoaded()) return stats;
+
+    std::vector<NavArea*> candidates;
+    if (selectedOnly && !m_selectedAreaIds.empty()) {
+        for (uint32_t id : m_selectedAreaIds) {
+            NavArea* a = m_nav->GetAreaByID(id);
+            if (a) candidates.push_back(a);
+        }
+    } else {
+        candidates = m_nav->GetAreas();
+    }
+
+    stats.totalScanned = candidates.size();
+    std::vector<std::pair<uint32_t, uint8_t>> oldFlags;
+    std::vector<std::pair<uint32_t, uint8_t>> newFlags;
+
+    for (NavArea* area : candidates) {
+        if (!area) continue;
+        uint8_t currentAttr = area->GetAttributes();
+        uint8_t detected = currentAttr;
+
+        // 1. Low Headroom / Crouch check (< 72 units clearance)
+        bool isCrouch = false;
+        if (m_bsp && m_bsp->IsLoaded()) {
+            Vector3 center = area->GetCenter();
+            float w = area->GetExtent().hi.x - area->GetExtent().lo.x;
+            float l = area->GetExtent().hi.y - area->GetExtent().lo.y;
+            float insetX = std::min(8.0f, w * 0.25f);
+            float insetY = std::min(8.0f, l * 0.25f);
+
+            Vector3 testPts[5] = {
+                center,
+                Vector3(area->GetExtent().lo.x + insetX, area->GetExtent().lo.y + insetY, 0.0f),
+                Vector3(area->GetExtent().hi.x - insetX, area->GetExtent().lo.y + insetY, 0.0f),
+                Vector3(area->GetExtent().hi.x - insetX, area->GetExtent().hi.y - insetY, 0.0f),
+                Vector3(area->GetExtent().lo.x + insetX, area->GetExtent().hi.y - insetY, 0.0f)
+            };
+            for (int i = 1; i < 5; ++i) {
+                testPts[i].z = area->GetZ(testPts[i].x, testPts[i].y);
+            }
+
+            for (const auto& pt : testPts) {
+                Vector3 start(pt.x, pt.y, pt.z + 4.0f);
+                Vector3 end(pt.x, pt.y, pt.z + 74.0f);
+                BSPTraceResult tr;
+                if (m_bsp->TraceWorld(start, end, HULL_POINT, &tr)) {
+                    if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f) {
+                        float clearance = tr.endpos.z - pt.z;
+                        if (clearance < 72.0f && clearance >= 24.0f) {
+                            isCrouch = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (isCrouch) {
+            detected |= NAV_ATTR_CROUCH;
+            if (!(currentAttr & NAV_ATTR_CROUCH)) stats.crouchCount++;
+        }
+
+        // 2. Narrow Constriction / Doorway check (< 48 units width or length)
+        float width = area->GetExtent().hi.x - area->GetExtent().lo.x;
+        float length = area->GetExtent().hi.y - area->GetExtent().lo.y;
+        if (width < 48.0f || length < 48.0f) {
+            detected |= NAV_ATTR_PRECISE;
+            if (!(currentAttr & NAV_ATTR_PRECISE)) stats.preciseCount++;
+        }
+
+        // 3. Step Obstacle / Ledge Jump check (> 18 units elevation difference)
+        bool isJump = false;
+        for (int d = 0; d < 4; ++d) {
+            for (const auto& conn : area->GetAdjacentList(static_cast<NavDirType>(d))) {
+                if (conn.area) {
+                    float dz = conn.area->GetCenter().z - area->GetCenter().z;
+                    if (dz > 18.0f && dz <= 45.0f) {
+                        isJump = true;
+                        break;
+                    }
+                }
+            }
+            if (isJump) break;
+        }
+        if (isJump) {
+            detected |= NAV_ATTR_JUMP;
+            if (!(currentAttr & NAV_ATTR_JUMP)) stats.jumpCount++;
+        }
+
+        if (detected != currentAttr) {
+            oldFlags.push_back({ area->GetID(), currentAttr });
+            newFlags.push_back({ area->GetID(), detected });
+        }
+    }
+
+    stats.totalModified = newFlags.size();
+    if (!newFlags.empty()) {
+        cmdMgr.ExecuteCommand(std::make_unique<CmdAnalyzeAreaFlags>(this, oldFlags, newFlags));
+    }
+    return stats;
+}
+
+EditorScene::OptimizeMeshStats EditorScene::OptimizeMesh(CommandManager& cmdMgr, bool selectedOnly) {
+    OptimizeMeshStats stats;
+    if (!m_nav || !m_nav->IsLoaded()) return stats;
+
+    stats.initialAreaCount = m_nav->GetAreaCount();
+
+    std::vector<OptimizeMergeRecord> allRecords;
+    std::vector<uint32_t> candidateIds;
+    if (selectedOnly && !m_selectedAreaIds.empty()) {
+        candidateIds = m_selectedAreaIds;
+    } else {
+        for (const auto* a : m_nav->GetAreas()) {
+            if (a) candidateIds.push_back(a->GetID());
+        }
+    }
+
+    bool mergedAny = false;
+    do {
+        mergedAny = false;
+        std::vector<uint32_t> activeIds;
+        for (uint32_t id : candidateIds) {
+            if (m_nav->GetAreaByID(id)) activeIds.push_back(id);
+        }
+
+        for (size_t i = 0; i < activeIds.size(); ++i) {
+            NavArea* a = m_nav->GetAreaByID(activeIds[i]);
+            if (!a) continue;
+
+            for (size_t j = i + 1; j < activeIds.size(); ++j) {
+                NavArea* b = m_nav->GetAreaByID(activeIds[j]);
+                if (!b) continue;
+
+                if (a->GetAttributes() != b->GetAttributes()) continue;
+                if (a->GetPlace() != b->GetPlace() || a->GetPlaceName() != b->GetPlaceName()) continue;
+
+                NavArea* first = a;
+                NavArea* second = b;
+                bool isXMerge = false;
+                bool isYMerge = false;
+
+                // Horizontal (along X)
+                if (first->GetExtent().lo.x > second->GetExtent().lo.x) {
+                    std::swap(first, second);
+                }
+                const NavExtent& ext1 = first->GetExtent();
+                const NavExtent& ext2 = second->GetExtent();
+
+                if (std::fabs(ext1.hi.x - ext2.lo.x) <= 0.25f &&
+                    std::fabs(ext1.lo.y - ext2.lo.y) <= 0.25f &&
+                    std::fabs(ext1.hi.y - ext2.hi.y) <= 0.25f) {
+                    if (std::fabs(first->GetNEZ() - ext2.lo.z) <= 2.5f &&
+                        std::fabs(ext1.hi.z - second->GetSWZ()) <= 2.5f) {
+                        float w1 = ext1.hi.x - ext1.lo.x;
+                        float w2 = ext2.hi.x - ext2.lo.x;
+                        float wTot = w1 + w2;
+                        if (wTot > 0.001f) {
+                            float r = w1 / wTot;
+                            float expN = ext1.lo.z + (second->GetNEZ() - ext1.lo.z) * r;
+                            float expS = first->GetSWZ() + (ext2.hi.z - first->GetSWZ()) * r;
+                            if (std::fabs(first->GetNEZ() - expN) <= 2.5f &&
+                                std::fabs(ext1.hi.z - expS) <= 2.5f) {
+                                isXMerge = true;
+                            }
+                        }
+                    }
+                }
+
+                if (!isXMerge) {
+                    // Vertical (along Y)
+                    first = a;
+                    second = b;
+                    if (first->GetExtent().lo.y > second->GetExtent().lo.y) {
+                        std::swap(first, second);
+                    }
+                    const NavExtent& yExt1 = first->GetExtent();
+                    const NavExtent& yExt2 = second->GetExtent();
+
+                    if (std::fabs(yExt1.hi.y - yExt2.lo.y) <= 0.25f &&
+                        std::fabs(yExt1.lo.x - yExt2.lo.x) <= 0.25f &&
+                        std::fabs(yExt1.hi.x - yExt2.hi.x) <= 0.25f) {
+                        if (std::fabs(first->GetSWZ() - yExt2.lo.z) <= 2.5f &&
+                            std::fabs(yExt1.hi.z - second->GetNEZ()) <= 2.5f) {
+                            float l1 = yExt1.hi.y - yExt1.lo.y;
+                            float l2 = yExt2.hi.y - yExt2.lo.y;
+                            float lTot = l1 + l2;
+                            if (lTot > 0.001f) {
+                                float r = l1 / lTot;
+                                float expW = yExt1.lo.z + (second->GetSWZ() - yExt1.lo.z) * r;
+                                float expE = first->GetNEZ() + (yExt2.hi.z - first->GetNEZ()) * r;
+                                if (std::fabs(first->GetSWZ() - expW) <= 2.5f &&
+                                    std::fabs(yExt1.hi.z - expE) <= 2.5f) {
+                                    isYMerge = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (isXMerge || isYMerge) {
+                    OptimizeMergeRecord rec;
+                    rec.keepId = first->GetID();
+                    rec.removeId = second->GetID();
+                    rec.oldExtKeep = first->GetExtent();
+                    rec.oldNeZKeep = first->GetNEZ();
+                    rec.oldSwZKeep = first->GetSWZ();
+                    rec.oldExtRemove = second->GetExtent();
+                    rec.oldNeZRemove = second->GetNEZ();
+                    rec.oldSwZRemove = second->GetSWZ();
+                    rec.removeAttr = second->GetAttributes();
+                    rec.removePlace = second->GetPlace();
+                    rec.removePlaceName = second->GetPlaceName();
+
+                    if (isXMerge) {
+                        rec.mergedExt.lo = Vector3(first->GetExtent().lo.x, first->GetExtent().lo.y, first->GetExtent().lo.z);
+                        rec.mergedExt.hi = Vector3(second->GetExtent().hi.x, second->GetExtent().hi.y, second->GetExtent().hi.z);
+                        rec.mergedNeZ = second->GetNEZ();
+                        rec.mergedSwZ = first->GetSWZ();
+                    } else {
+                        rec.mergedExt.lo = Vector3(first->GetExtent().lo.x, first->GetExtent().lo.y, first->GetExtent().lo.z);
+                        rec.mergedExt.hi = Vector3(second->GetExtent().hi.x, second->GetExtent().hi.y, second->GetExtent().hi.z);
+                        rec.mergedNeZ = first->GetNEZ();
+                        rec.mergedSwZ = second->GetSWZ();
+                    }
+
+                    for (int d = 0; d < 4; ++d) {
+                        for (const auto& conn : second->GetAdjacentList(static_cast<NavDirType>(d))) {
+                            if (conn.area && conn.area->GetID() != rec.keepId && conn.area->GetID() != rec.removeId) {
+                                rec.removeOutgoing.push_back({ conn.area->GetID(), static_cast<NavDirType>(d) });
+                            }
+                        }
+                    }
+                    for (const NavArea* other : m_nav->GetAreas()) {
+                        if (other && other->GetID() != rec.removeId && other->GetID() != rec.keepId) {
+                            for (int d = 0; d < 4; ++d) {
+                                if (other->IsConnected(second, d)) {
+                                    rec.removeIncoming.push_back({ other->GetID(), static_cast<NavDirType>(d) });
+                                }
+                            }
+                        }
+                    }
+
+                    m_nav->GetGrid().RemoveArea(first);
+                    first->SetExtent(rec.mergedExt);
+                    first->SetCornerHeights(rec.mergedNeZ, rec.mergedSwZ);
+                    m_nav->GetGrid().AddArea(first);
+
+                    m_nav->RemoveArea(rec.removeId);
+
+                    for (const auto& out : rec.removeOutgoing) {
+                        m_nav->ConnectAreas(rec.keepId, out.targetId, false, out.dir);
+                    }
+                    for (const auto& in : rec.removeIncoming) {
+                        m_nav->ConnectAreas(in.targetId, rec.keepId, false, in.dir);
+                    }
+
+                    allRecords.push_back(std::move(rec));
+                    mergedAny = true;
+                    break;
+                }
+            }
+            if (mergedAny) break;
+        }
+    } while (mergedAny);
+
+    stats.mergedCount = allRecords.size();
+    stats.finalAreaCount = m_nav->GetAreaCount();
+
+    if (!allRecords.empty()) {
+        for (auto it = allRecords.rbegin(); it != allRecords.rend(); ++it) {
+            const auto& rec = *it;
+            NavArea* keep = m_nav->GetAreaByID(rec.keepId);
+            if (keep) {
+                m_nav->GetGrid().RemoveArea(keep);
+                keep->SetExtent(rec.oldExtKeep);
+                keep->SetCornerHeights(rec.oldNeZKeep, rec.oldSwZKeep);
+                m_nav->GetGrid().AddArea(keep);
+            }
+            NavArea* recreat = m_nav->CreateArea(rec.oldExtRemove, rec.oldNeZRemove, rec.oldSwZRemove);
+            if (recreat) {
+                m_nav->GetGrid().RemoveArea(recreat);
+                recreat->SetID(rec.removeId);
+                m_nav->GetGrid().AddArea(recreat);
+                recreat->SetAttributes(rec.removeAttr);
+                recreat->SetPlace(rec.removePlace);
+                recreat->SetPlaceName(rec.removePlaceName);
+
+                for (const auto& out : rec.removeOutgoing) {
+                    m_nav->ConnectAreas(rec.removeId, out.targetId, false, out.dir);
+                }
+                for (const auto& in : rec.removeIncoming) {
+                    m_nav->ConnectAreas(in.targetId, rec.removeId, false, in.dir);
+                }
+            }
+        }
+
+        cmdMgr.ExecuteCommand(std::make_unique<CmdOptimizeMesh>(this, std::move(allRecords)));
+    }
+
+    return stats;
+}
+
+void EditorScene::StartKnifeMode() {
+    m_isKnifeMode = true;
+    m_knifeActive = false;
+    m_knifeHoverAreaId = 0;
+    ExitDrawAreaMode();
+    ExitFillAreaMode();
+    CancelBridgeMode();
+}
+
+void EditorScene::ExitKnifeMode() {
+    m_isKnifeMode = false;
+    m_knifeActive = false;
+    m_knifeHoverAreaId = 0;
+}
+
+void EditorScene::ToggleKnifeMode() {
+    if (m_isKnifeMode) {
+        ExitKnifeMode();
+    } else {
+        StartKnifeMode();
+    }
+}
+
+void EditorScene::UpdateKnife(const Ray& ray) {
+    if (!m_isKnifeMode || !m_nav || !m_nav->IsLoaded()) {
+        m_knifeHoverAreaId = 0;
+        return;
+    }
+
+    uint32_t hitId = ScenePicker::PickNavArea(*this, ray);
+    m_knifeHoverAreaId = hitId;
+    if (hitId == 0) return;
+
+    NavArea* area = m_nav->GetAreaByID(hitId);
+    if (!area) {
+        m_knifeHoverAreaId = 0;
+        return;
+    }
+
+    Vector3 hitPos = area->GetCenter();
+    if (std::abs(ray.direction.z) > 1e-4f) {
+        float t = (area->GetCenter().z - ray.origin.z) / ray.direction.z;
+        hitPos = ray.origin + ray.direction * t;
+    }
+
+    const NavExtent& ext = area->GetExtent();
+    float w = ext.hi.x - ext.lo.x;
+    float l = ext.hi.y - ext.lo.y;
+
+    if (l >= w) {
+        m_knifeSplitAlongY = true;
+        float rawY = hitPos.y;
+        if (m_gridSnap) rawY = SnapValue(rawY);
+        m_knifeSplitCoord = std::max(ext.lo.y + 4.0f, std::min(ext.hi.y - 4.0f, rawY));
+    } else {
+        m_knifeSplitAlongY = false;
+        float rawX = hitPos.x;
+        if (m_gridSnap) rawX = SnapValue(rawX);
+        m_knifeSplitCoord = std::max(ext.lo.x + 4.0f, std::min(ext.hi.x - 4.0f, rawX));
+    }
+}
+
+void EditorScene::OnKnifeClick(const Ray& ray, CommandManager& cmdMgr) {
+    if (!m_isKnifeMode) return;
+    UpdateKnife(ray);
+    if (m_knifeHoverAreaId != 0) {
+        cmdMgr.ExecuteCommand(std::make_unique<CmdSplitAreaKnife>(this, m_knifeHoverAreaId, m_knifeSplitCoord, m_knifeSplitAlongY));
+    }
 }

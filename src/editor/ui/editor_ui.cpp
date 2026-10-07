@@ -184,6 +184,13 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
 
     RenderUnsavedModal(scene, cmdMgr);
     RenderSaveSuccessModal();
+
+    if (m_showAnalyzerModal) {
+        RenderAnalyzerModal();
+    }
+    if (m_showOptimizeModal) {
+        RenderOptimizeModal();
+    }
 }
 
 void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
@@ -478,6 +485,9 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             if (ImGui::MenuItem("Split Selected Area", "Shift+X", false, sel != nullptr)) {
                 scene.SplitSelectedArea(cmdMgr);
             }
+            if (ImGui::MenuItem("Split / Knife Tool", "K", scene.IsKnifeMode())) {
+                scene.ToggleKnifeMode();
+            }
             if (ImGui::MenuItem("Merge Adjacent Area", "Shift+M", false, sel != nullptr)) {
                 scene.MergeSelectedArea(cmdMgr);
             }
@@ -488,6 +498,16 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 
             if (ImGui::MenuItem("Focus on Selection", "F", false, sel != nullptr)) {
                 camera.FocusOn(sel->GetCenter());
+            }
+
+            ImGui::Separator();
+            if (ImGui::MenuItem("Auto-Crouch & Obstacle Flag Analyzer...", nullptr, false, scene.HasNAV())) {
+                m_analyzerStats = scene.AutoAnalyzeFlags(cmdMgr, false);
+                m_showAnalyzerModal = true;
+            }
+            if (ImGui::MenuItem("Optimize Mesh (Merge Coplanar)...", nullptr, false, scene.HasNAV())) {
+                m_optimizeStats = scene.OptimizeMesh(cmdMgr, false);
+                m_showOptimizeModal = true;
             }
 
             ImGui::Separator();
@@ -556,6 +576,22 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         if (ImGui::Button("Batch Generate...", ImVec2(-1, 26))) {
             m_showBatchGenerateModal = true;
         }
+
+        if (ImGui::Button("Auto-Flag Obstacles", ImVec2(-1, 26))) {
+            if (scene.HasNAV()) {
+                m_analyzerStats = scene.AutoAnalyzeFlags(cmdMgr, false);
+                m_showAnalyzerModal = true;
+            }
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Scans low ceilings (<72u) for Crouch, narrow corridors (<48u) for Precise, and ledges (>18u) for Jump");
+
+        if (ImGui::Button("Optimize Mesh (Merge)", ImVec2(-1, 26))) {
+            if (scene.HasNAV()) {
+                m_optimizeStats = scene.OptimizeMesh(cmdMgr, false);
+                m_showOptimizeModal = true;
+            }
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Combines collinear coplanar rectangular areas sharing elevation, slope, and attributes to reduce area count");
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -676,6 +712,14 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         if (ImGui::Button("Split Area [Shift+X]", ImVec2(-1, 26))) {
             if (hasSel) scene.SplitSelectedArea(cmdMgr);
         }
+
+        bool knifeActive = scene.IsKnifeMode();
+        if (knifeActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.45f, 0.15f, 1.0f));
+        if (ImGui::Button(knifeActive ? "Exit Knife Tool [Esc]" : "Knife / Split Tool [K]", ImVec2(-1, 26))) {
+            scene.ToggleKnifeMode();
+        }
+        if (knifeActive) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click or drag across an area to slice along seam with bilinearly interpolated elevation");
 
         if (ImGui::Button("Merge Areas [Shift+M]", ImVec2(-1, 26))) {
             if (hasSel) scene.MergeSelectedArea(cmdMgr);
@@ -1127,6 +1171,23 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
             }
             if (!hasBSP) ImGui::EndDisabled();
             if (ImGui::IsItemHovered()) ImGui::SetTooltip(hasBSP ? "Snaps corner elevations of all selected areas onto BSP floor" : "Requires loaded BSP map");
+
+            if (ImGui::Button("Extrude All [E]", ImVec2(-1, 26))) {
+                scene.BatchExtrude(cmdMgr);
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Extrudes all selected areas outward along active edge");
+
+            if (ImGui::Button("Auto-Flag Selected", ImVec2(-1, 26))) {
+                m_analyzerStats = scene.AutoAnalyzeFlags(cmdMgr, true);
+                m_showAnalyzerModal = true;
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Scans selected areas for Crouch, Precise, and Jump flags");
+
+            if (ImGui::Button("Optimize Selected", ImVec2(-1, 26))) {
+                m_optimizeStats = scene.OptimizeMesh(cmdMgr, true);
+                m_showOptimizeModal = true;
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Merges adjacent coplanar rectangular areas within the selection");
 
             if (ImGui::Button("Duplicate All [Shift+D]", ImVec2(-1, 26))) {
                 scene.BatchDuplicate(cmdMgr);
@@ -2206,6 +2267,73 @@ void EditorUI::RenderSaveSuccessModal() {
 
         if (ImGui::Button("OK##SaveOkBtn", ImVec2(100, 26))) {
             m_showSaveSuccessModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderAnalyzerModal() {
+    if (m_showAnalyzerModal) {
+        ImGui::OpenPopup("Auto-Crouch & Obstacle Flag Analyzer##Modal");
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal("Auto-Crouch & Obstacle Flag Analyzer##Modal", &m_showAnalyzerModal, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextColored(ImVec4(0.2f, 0.85f, 0.3f, 1.0f), "Automated Flag Scan Complete");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::Text("Total Areas Scanned: %zu", m_analyzerStats.totalScanned);
+        ImGui::Spacing();
+        ImGui::Text("  - Low Headroom (< 72u): %zu Crouch flags assigned", m_analyzerStats.crouchCount);
+        ImGui::Text("  - Narrow Passages (< 48u): %zu Precise flags assigned", m_analyzerStats.preciseCount);
+        ImGui::Text("  - Step Obstacles (> 18u): %zu Jump flags assigned", m_analyzerStats.jumpCount);
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "Total Areas Modified: %zu", m_analyzerStats.totalModified);
+        ImGui::Spacing();
+
+        if (ImGui::Button("Close##AnalyzerBtn", ImVec2(100, 26))) {
+            m_showAnalyzerModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderOptimizeModal() {
+    if (m_showOptimizeModal) {
+        ImGui::OpenPopup("Mesh Optimization Results##Modal");
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal("Mesh Optimization Results##Modal", &m_showOptimizeModal, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextColored(ImVec4(0.2f, 0.85f, 0.3f, 1.0f), "Coplanar Mesh Simplification Complete");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::Text("Initial NavArea Count: %zu", m_optimizeStats.initialAreaCount);
+        ImGui::Text("Merged Area Pairs:     %zu", m_optimizeStats.mergedCount);
+        ImGui::Text("Final NavArea Count:   %zu", m_optimizeStats.finalAreaCount);
+        ImGui::Spacing();
+        if (m_optimizeStats.initialAreaCount > 0 && m_optimizeStats.mergedCount > 0) {
+            float pct = (static_cast<float>(m_optimizeStats.mergedCount) / static_cast<float>(m_optimizeStats.initialAreaCount)) * 100.0f;
+            ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Area Count Reduced by: %.1f%%", pct);
+        } else {
+            ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1.0f), "Mesh is already maximally simplified.");
+        }
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Close##OptimizeBtn", ImVec2(100, 26))) {
+            m_showOptimizeModal = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();

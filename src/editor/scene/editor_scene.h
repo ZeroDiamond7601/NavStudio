@@ -81,6 +81,7 @@ public:
     void BatchSnapToFloor(class CommandManager& cmdMgr);
     void BatchDuplicate(class CommandManager& cmdMgr);
     void BatchDelete(class CommandManager& cmdMgr);
+    void BatchExtrude(class CommandManager& cmdMgr, SelectedHandleType edge = HANDLE_NONE, float length = 0.0f);
 
     void SetHoveredArea(uint32_t id);
     NavArea* GetSelectedArea();
@@ -199,6 +200,35 @@ public:
     void CancelFillAreaMode() { ExitFillAreaMode(); }
     size_t FloodFillAreaAt(const Ray& ray, class CommandManager& cmdMgr);
 
+    // Split Area Knife Tool (Interactive Cutter [K])
+    bool IsKnifeMode() const { return m_isKnifeMode; }
+    void StartKnifeMode();
+    void ExitKnifeMode();
+    void ToggleKnifeMode();
+    void UpdateKnife(const Ray& ray);
+    void OnKnifeClick(const Ray& ray, class CommandManager& cmdMgr);
+    uint32_t GetKnifeHoverArea() const { return m_knifeHoverAreaId; }
+    bool GetKnifeSplitAlongY() const { return m_knifeSplitAlongY; }
+    float GetKnifeSplitCoord() const { return m_knifeSplitCoord; }
+
+    // Auto-Crouch & Obstacle Flag Analyzer
+    struct AnalyzerStats {
+        size_t totalScanned{0};
+        size_t crouchCount{0};
+        size_t preciseCount{0};
+        size_t jumpCount{0};
+        size_t totalModified{0};
+    };
+    AnalyzerStats AutoAnalyzeFlags(class CommandManager& cmdMgr, bool selectedOnly = false);
+
+    // Mesh Optimization / Area Simplification (1-Click Coplanar Merge)
+    struct OptimizeMeshStats {
+        size_t initialAreaCount{0};
+        size_t finalAreaCount{0};
+        size_t mergedCount{0};
+    };
+    OptimizeMeshStats OptimizeMesh(class CommandManager& cmdMgr, bool selectedOnly = false);
+
     // Interactive Handles (Gizmo Arrows, Edges, Corners)
     SelectedHandleType GetHoveredHandle() const { return m_hoveredHandle; }
     void SetHoveredHandle(SelectedHandleType h);
@@ -315,6 +345,20 @@ private:
 
     // Multi-Selection
     std::vector<uint32_t> m_selectedAreaIds;
+    struct MultiDragState {
+        uint32_t areaId{0};
+        NavExtent startExtent;
+        float startNeZ{0.0f};
+        float startSwZ{0.0f};
+    };
+    std::vector<MultiDragState> m_multiDragStates;
+
+    // Split Area Knife Tool State
+    bool m_isKnifeMode{false};
+    bool m_knifeActive{false};
+    uint32_t m_knifeHoverAreaId{0};
+    bool m_knifeSplitAlongY{false};
+    float m_knifeSplitCoord{0.0f};
 
     // Handles
     SelectedHandleType m_hoveredHandle{HANDLE_NONE};

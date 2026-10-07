@@ -136,6 +136,12 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                 return;
             }
 
+            // Knife Mode Left Click: Click area to slice along knife guideline
+            if (g_activeScene->IsKnifeMode()) {
+                g_activeScene->OnKnifeClick(ray, *g_cmdMgr);
+                return;
+            }
+
             // Bridge Mode Left Click: Click Edge 1 then Edge 2
             if (g_activeScene->IsBridgeMode()) {
                 uint32_t edgeArea = g_activeScene->GetBridgeHoverArea();
@@ -214,8 +220,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
         return;
     }
 
-    // When in drawing mode, WASD keys navigate the camera
-    if (g_activeScene && g_activeScene->IsDrawAreaMode()) {
+    // When in drawing mode or knife mode, WASD keys navigate the camera
+    if (g_activeScene && (g_activeScene->IsDrawAreaMode() || g_activeScene->IsKnifeMode())) {
         if (key == GLFW_KEY_W || key == GLFW_KEY_A || key == GLFW_KEY_S || key == GLFW_KEY_D) {
             return;
         }
@@ -267,6 +273,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 g_activeScene->ToggleBridgeMode();
             } else if (key == GLFW_KEY_N && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // N: Draw Area Tool
                 g_activeScene->ToggleDrawAreaMode();
+            } else if (key == GLFW_KEY_K && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // K: Knife / Split Tool
+                g_activeScene->ToggleKnifeMode();
             } else if (key == GLFW_KEY_F && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0 &&
                        g_activeScene->GetSelectedAreaID() == 0 && g_activeScene->GetSelectedAreaIDs().empty() &&
                        g_activeScene->GetSelectedEntityIndex() < 0) { // F: Fill Area Tool (when nothing selected)
@@ -274,7 +282,9 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
             } else if (key == GLFW_KEY_A && (mods & GLFW_MOD_CONTROL) != 0) { // Ctrl+A: Select All
                 g_activeScene->SelectAllAreas();
             } else if (key == GLFW_KEY_ESCAPE) {
-                if (g_activeScene->IsDrawAreaMode()) {
+                if (g_activeScene->IsKnifeMode()) {
+                    g_activeScene->ExitKnifeMode();
+                } else if (g_activeScene->IsDrawAreaMode()) {
                     g_activeScene->CancelDrawArea();
                 } else if (g_activeScene->IsFillAreaMode()) {
                     g_activeScene->ExitFillAreaMode();
@@ -321,7 +331,11 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                         );
                     }
                 } else if (key == GLFW_KEY_E && (mods & GLFW_MOD_CONTROL) == 0) { // Hammer Edge Extrude
-                    if (sel) g_activeScene->ExtrudeSelectedEdge(*g_cmdMgr);
+                    if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
+                        g_activeScene->BatchExtrude(*g_cmdMgr);
+                    } else if (sel) {
+                        g_activeScene->ExtrudeSelectedEdge(*g_cmdMgr);
+                    }
                 } else if (key == GLFW_KEY_X && (mods & GLFW_MOD_SHIFT) != 0) { // Hammer Shift+X Split Area
                     if (sel) g_activeScene->SplitSelectedArea(*g_cmdMgr);
                 } else if (key == GLFW_KEY_M && (mods & GLFW_MOD_SHIFT) != 0) { // Hammer Shift+M Merge
@@ -404,6 +418,8 @@ static void CursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
                 static_cast<float>(xpos), static_cast<float>(ypos),
                 ray, static_cast<float>(ypos - g_lastMouseY)
             );
+        } else if (g_activeScene->IsKnifeMode()) {
+            g_activeScene->UpdateKnife(ray);
         } else if (g_activeScene->IsDrawAreaMode()) {
             g_activeScene->UpdateDrawArea(ray);
         } else if (g_activeScene->IsBridgeMode()) {

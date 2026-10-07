@@ -49,6 +49,8 @@ private:
     void RenderBatchGenerateModal(EditorScene& scene);
     void RenderUnsavedModal(EditorScene& scene, CommandManager& cmdMgr);
     void RenderSaveSuccessModal();
+    void RenderAnalyzerModal();
+    void RenderOptimizeModal();
 
     bool m_mouseOverUI;
     bool m_requestQuit;
@@ -86,6 +88,11 @@ private:
     bool m_showUnsavedModal{false};
     bool m_showSaveSuccessModal{false};
     std::string m_saveSuccessMessage;
+
+    bool m_showAnalyzerModal{false};
+    EditorScene::AnalyzerStats m_analyzerStats;
+    bool m_showOptimizeModal{false};
+    EditorScene::OptimizeMeshStats m_optimizeStats;
 };
 
 #endif // EDITOR_UI_H
