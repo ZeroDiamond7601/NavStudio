@@ -1582,7 +1582,7 @@ void EditorUI::RenderNavMeshGlobalInspector(EditorScene& scene, CommandManager& 
         ImGui::TextDisabled("Unsaved Navigation Mesh (In-Memory)");
     }
 
-    ImGui::Text("Format Version: %u (Sub: %u)", nav.GetVersion(), nav.GetSubVersion());
+    ImGui::Text("Format Version: %u", nav.GetVersion());
     ImGui::Text("Recorded BSP Size: %u bytes", nav.GetBspSize());
     ImGui::Separator();
 
