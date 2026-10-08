@@ -263,7 +263,7 @@ SelectedHandleType ScenePicker::PickAreaHandles(
     Vector3 camPos(invView.m[12], invView.m[13], invView.m[14]);
 
     float camDist = (camPos - c).Length();
-    float gLen = std::max(42.0f, std::min(130.0f, camDist * 0.082f));
+    float gLen = std::max(48.0f, std::min(450.0f, camDist * 0.105f));
     float coneH = gLen * 0.22f;
     float cubeDist = gLen * 0.72f;
     float rotR = gLen * 0.58f;
@@ -565,4 +565,81 @@ bool ScenePicker::PickAnyAreaEdge(
         return true;
     }
     return false;
+}
+
+bool ScenePicker::PickConnection(
+    const EditorScene& scene,
+    float screenX, float screenY,
+    float viewportWidth, float viewportHeight,
+    const Matrix4& viewMatrix,
+    const Matrix4& projMatrix,
+    uint32_t& outFromId, uint32_t& outToId, int& outDir,
+    float maxPixelDist
+) {
+    outFromId = 0;
+    outToId = 0;
+    outDir = -1;
+    if (!scene.HasNAV()) return false;
+    const NavMesh& nav = scene.GetNAV();
+    Matrix4 viewProj = projMatrix * viewMatrix;
+
+    float bestDist = maxPixelDist;
+    float bestDepth = std::numeric_limits<float>::max();
+    bool found = false;
+
+    auto DistToSegment2D = [](float px, float py, float x1, float y1, float x2, float y2) -> float {
+        float dx = x2 - x1;
+        float dy = y2 - y1;
+        float lenSq = dx * dx + dy * dy;
+        if (lenSq < 0.0001f) return std::hypot(px - x1, py - y1);
+        float t = std::max(0.0f, std::min(1.0f, ((px - x1) * dx + (py - y1) * dy) / lenSq));
+        float projX = x1 + t * dx;
+        float projY = y1 + t * dy;
+        return std::hypot(px - projX, py - projY);
+    };
+
+    for (const auto* area : nav.GetAreas()) {
+        if (!area) continue;
+        Vector3 centerA = area->GetCenter();
+        for (int d = 0; d < 4; ++d) {
+            for (const auto& conn : area->GetAdjacentList(static_cast<NavDirType>(d))) {
+                const NavArea* target = conn.area;
+                if (!target) continue;
+                Vector3 centerB = target->GetCenter();
+
+                bool isTwoWay = target->IsConnected(area);
+                Vector3 delta = centerB - centerA;
+                float dLen = delta.Length();
+                if (dLen < 1.0f) continue;
+
+                Vector3 fwd = delta * (1.0f / dLen);
+                Vector3 lateral(-fwd.y, fwd.x, 0.0f);
+                float laneOffset = isTwoWay ? 3.5f : 0.0f;
+                Vector3 start = centerA + lateral * laneOffset + Vector3(0.0f, 0.0f, 4.0f);
+                Vector3 end = centerB + lateral * laneOffset + Vector3(0.0f, 0.0f, 4.0f);
+
+                ScreenPoint2D spA = ProjectToScreen(start, viewProj, viewportWidth, viewportHeight);
+                ScreenPoint2D spB = ProjectToScreen(end, viewProj, viewportWidth, viewportHeight);
+
+                if (!spA.valid && !spB.valid) continue;
+
+                float dist = DistToSegment2D(screenX, screenY, spA.x, spA.y, spB.x, spB.y);
+                if (dist <= bestDist) {
+                    Vector3 mid = (start + end) * 0.5f;
+                    Vector4 clip = viewProj * Vector4(mid.x, mid.y, mid.z, 1.0f);
+                    float depth = clip.w;
+                    if (dist < bestDist - 1.5f || (std::abs(dist - bestDist) <= 1.5f && depth < bestDepth)) {
+                        bestDist = dist;
+                        bestDepth = depth;
+                        outFromId = area->GetID();
+                        outToId = target->GetID();
+                        outDir = d;
+                        found = true;
+                    }
+                }
+            }
+        }
+    }
+
+    return found;
 }

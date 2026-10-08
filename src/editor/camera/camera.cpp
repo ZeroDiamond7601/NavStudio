@@ -79,6 +79,9 @@ void Camera::ProcessKeyboard(int direction, float deltaTime) {
 }
 
 void Camera::ProcessMouseMovement(float xoffset, float yoffset, bool constrainPitch) {
+    if (m_invertY) {
+        yoffset = -yoffset;
+    }
     xoffset *= m_sensitivity;
     yoffset *= m_sensitivity;
 

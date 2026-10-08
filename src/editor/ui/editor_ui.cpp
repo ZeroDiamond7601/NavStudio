@@ -44,31 +44,172 @@ EditorUI::EditorUI()
 EditorUI::~EditorUI() {
 }
 
-void EditorUI::Init() {
-    // Customize ImGui theme to match dark studio aesthetics
+void EditorUI::ApplyTheme(int themeIndex) {
     ImGuiStyle& style = ImGui::GetStyle();
     style.WindowRounding = 4.0f;
     style.FrameRounding = 3.0f;
     style.GrabRounding = 3.0f;
     style.ScrollbarRounding = 4.0f;
     style.TabRounding = 3.0f;
+    style.WindowBorderSize = 1.0f;
+    style.FrameBorderSize = 0.0f;
 
     ImVec4* colors = style.Colors;
-    colors[ImGuiCol_WindowBg] = ImVec4(0.14f, 0.14f, 0.16f, 0.94f);
-    colors[ImGuiCol_Header] = ImVec4(0.24f, 0.26f, 0.32f, 1.0f);
-    colors[ImGuiCol_HeaderHovered] = ImVec4(0.32f, 0.36f, 0.44f, 1.0f);
-    colors[ImGuiCol_HeaderActive] = ImVec4(0.40f, 0.44f, 0.54f, 1.0f);
-    colors[ImGuiCol_Button] = ImVec4(0.22f, 0.25f, 0.32f, 1.0f);
-    colors[ImGuiCol_ButtonHovered] = ImVec4(0.30f, 0.35f, 0.45f, 1.0f);
-    colors[ImGuiCol_ButtonActive] = ImVec4(0.38f, 0.45f, 0.58f, 1.0f);
-    colors[ImGuiCol_FrameBg] = ImVec4(0.18f, 0.19f, 0.22f, 1.0f);
-    colors[ImGuiCol_FrameBgHovered] = ImVec4(0.24f, 0.26f, 0.30f, 1.0f);
-    colors[ImGuiCol_FrameBgActive] = ImVec4(0.28f, 0.30f, 0.36f, 1.0f);
-    colors[ImGuiCol_Tab] = ImVec4(0.18f, 0.20f, 0.24f, 1.0f);
-    colors[ImGuiCol_TabHovered] = ImVec4(0.32f, 0.36f, 0.44f, 1.0f);
-    colors[ImGuiCol_TabActive] = ImVec4(0.26f, 0.30f, 0.38f, 1.0f);
-    colors[ImGuiCol_TitleBg] = ImVec4(0.12f, 0.12f, 0.14f, 1.0f);
-    colors[ImGuiCol_TitleBgActive] = ImVec4(0.18f, 0.20f, 0.25f, 1.0f);
+
+    if (themeIndex == 1) {
+        // Theme 1: Classic GoldSrc (Valve Charcoal & Warm Amber)
+        colors[ImGuiCol_Text]                  = ImVec4(0.92f, 0.92f, 0.92f, 1.00f);
+        colors[ImGuiCol_TextDisabled]          = ImVec4(0.55f, 0.55f, 0.55f, 1.00f);
+        colors[ImGuiCol_WindowBg]              = ImVec4(0.12f, 0.12f, 0.13f, 0.96f);
+        colors[ImGuiCol_ChildBg]               = ImVec4(0.14f, 0.14f, 0.15f, 1.00f);
+        colors[ImGuiCol_PopupBg]               = ImVec4(0.13f, 0.13f, 0.14f, 0.98f);
+        colors[ImGuiCol_Border]                = ImVec4(0.24f, 0.24f, 0.26f, 0.70f);
+        colors[ImGuiCol_FrameBg]               = ImVec4(0.18f, 0.18f, 0.20f, 1.00f);
+        colors[ImGuiCol_FrameBgHovered]        = ImVec4(0.28f, 0.26f, 0.24f, 1.00f);
+        colors[ImGuiCol_FrameBgActive]         = ImVec4(0.36f, 0.30f, 0.22f, 1.00f);
+        colors[ImGuiCol_TitleBg]               = ImVec4(0.10f, 0.10f, 0.11f, 1.00f);
+        colors[ImGuiCol_TitleBgActive]         = ImVec4(0.22f, 0.18f, 0.10f, 1.00f);
+        colors[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.08f, 0.08f, 0.08f, 0.80f);
+        colors[ImGuiCol_MenuBarBg]             = ImVec4(0.12f, 0.12f, 0.13f, 1.00f);
+        colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.10f, 0.10f, 0.11f, 0.60f);
+        colors[ImGuiCol_ScrollbarGrab]         = ImVec4(0.30f, 0.30f, 0.32f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(0.42f, 0.42f, 0.44f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabActive]   = ImVec4(0.55f, 0.45f, 0.20f, 1.00f);
+        colors[ImGuiCol_CheckMark]             = ImVec4(0.95f, 0.65f, 0.10f, 1.00f);
+        colors[ImGuiCol_SliderGrab]            = ImVec4(0.85f, 0.58f, 0.12f, 1.00f);
+        colors[ImGuiCol_SliderGrabActive]      = ImVec4(1.00f, 0.75f, 0.20f, 1.00f);
+        colors[ImGuiCol_Button]                = ImVec4(0.24f, 0.22f, 0.20f, 1.00f);
+        colors[ImGuiCol_ButtonHovered]         = ImVec4(0.45f, 0.35f, 0.15f, 1.00f);
+        colors[ImGuiCol_ButtonActive]          = ImVec4(0.65f, 0.48f, 0.12f, 1.00f);
+        colors[ImGuiCol_Header]                = ImVec4(0.32f, 0.26f, 0.16f, 1.00f);
+        colors[ImGuiCol_HeaderHovered]         = ImVec4(0.46f, 0.36f, 0.18f, 1.00f);
+        colors[ImGuiCol_HeaderActive]          = ImVec4(0.58f, 0.44f, 0.16f, 1.00f);
+        colors[ImGuiCol_Separator]             = ImVec4(0.26f, 0.26f, 0.28f, 0.60f);
+        colors[ImGuiCol_Tab]                   = ImVec4(0.16f, 0.16f, 0.17f, 1.00f);
+        colors[ImGuiCol_TabHovered]            = ImVec4(0.40f, 0.32f, 0.16f, 1.00f);
+        colors[ImGuiCol_TabActive]             = ImVec4(0.32f, 0.25f, 0.14f, 1.00f);
+        colors[ImGuiCol_TabUnfocused]          = ImVec4(0.12f, 0.12f, 0.13f, 1.00f);
+        colors[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.22f, 0.19f, 0.14f, 1.00f);
+    } else if (themeIndex == 2) {
+        // Theme 2: Clean Studio (High-Contrast Neutral Charcoal & Teal Accent)
+        colors[ImGuiCol_Text]                  = ImVec4(0.95f, 0.95f, 0.95f, 1.00f);
+        colors[ImGuiCol_TextDisabled]          = ImVec4(0.50f, 0.50f, 0.50f, 1.00f);
+        colors[ImGuiCol_WindowBg]              = ImVec4(0.10f, 0.10f, 0.11f, 0.96f);
+        colors[ImGuiCol_ChildBg]               = ImVec4(0.12f, 0.12f, 0.13f, 1.00f);
+        colors[ImGuiCol_PopupBg]               = ImVec4(0.12f, 0.12f, 0.13f, 0.98f);
+        colors[ImGuiCol_Border]                = ImVec4(0.22f, 0.22f, 0.24f, 0.80f);
+        colors[ImGuiCol_FrameBg]               = ImVec4(0.16f, 0.16f, 0.18f, 1.00f);
+        colors[ImGuiCol_FrameBgHovered]        = ImVec4(0.22f, 0.22f, 0.26f, 1.00f);
+        colors[ImGuiCol_FrameBgActive]         = ImVec4(0.28f, 0.28f, 0.32f, 1.00f);
+        colors[ImGuiCol_TitleBg]               = ImVec4(0.08f, 0.08f, 0.09f, 1.00f);
+        colors[ImGuiCol_TitleBgActive]         = ImVec4(0.14f, 0.16f, 0.18f, 1.00f);
+        colors[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.07f, 0.07f, 0.08f, 0.80f);
+        colors[ImGuiCol_MenuBarBg]             = ImVec4(0.10f, 0.10f, 0.11f, 1.00f);
+        colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.08f, 0.08f, 0.09f, 0.60f);
+        colors[ImGuiCol_ScrollbarGrab]         = ImVec4(0.25f, 0.25f, 0.27f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(0.35f, 0.35f, 0.38f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabActive]   = ImVec4(0.15f, 0.65f, 0.55f, 1.00f);
+        colors[ImGuiCol_CheckMark]             = ImVec4(0.12f, 0.78f, 0.62f, 1.00f);
+        colors[ImGuiCol_SliderGrab]            = ImVec4(0.12f, 0.72f, 0.58f, 1.00f);
+        colors[ImGuiCol_SliderGrabActive]      = ImVec4(0.15f, 0.88f, 0.72f, 1.00f);
+        colors[ImGuiCol_Button]                = ImVec4(0.18f, 0.20f, 0.22f, 1.00f);
+        colors[ImGuiCol_ButtonHovered]         = ImVec4(0.14f, 0.55f, 0.46f, 1.00f);
+        colors[ImGuiCol_ButtonActive]          = ImVec4(0.12f, 0.72f, 0.58f, 1.00f);
+        colors[ImGuiCol_Header]                = ImVec4(0.16f, 0.30f, 0.28f, 1.00f);
+        colors[ImGuiCol_HeaderHovered]         = ImVec4(0.20f, 0.42f, 0.38f, 1.00f);
+        colors[ImGuiCol_HeaderActive]          = ImVec4(0.15f, 0.52f, 0.45f, 1.00f);
+        colors[ImGuiCol_Separator]             = ImVec4(0.22f, 0.22f, 0.24f, 0.80f);
+        colors[ImGuiCol_Tab]                   = ImVec4(0.13f, 0.14f, 0.15f, 1.00f);
+        colors[ImGuiCol_TabHovered]            = ImVec4(0.18f, 0.42f, 0.36f, 1.00f);
+        colors[ImGuiCol_TabActive]             = ImVec4(0.16f, 0.28f, 0.25f, 1.00f);
+        colors[ImGuiCol_TabUnfocused]          = ImVec4(0.10f, 0.10f, 0.11f, 1.00f);
+        colors[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.14f, 0.18f, 0.17f, 1.00f);
+    } else if (themeIndex == 3) {
+        // Theme 3: Light Studio (Clean Light Gray & Royal Blue)
+        colors[ImGuiCol_Text]                  = ImVec4(0.14f, 0.15f, 0.18f, 1.00f);
+        colors[ImGuiCol_TextDisabled]          = ImVec4(0.55f, 0.55f, 0.58f, 1.00f);
+        colors[ImGuiCol_WindowBg]              = ImVec4(0.93f, 0.94f, 0.96f, 0.98f);
+        colors[ImGuiCol_ChildBg]               = ImVec4(0.96f, 0.97f, 0.98f, 1.00f);
+        colors[ImGuiCol_PopupBg]               = ImVec4(0.98f, 0.98f, 0.99f, 0.98f);
+        colors[ImGuiCol_Border]                = ImVec4(0.78f, 0.80f, 0.84f, 0.80f);
+        colors[ImGuiCol_FrameBg]               = ImVec4(0.86f, 0.88f, 0.92f, 1.00f);
+        colors[ImGuiCol_FrameBgHovered]        = ImVec4(0.78f, 0.82f, 0.88f, 1.00f);
+        colors[ImGuiCol_FrameBgActive]         = ImVec4(0.70f, 0.76f, 0.84f, 1.00f);
+        colors[ImGuiCol_TitleBg]               = ImVec4(0.85f, 0.87f, 0.90f, 1.00f);
+        colors[ImGuiCol_TitleBgActive]         = ImVec4(0.78f, 0.82f, 0.88f, 1.00f);
+        colors[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.88f, 0.90f, 0.92f, 0.80f);
+        colors[ImGuiCol_MenuBarBg]             = ImVec4(0.90f, 0.92f, 0.94f, 1.00f);
+        colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.90f, 0.91f, 0.93f, 0.60f);
+        colors[ImGuiCol_ScrollbarGrab]         = ImVec4(0.72f, 0.74f, 0.78f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(0.60f, 0.63f, 0.68f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabActive]   = ImVec4(0.20f, 0.50f, 0.90f, 1.00f);
+        colors[ImGuiCol_CheckMark]             = ImVec4(0.15f, 0.45f, 0.92f, 1.00f);
+        colors[ImGuiCol_SliderGrab]            = ImVec4(0.25f, 0.52f, 0.92f, 1.00f);
+        colors[ImGuiCol_SliderGrabActive]      = ImVec4(0.12f, 0.42f, 0.95f, 1.00f);
+        colors[ImGuiCol_Button]                = ImVec4(0.82f, 0.85f, 0.90f, 1.00f);
+        colors[ImGuiCol_ButtonHovered]         = ImVec4(0.35f, 0.60f, 0.95f, 1.00f);
+        colors[ImGuiCol_ButtonActive]          = ImVec4(0.20f, 0.48f, 0.90f, 1.00f);
+        colors[ImGuiCol_Header]                = ImVec4(0.78f, 0.84f, 0.92f, 1.00f);
+        colors[ImGuiCol_HeaderHovered]         = ImVec4(0.70f, 0.78f, 0.90f, 1.00f);
+        colors[ImGuiCol_HeaderActive]          = ImVec4(0.60f, 0.72f, 0.88f, 1.00f);
+        colors[ImGuiCol_Separator]             = ImVec4(0.76f, 0.78f, 0.82f, 0.80f);
+        colors[ImGuiCol_Tab]                   = ImVec4(0.84f, 0.86f, 0.90f, 1.00f);
+        colors[ImGuiCol_TabHovered]            = ImVec4(0.72f, 0.78f, 0.88f, 1.00f);
+        colors[ImGuiCol_TabActive]             = ImVec4(0.93f, 0.94f, 0.96f, 1.00f);
+        colors[ImGuiCol_TabUnfocused]          = ImVec4(0.86f, 0.88f, 0.91f, 1.00f);
+        colors[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.90f, 0.92f, 0.94f, 1.00f);
+    } else {
+        // Theme 0 (Default): Modern Slate Dark
+        colors[ImGuiCol_Text]                  = ImVec4(0.92f, 0.93f, 0.95f, 1.00f);
+        colors[ImGuiCol_TextDisabled]          = ImVec4(0.50f, 0.52f, 0.56f, 1.00f);
+        colors[ImGuiCol_WindowBg]              = ImVec4(0.14f, 0.14f, 0.16f, 0.94f);
+        colors[ImGuiCol_ChildBg]               = ImVec4(0.16f, 0.16f, 0.18f, 1.00f);
+        colors[ImGuiCol_PopupBg]               = ImVec4(0.15f, 0.15f, 0.17f, 0.98f);
+        colors[ImGuiCol_Border]                = ImVec4(0.24f, 0.25f, 0.28f, 0.80f);
+        colors[ImGuiCol_FrameBg]               = ImVec4(0.18f, 0.19f, 0.22f, 1.00f);
+        colors[ImGuiCol_FrameBgHovered]        = ImVec4(0.24f, 0.26f, 0.30f, 1.00f);
+        colors[ImGuiCol_FrameBgActive]         = ImVec4(0.28f, 0.30f, 0.36f, 1.00f);
+        colors[ImGuiCol_TitleBg]               = ImVec4(0.12f, 0.12f, 0.14f, 1.00f);
+        colors[ImGuiCol_TitleBgActive]         = ImVec4(0.18f, 0.20f, 0.25f, 1.00f);
+        colors[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.10f, 0.10f, 0.11f, 0.80f);
+        colors[ImGuiCol_MenuBarBg]             = ImVec4(0.13f, 0.13f, 0.15f, 1.00f);
+        colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.12f, 0.12f, 0.14f, 0.60f);
+        colors[ImGuiCol_ScrollbarGrab]         = ImVec4(0.28f, 0.30f, 0.35f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(0.38f, 0.40f, 0.46f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabActive]   = ImVec4(0.48f, 0.52f, 0.60f, 1.00f);
+        colors[ImGuiCol_CheckMark]             = ImVec4(0.35f, 0.65f, 1.00f, 1.00f);
+        colors[ImGuiCol_SliderGrab]            = ImVec4(0.32f, 0.58f, 0.95f, 1.00f);
+        colors[ImGuiCol_SliderGrabActive]      = ImVec4(0.45f, 0.72f, 1.00f, 1.00f);
+        colors[ImGuiCol_Button]                = ImVec4(0.22f, 0.25f, 0.32f, 1.00f);
+        colors[ImGuiCol_ButtonHovered]         = ImVec4(0.30f, 0.35f, 0.45f, 1.00f);
+        colors[ImGuiCol_ButtonActive]          = ImVec4(0.38f, 0.45f, 0.58f, 1.00f);
+        colors[ImGuiCol_Header]                = ImVec4(0.24f, 0.26f, 0.32f, 1.00f);
+        colors[ImGuiCol_HeaderHovered]         = ImVec4(0.32f, 0.36f, 0.44f, 1.00f);
+        colors[ImGuiCol_HeaderActive]          = ImVec4(0.40f, 0.44f, 0.54f, 1.00f);
+        colors[ImGuiCol_Separator]             = ImVec4(0.24f, 0.25f, 0.28f, 0.80f);
+        colors[ImGuiCol_Tab]                   = ImVec4(0.18f, 0.20f, 0.24f, 1.00f);
+        colors[ImGuiCol_TabHovered]            = ImVec4(0.32f, 0.36f, 0.44f, 1.00f);
+        colors[ImGuiCol_TabActive]             = ImVec4(0.26f, 0.30f, 0.38f, 1.00f);
+        colors[ImGuiCol_TabUnfocused]          = ImVec4(0.15f, 0.16f, 0.18f, 1.00f);
+        colors[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.20f, 0.22f, 0.26f, 1.00f);
+    }
+}
+
+void EditorUI::ApplyPreferencesToRuntime(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
+    EditorPreferences& prefs = scene.GetPreferences();
+    scene.ApplyPreferences();
+    camera.SetSpeed(prefs.cameraMoveSpeed);
+    camera.SetFov(prefs.fieldOfView);
+    camera.SetSensitivity(prefs.mouseSensitivity);
+    camera.SetInvertY(prefs.invertY);
+    cmdMgr.SetMaxHistory(prefs.maxUndoSteps);
+    m_showStatsOverlay = prefs.showFps;
+    ApplyTheme(prefs.themeIndex);
+    scene.RebuildNavRenderer();
+}
+
+void EditorUI::Init() {
+    ApplyTheme(0);
 }
 
 void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr, float /*deltaTime*/) {
@@ -736,6 +877,29 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         ImGui::Separator();
         ImGui::Spacing();
 
+        ImGui::Text("Selection Target:");
+        bool connSel = scene.IsConnectionSelectionMode();
+        float selModeW = (ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f;
+
+        if (!connSel) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.48f, 0.85f, 1.0f));
+        if (ImGui::Button("Nav Areas##selAreas", ImVec2(selModeW, 24))) {
+            scene.SetConnectionSelectionMode(false);
+        }
+        if (!connSel) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Area Selection Mode: Click viewport to select, translate, and inspect NavAreas");
+
+        ImGui::SameLine();
+        if (connSel) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.55f, 0.10f, 1.0f));
+        if (ImGui::Button("Connections [Alt+C]##selConns", ImVec2(selModeW, 24))) {
+            scene.SetConnectionSelectionMode(true);
+        }
+        if (connSel) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Connection Selection Mode: Click connection lines directly without interfering with nav areas (Shortcut: Alt+C)");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
         ImGui::Text("3D Transform Gizmo Mode:");
         GizmoMode curGizmo = scene.GetGizmoMode();
         float btnW = (ImGui::GetContentRegionAvail().x - 12.0f) / 4.0f;
@@ -1238,6 +1402,12 @@ void EditorUI::RenderEntityInspector(EditorScene& scene, Camera& camera) {
 void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
     ImGui::SetNextWindowSize(ImVec2(290, 460), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Property Inspector")) {
+        if (scene.HasSelectedConnection()) {
+            RenderConnectionInspector(scene, camera, cmdMgr);
+            ImGui::End();
+            return;
+        }
+
         if (scene.GetSelectedEntityIndex() >= 0) {
             RenderEntityInspector(scene, camera);
             ImGui::End();
@@ -1687,6 +1857,101 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
     ImGui::End();
 }
 
+void EditorUI::RenderConnectionInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
+    const auto& conn = scene.GetSelectedConnection();
+    if (!conn.valid() || !scene.HasNAV()) return;
+
+    NavArea* fromArea = scene.GetNAV().GetAreaByID(conn.fromId);
+    NavArea* toArea = scene.GetNAV().GetAreaByID(conn.toId);
+    if (!fromArea || !toArea) {
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Connection endpoints invalid.");
+        if (ImGui::Button("Clear Selection", ImVec2(-1, 24))) {
+            scene.ClearSelectedConnection();
+        }
+        return;
+    }
+
+    bool isTwoWay = toArea->IsConnected(fromArea);
+    float deltaZ = toArea->GetCenter().z - fromArea->GetCenter().z;
+    float dist3D = (toArea->GetCenter() - fromArea->GetCenter()).Length();
+    bool isInvalid = (deltaZ > 18.0f && !(fromArea->GetAttributes() & NAV_ATTR_JUMP)) || (deltaZ < -200.0f);
+
+    ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.20f, 1.0f), "Connection Inspector");
+    ImGui::TextDisabled("Link: #%u -> #%u", conn.fromId, conn.toId);
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Type Badge
+    if (isTwoWay) {
+        ImGui::TextColored(ImVec4(0.2f, 0.9f, 1.0f, 1.0f), "[Bidirectional (Two-Way)]");
+    } else {
+        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "[One-Way (Directional)]");
+    }
+
+    // Step Height Validation
+    if (isInvalid) {
+        ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "Step Delta: %+.1f u [IMPASSABLE (>18u)]", deltaZ);
+    } else {
+        ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.5f, 1.0f), "Step Delta: %+.1f u [Walkable]", deltaZ);
+    }
+    ImGui::Text("Length: %.1f units", dist3D);
+
+    const char* dirNames[] = { "North (0)", "East (1)", "South (2)", "West (3)" };
+    if (conn.dir >= 0 && conn.dir < 4) {
+        ImGui::Text("Direction: %s", dirNames[conn.dir]);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Endpoints navigation
+    float btnW = (ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f;
+    ImGui::Text("Source Area #%u:", conn.fromId);
+    if (ImGui::Button("Select##connSrc", ImVec2(btnW, 22))) {
+        scene.SelectArea(conn.fromId);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Focus##connFocusSrc", ImVec2(btnW, 22))) {
+        camera.FocusOn(fromArea->GetCenter());
+    }
+
+    ImGui::Spacing();
+    ImGui::Text("Target Area #%u:", conn.toId);
+    if (ImGui::Button("Select##connDst", ImVec2(btnW, 22))) {
+        scene.SelectArea(conn.toId);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Focus##connFocusDst", ImVec2(btnW, 22))) {
+        camera.FocusOn(toArea->GetCenter());
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::Text("Connection Operations:");
+    if (ImGui::Button(isTwoWay ? "Convert to One-Way" : "Convert to Two-Way (Bidirectional)", ImVec2(-1, 26))) {
+        scene.ToggleSelectedConnectionBidirectional(cmdMgr);
+    }
+
+    if (ImGui::Button("Reverse Direction (Swap Endpoints)", ImVec2(-1, 26))) {
+        scene.ReverseSelectedConnection(cmdMgr);
+    }
+
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.75f, 0.20f, 0.20f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.90f, 0.25f, 0.25f, 1.0f));
+    if (ImGui::Button("Delete Connection [Del]", ImVec2(-1, 26))) {
+        scene.DeleteSelectedConnection(cmdMgr);
+    }
+    ImGui::PopStyleColor(2);
+
+    ImGui::Spacing();
+    if (ImGui::Button("Deselect Connection [Esc]", ImVec2(-1, 24))) {
+        scene.ClearSelectedConnection();
+    }
+}
+
 void EditorUI::RenderNavMeshGlobalInspector(EditorScene& scene, CommandManager& cmdMgr) {
     const auto& nav = scene.GetNAV();
     ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "Navigation Mesh Overview");
@@ -1884,7 +2149,10 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
                 ImGui::Text("Map: %s | Entity #%d (%s) @ (%.0f, %.0f, %.0f) | Entities: %zu | Grid: %.0f [%s]",
                     bspName, selEnt->index, selEnt->classname.c_str(), selEnt->origin.x, selEnt->origin.y, selEnt->origin.z,
                     entCount, grid, snap ? "SNAP" : "FREE");
-            }
+        } else if (scene.HasSelectedConnection()) {
+            const auto& conn = scene.GetSelectedConnection();
+            ImGui::Text("Map: %s | Selected Connection: #%u -> #%u | Del: Delete | Esc: Deselect | Grid: %.0f [%s]",
+                bspName, conn.fromId, conn.toId, grid, snap ? "SNAP" : "FREE");
         } else if (scene.GetSelectedAreaIDs().size() > 1) {
             ImGui::Text("Map: %s | Multi-Selection: %zu NavAreas Selected | Grid: %.0f [%s] | Esc to clear",
                 bspName, scene.GetSelectedAreaIDs().size(), grid, snap ? "SNAP" : "FREE");
@@ -2009,8 +2277,10 @@ void EditorUI::RenderHelpModal() {
         ImGui::BulletText("Shift + S: Snap selected area flush to neighbors (close micro-gaps)");
         ImGui::BulletText("R: Rotate area orientation 90 degrees");
         ImGui::BulletText("C: Connect Mode (Left-Click target: 2-Way, Shift+Click: 1-Way)");
+        ImGui::BulletText("Alt + C: Toggle Connection Selection Mode (click connection links directly)");
+        ImGui::BulletText("Alt + Left-Click: Pick connection without interfering with nav areas");
         ImGui::BulletText("Shift + D: Duplicate selected area");
-        ImGui::BulletText("X / Delete: Delete selected area");
+        ImGui::BulletText("X / Delete / Backspace: Delete selected area or connection");
         ImGui::BulletText("Space: Snap selected area elevation to BSP floor");
         ImGui::BulletText("Ctrl+Z / Ctrl+Y: Undo / Redo history");
         ImGui::BulletText("Ctrl+S: Save current navigation mesh");
@@ -2076,7 +2346,10 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
                 ImGui::Separator();
                 ImGui::Spacing();
                 ImGui::Text("Connection Validation:");
-                ImGui::Checkbox("Highlight Impassable Steps (> 18u) in Crimson Red", &prefs.showConnectionValidity);
+                if (ImGui::Checkbox("Highlight Impassable Steps (> 18u) in Crimson Red", &prefs.showConnectionValidity)) {
+                    scene.GetNavRenderer().SetShowConnectionValidity(prefs.showConnectionValidity);
+                    scene.RebuildNavRenderer();
+                }
 
                 ImGui::EndTabItem();
             }
@@ -2087,13 +2360,19 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
                 float moveSpeed = prefs.cameraMoveSpeed;
                 if (ImGui::SliderFloat("Camera Move Speed", &moveSpeed, 100.0f, 3000.0f, "%.0f u/s")) {
                     prefs.cameraMoveSpeed = moveSpeed;
+                    camera.SetSpeed(moveSpeed);
                 }
                 ImGui::SliderFloat("Shift Speed Multiplier", &prefs.cameraFastMultiplier, 1.5f, 5.0f, "%.1fx");
-                ImGui::SliderFloat("Mouse Sensitivity", &prefs.mouseSensitivity, 0.02f, 0.50f, "%.2f");
-                ImGui::Checkbox("Invert Mouse Y (Pitch)", &prefs.invertY);
+                if (ImGui::SliderFloat("Mouse Sensitivity", &prefs.mouseSensitivity, 0.02f, 0.50f, "%.2f")) {
+                    camera.SetSensitivity(prefs.mouseSensitivity);
+                }
+                if (ImGui::Checkbox("Invert Mouse Y (Pitch)", &prefs.invertY)) {
+                    camera.SetInvertY(prefs.invertY);
+                }
                 float fov = prefs.fieldOfView;
                 if (ImGui::SliderFloat("Field of View (FOV)", &fov, 50.0f, 110.0f, "%.0f deg")) {
                     prefs.fieldOfView = fov;
+                    camera.SetFov(fov);
                 }
 
                 ImGui::EndTabItem();
@@ -2102,15 +2381,22 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
             if (ImGui::BeginTabItem("Visuals & Theme")) {
                 ImGui::Spacing();
                 ImGui::Text("Visual Features:");
-                ImGui::Checkbox("Show 3D Skybox Atmosphere by Default", &prefs.show3DSkybox);
-                ImGui::Checkbox("Show FPS & Performance Stats Overlay", &prefs.showFps);
+                if (ImGui::Checkbox("Show 3D Skybox Atmosphere by Default", &prefs.show3DSkybox)) {
+                    scene.SetShowSkybox(prefs.show3DSkybox);
+                }
+                if (ImGui::Checkbox("Show FPS & Performance Stats Overlay", &prefs.showFps)) {
+                    m_showStatsOverlay = prefs.showFps;
+                }
 
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Spacing();
                 ImGui::Text("UI Theme:");
-                const char* themes[] = { "Modern Slate (Dark)", "Classic GoldSrc", "Clean Neutral" };
-                ImGui::Combo("Theme Style", &prefs.themeIndex, themes, 3);
+                const char* themes[] = { "Modern Slate (Dark)", "Classic GoldSrc", "Clean Studio (Neutral)", "Light Studio" };
+                if (ImGui::Combo("Theme Style", &prefs.themeIndex, themes, 4)) {
+                    ApplyTheme(prefs.themeIndex);
+                }
+                ImGui::TextDisabled("Themes adapt all windows, docking tabs, buttons, and popups.");
 
                 ImGui::EndTabItem();
             }
@@ -2122,18 +2408,19 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
         ImGui::Separator();
         ImGui::Spacing();
 
-        if (ImGui::Button("Save & Apply", ImVec2(120, 26))) {
+        if (ImGui::Button("Save & Close", ImVec2(110, 26))) {
             prefs.Save("navstudio_prefs.ini");
-            scene.ApplyPreferences();
-            camera.SetSpeed(prefs.cameraMoveSpeed);
-            camera.SetFov(prefs.fieldOfView);
-            cmdMgr.SetMaxHistory(prefs.maxUndoSteps);
-            scene.RebuildNavRenderer();
+            ApplyPreferencesToRuntime(scene, camera, cmdMgr);
             m_showPreferencesModal = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Close", ImVec2(90, 26))) {
+        if (ImGui::Button("Apply", ImVec2(80, 26))) {
+            prefs.Save("navstudio_prefs.ini");
+            ApplyPreferencesToRuntime(scene, camera, cmdMgr);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Close", ImVec2(80, 26))) {
             m_showPreferencesModal = false;
             ImGui::CloseCurrentPopup();
         }

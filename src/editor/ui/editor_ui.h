@@ -12,6 +12,8 @@ public:
     ~EditorUI();
 
     void Init();
+    void ApplyTheme(int themeIndex);
+    void ApplyPreferencesToRuntime(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
     void Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr, float deltaTime);
 
     bool IsMouseOverUI() const { return m_mouseOverUI; }
@@ -37,6 +39,7 @@ private:
     void RenderToolPalette(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
     void RenderHierarchy(EditorScene& scene, Camera& camera);
     void RenderInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
+    void RenderConnectionInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
     void RenderStatusBar(const EditorScene& scene, const Camera& camera);
     void RenderHelpModal();
     void RenderPreferencesModal(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);

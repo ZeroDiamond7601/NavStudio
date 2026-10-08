@@ -951,6 +951,19 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
         }
     }
 
+    // Selected Connection Visual Highlight
+    if (m_selectedConnection.valid() && m_nav && m_nav->IsLoaded()) {
+        const NavArea* a1 = m_nav->GetAreaByID(m_selectedConnection.fromId);
+        const NavArea* a2 = m_nav->GetAreaByID(m_selectedConnection.toId);
+        if (a1 && a2) {
+            Vector3 c1 = a1->GetCenter() + Vector3(0.0f, 0.0f, 6.0f);
+            Vector3 c2 = a2->GetCenter() + Vector3(0.0f, 0.0f, 6.0f);
+            m_gizmoRenderer.RenderLineSegment(lineShader, mvp, c1, c2, 1.0f, 0.88f, 0.10f, 1.0f, 4.5f);
+            m_gizmoRenderer.RenderRectMarquee(lineShader, mvp, c1 - Vector3(6, 6, 0), c1 + Vector3(6, 6, 0), 1.0f, 0.88f, 0.10f, 1.0f);
+            m_gizmoRenderer.RenderRectMarquee(lineShader, mvp, c2 - Vector3(6, 6, 0), c2 + Vector3(6, 6, 0), 0.15f, 1.0f, 0.60f, 1.0f);
+        }
+    }
+
     // Bridge Mode Visual Highlights
     if (m_isBridgeMode && m_nav && m_nav->IsLoaded()) {
         auto GetEdgePts = [](const NavArea* a, SelectedHandleType e, Vector3& p0, Vector3& p1) {
@@ -2129,6 +2142,61 @@ void EditorScene::DisconnectSelectedFrom(uint32_t targetId, bool bidirectional, 
     NavArea* area = GetSelectedArea();
     if (!area || targetId == 0) return;
     cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(this, area->GetID(), targetId, bidirectional));
+}
+
+void EditorScene::SelectConnection(uint32_t fromId, uint32_t toId, int dir) {
+    m_selectedConnection = { fromId, toId, dir };
+    m_navRenderer.SetSelectedConnection(fromId, toId);
+}
+
+void EditorScene::ClearSelectedConnection() {
+    m_selectedConnection.clear();
+    m_navRenderer.SetSelectedConnection(0, 0);
+}
+
+bool EditorScene::DeleteSelectedConnection(CommandManager& cmdMgr) {
+    if (!m_selectedConnection.valid() || !m_nav || !m_nav->IsLoaded()) return false;
+    uint32_t fromId = m_selectedConnection.fromId;
+    uint32_t toId = m_selectedConnection.toId;
+    NavArea* fromArea = m_nav->GetAreaByID(fromId);
+    NavArea* toArea = m_nav->GetAreaByID(toId);
+    if (!fromArea || !toArea) return false;
+
+    bool isTwoWay = toArea->IsConnected(fromArea);
+    cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(this, fromId, toId, isTwoWay));
+    ClearSelectedConnection();
+    return true;
+}
+
+bool EditorScene::ReverseSelectedConnection(CommandManager& cmdMgr) {
+    if (!m_selectedConnection.valid() || !m_nav || !m_nav->IsLoaded()) return false;
+    uint32_t fromId = m_selectedConnection.fromId;
+    uint32_t toId = m_selectedConnection.toId;
+    NavArea* fromArea = m_nav->GetAreaByID(fromId);
+    NavArea* toArea = m_nav->GetAreaByID(toId);
+    if (!fromArea || !toArea) return false;
+
+    cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(this, fromId, toId, false));
+    cmdMgr.ExecuteCommand(std::make_unique<CmdConnectAreas>(this, toId, fromId, false));
+    SelectConnection(toId, fromId);
+    return true;
+}
+
+bool EditorScene::ToggleSelectedConnectionBidirectional(CommandManager& cmdMgr) {
+    if (!m_selectedConnection.valid() || !m_nav || !m_nav->IsLoaded()) return false;
+    uint32_t fromId = m_selectedConnection.fromId;
+    uint32_t toId = m_selectedConnection.toId;
+    NavArea* fromArea = m_nav->GetAreaByID(fromId);
+    NavArea* toArea = m_nav->GetAreaByID(toId);
+    if (!fromArea || !toArea) return false;
+
+    bool isTwoWay = toArea->IsConnected(fromArea);
+    if (isTwoWay) {
+        cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(this, toId, fromId, false));
+    } else {
+        cmdMgr.ExecuteCommand(std::make_unique<CmdConnectAreas>(this, toId, fromId, false));
+    }
+    return true;
 }
 
 void EditorScene::DuplicateSelectedArea(CommandManager& cmdMgr) {

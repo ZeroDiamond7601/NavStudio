@@ -40,6 +40,21 @@ struct AsyncLoadContext {
     float displayProgress{0.0f};
 };
 
+struct SelectedConnection {
+    uint32_t fromId{0};
+    uint32_t toId{0};
+    int dir{-1};
+
+    bool valid() const { return fromId != 0 && toId != 0; }
+    void clear() { fromId = 0; toId = 0; dir = -1; }
+    bool operator==(const SelectedConnection& o) const {
+        return fromId == o.fromId && toId == o.toId;
+    }
+    bool operator!=(const SelectedConnection& o) const {
+        return !(*this == o);
+    }
+};
+
 class EditorScene {
 public:
     EditorScene();
@@ -90,6 +105,19 @@ public:
     NavArea* GetSelectedArea();
     const NavArea* GetSelectedArea() const;
     uint32_t GetSelectedAreaID() const { return m_selectedAreaId; }
+
+    // Connection Selection & Editing
+    bool IsConnectionSelectionMode() const { return m_connectionSelectMode; }
+    void SetConnectionSelectionMode(bool enable) { m_connectionSelectMode = enable; }
+    void ToggleConnectionSelectionMode() { m_connectionSelectMode = !m_connectionSelectMode; }
+
+    bool HasSelectedConnection() const { return m_selectedConnection.valid(); }
+    const SelectedConnection& GetSelectedConnection() const { return m_selectedConnection; }
+    void SelectConnection(uint32_t fromId, uint32_t toId, int dir = -1);
+    void ClearSelectedConnection();
+    bool DeleteSelectedConnection(class CommandManager& cmdMgr);
+    bool ReverseSelectedConnection(class CommandManager& cmdMgr);
+    bool ToggleSelectedConnectionBidirectional(class CommandManager& cmdMgr);
 
     EntityRenderer& GetEntityRenderer() { return m_entityRenderer; }
     const EntityRenderer& GetEntityRenderer() const { return m_entityRenderer; }
@@ -355,6 +383,8 @@ private:
     uint32_t m_selectedAreaId;
     uint32_t m_hoveredAreaId;
     int m_selectedEntityIndex{-1};
+    SelectedConnection m_selectedConnection;
+    bool m_connectionSelectMode{false};
 
     BSPRenderMode m_bspMode;
     bool m_showBSP;

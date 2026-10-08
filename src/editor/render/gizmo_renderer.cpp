@@ -31,7 +31,7 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
     std::vector<uint32_t> indices;
 
     float camDist = (camPos - center).Length();
-    float gLen = std::max(42.0f, std::min(130.0f, camDist * 0.082f));
+    float gLen = std::max(48.0f, std::min(450.0f, camDist * 0.105f));
 
     float coneH = gLen * 0.22f;
     float coneR = gLen * 0.08f;
@@ -402,21 +402,23 @@ void GizmoRenderer::Render(const Shader& lineShader, const Matrix4& mvp,
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LEQUAL);
-    glDepthMask(GL_FALSE); // High-visibility overlay without overwriting depth buffer
+
+    // Pop out on top of world geometry (like Blender / Unreal / Unity)
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
 
     lineShader.Bind();
     lineShader.SetMat4("u_MVP", mvp);
     lineShader.SetVec4("u_Color", 1.0f, 1.0f, 1.0f, 1.0f);
 
-    glLineWidth(2.2f);
+    glLineWidth(3.0f);
     glBindVertexArray(m_vao);
     glDrawElements(GL_LINES, m_indexCount, GL_UNSIGNED_INT, nullptr);
     glBindVertexArray(0);
     lineShader.Unbind();
 
     glLineWidth(1.0f);
+    glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_LESS);
     glDisable(GL_BLEND);

@@ -163,6 +163,34 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     g_activeScene->ConnectSelectedTo(hitArea, !shiftPressed, *g_cmdMgr);
                 }
             } else {
+                bool altPressed = (mods & GLFW_MOD_ALT) != 0 ||
+                                  glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
+                                  glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
+                bool connSelectMode = altPressed || (g_activeScene && g_activeScene->IsConnectionSelectionMode());
+
+                if (connSelectMode && g_activeScene) {
+                    uint32_t fromId = 0, toId = 0;
+                    int dir = -1;
+                    bool hitConn = ScenePicker::PickConnection(
+                        *g_activeScene,
+                        static_cast<float>(mouseX), static_cast<float>(mouseY),
+                        static_cast<float>(displayW), static_cast<float>(displayH),
+                        g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect),
+                        fromId, toId, dir
+                    );
+                    if (hitConn) {
+                        g_activeScene->SelectConnection(fromId, toId, dir);
+                        return;
+                    } else if (g_activeScene->IsConnectionSelectionMode()) {
+                        g_activeScene->ClearSelectedConnection();
+                        return;
+                    }
+                }
+
+                if (g_activeScene && g_activeScene->HasSelectedConnection() && !connSelectMode) {
+                    g_activeScene->ClearSelectedConnection();
+                }
+
                 // Test area gizmo handles, edges, and corners first
                 SelectedHandleType handle = ScenePicker::PickAreaHandles(
                     *g_activeScene,
@@ -291,6 +319,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                        g_activeScene->GetSelectedAreaID() == 0 && g_activeScene->GetSelectedAreaIDs().empty() &&
                        g_activeScene->GetSelectedEntityIndex() < 0) { // F: Fill Area Tool (when nothing selected)
                 g_activeScene->ToggleFillAreaMode();
+            } else if (key == GLFW_KEY_C && (mods & GLFW_MOD_ALT) != 0) { // Alt+C: Toggle Connection Selection Mode
+                g_activeScene->ToggleConnectionSelectionMode();
             } else if (key == GLFW_KEY_C && (mods & GLFW_MOD_CONTROL) != 0 && (mods & GLFW_MOD_SHIFT) == 0) { // Ctrl+C: Copy areas
                 g_activeScene->CopySelectedAreas();
             } else if (key == GLFW_KEY_V && (mods & GLFW_MOD_CONTROL) != 0 && (mods & GLFW_MOD_SHIFT) == 0) { // Ctrl+V: Paste areas
@@ -327,6 +357,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                     g_activeScene->ExitFillAreaMode();
                 } else if (g_activeScene->IsBridgeMode()) {
                     g_activeScene->CancelBridgeMode();
+                } else if (g_activeScene->HasSelectedConnection()) {
+                    g_activeScene->ClearSelectedConnection();
                 } else if (!g_activeScene->GetSelectedAreaIDs().empty() || g_activeScene->GetSelectedAreaID() != 0) {
                     g_activeScene->ClearSelection();
                 } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {
@@ -403,6 +435,20 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                     }
                 } else if (key == GLFW_KEY_ESCAPE) {
                     g_activeScene->ClearSelection();
+                }
+            } else if (g_activeScene->HasSelectedConnection()) {
+                if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
+                    g_activeScene->DeleteSelectedConnection(*g_cmdMgr);
+                } else if (key == GLFW_KEY_ESCAPE) {
+                    g_activeScene->ClearSelectedConnection();
+                } else if (key == GLFW_KEY_F) {
+                    const auto& sc = g_activeScene->GetSelectedConnection();
+                    const NavArea* a1 = g_activeScene->GetNAV().GetAreaByID(sc.fromId);
+                    const NavArea* a2 = g_activeScene->GetNAV().GetAreaByID(sc.toId);
+                    if (a1 && a2) {
+                        Vector3 mid = (a1->GetCenter() + a2->GetCenter()) * 0.5f;
+                        g_camera.FocusOn(mid);
+                    }
                 }
             } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {
                 if (key == GLFW_KEY_F) {
@@ -626,6 +672,7 @@ int main(int argc, char* argv[]) {
     g_cmdMgr = &cmdMgr;
     EditorUI editorUI;
     editorUI.Init();
+    editorUI.ApplyPreferencesToRuntime(scene, g_camera, cmdMgr);
     g_editorUI = &editorUI;
     glfwSetWindowCloseCallback(window, WindowCloseCallback);
 

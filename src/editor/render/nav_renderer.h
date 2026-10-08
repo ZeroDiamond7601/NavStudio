@@ -40,6 +40,13 @@ public:
     void SetMaxStepHeight(float step) { m_maxStepHeight = step; }
     size_t GetInvalidConnectionCount() const { return m_invalidConnectionCount; }
 
+    void SetSelectedConnection(uint32_t fromId, uint32_t toId) {
+        m_selConnFrom = fromId;
+        m_selConnTo = toId;
+    }
+    uint32_t GetSelectedConnectionFrom() const { return m_selConnFrom; }
+    uint32_t GetSelectedConnectionTo() const { return m_selConnTo; }
+
 private:
     void GenerateBuffers(const std::vector<NavVertex>& vertices, const std::vector<uint32_t>& indices);
     void GenerateLineBuffers(const std::vector<NavVertex>& vertices, const std::vector<uint32_t>& indices);
@@ -59,6 +66,8 @@ private:
     bool m_showConnectionValidity{true};
     float m_maxStepHeight{18.0f};
     size_t m_invalidConnectionCount{0};
+    uint32_t m_selConnFrom{0};
+    uint32_t m_selConnTo{0};
 };
 
 #endif // NAV_RENDERER_H

@@ -214,7 +214,14 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
                     }
                 }
 
-                if (isInvalidStep) {
+                bool isConnSelected = (m_selConnFrom == area->GetID() && m_selConnTo == target->GetID()) ||
+                                      (m_selConnFrom == target->GetID() && m_selConnTo == area->GetID() && isTwoWay);
+
+                if (isConnSelected) {
+                    // Selected Connection: Brilliant Radiant Gold / Amber
+                    cr = 1.0f; cg = 0.90f; cb = 0.10f; ca = 1.0f;
+                    zLiftTotal += 5.0f;
+                } else if (isInvalidStep) {
                     m_invalidConnectionCount++;
                     // Impassable invalid step: glowing crimson red
                     cr = 1.0f; cg = 0.15f; cb = 0.15f; ca = 1.0f;

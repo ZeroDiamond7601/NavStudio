@@ -40,6 +40,12 @@ public:
     float GetSpeed() const { return m_speed; }
     void SetSpeed(float s) { m_speed = s; }
 
+    float GetSensitivity() const { return m_sensitivity; }
+    void SetSensitivity(float s) { m_sensitivity = s; }
+
+    bool GetInvertY() const { return m_invertY; }
+    void SetInvertY(bool inv) { m_invertY = inv; }
+
     float GetFov() const { return m_fov; }
     void SetFov(float fov) { m_fov = fov; }
 
@@ -65,6 +71,7 @@ private:
     float m_pitch;
     float m_speed;
     float m_sensitivity;
+    bool m_invertY{false};
     float m_fov;
     float m_nearPlane;
     float m_farPlane;
