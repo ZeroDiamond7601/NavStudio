@@ -17,6 +17,7 @@
 #include "editor/render/skybox_renderer.h"
 
 #include "editor/scene/editor_handles.h"
+#include "editor/scene/editor_preferences.h"
 #include <vector>
 
 struct AsyncLoadContext {
@@ -210,6 +211,15 @@ public:
     float GetDrawAreaNeZ() const { return m_drawAreaNeZ; }
     float GetDrawAreaSeZ() const { return m_drawAreaSeZ; }
     float GetDrawAreaSwZ() const { return m_drawAreaSwZ; }
+    bool SnapToAreaCorner(Vector3& pos, float tolerance = 8.0f);
+    bool IsDrawAreaCornerSnapped() const { return m_drawAreaSnappedCorner; }
+    const Vector3& GetDrawAreaCornerPos() const { return m_drawAreaCornerPos; }
+    float GetCornerSnapTolerance() const { return m_cornerSnapTolerance; }
+    void SetCornerSnapTolerance(float tol) { m_cornerSnapTolerance = tol; }
+
+    // Area Copy / Paste across maps and sessions
+    bool CopySelectedAreas();
+    bool PasteAreas(const Vector3* targetPos, class CommandManager& cmdMgr);
 
     // Fill Area Tool (Click any floor to auto-fill room/surface with NavMesh)
     bool IsFillAreaMode() const { return m_isFillAreaMode; }
@@ -219,7 +229,13 @@ public:
     void CancelFillAreaMode() { ExitFillAreaMode(); }
     size_t FloodFillAreaAt(const Ray& ray, class CommandManager& cmdMgr);
 
-    // Split Area Knife Tool (Interactive Cutter [K])
+    // Split Area Knife Tool (Interactive Cutter [K] with 0°, 45°, 90°, 135° angles)
+    enum KnifeCutAngle {
+        KNIFE_ANGLE_0 = 0,    // Horizontal cut (along X, splitting Y)
+        KNIFE_ANGLE_45 = 45,  // Diagonal cut 45°
+        KNIFE_ANGLE_90 = 90,  // Vertical cut (along Y, splitting X)
+        KNIFE_ANGLE_135 = 135 // Diagonal cut 135°
+    };
     bool IsKnifeMode() const { return m_isKnifeMode; }
     void StartKnifeMode();
     void ExitKnifeMode();
@@ -227,11 +243,21 @@ public:
     void UpdateKnife(const Ray& ray);
     void OnKnifeClick(const Ray& ray, class CommandManager& cmdMgr);
     uint32_t GetKnifeHoverArea() const { return m_knifeHoverAreaId; }
-    bool GetKnifeSplitAlongY() const { return m_knifeSplitAlongY; }
+    bool GetKnifeSplitAlongY() const { return m_knifeAngle == KNIFE_ANGLE_0; }
     float GetKnifeSplitCoord() const { return m_knifeSplitCoord; }
-    void RotateKnifeAxis();
-    bool GetKnifeAxisOverride() const { return m_knifeForceAxis ? m_knifeAxisOverride : m_knifeSplitAlongY; }
+    float GetKnifeSplitCoordX() const { return m_knifeSplitCoordX; }
+    float GetKnifeSplitCoordY() const { return m_knifeSplitCoordY; }
+    KnifeCutAngle GetKnifeAngle() const { return m_knifeAngle; }
+    void SetKnifeAngle(KnifeCutAngle angle);
+    void CycleKnifeAngle();
+    void RotateKnifeAxis() { CycleKnifeAngle(); }
+    bool GetKnifeAxisOverride() const { return m_knifeAngle == KNIFE_ANGLE_0; }
     bool IsKnifeAxisForced() const { return m_knifeForceAxis; }
+
+    // User Preferences
+    EditorPreferences& GetPreferences() { return m_prefs; }
+    const EditorPreferences& GetPreferences() const { return m_prefs; }
+    void ApplyPreferences();
 
     // Auto-Crouch & Obstacle Flag Analyzer
     struct AnalyzerStats {
@@ -362,6 +388,9 @@ private:
     float m_drawAreaNeZ{0.0f};
     float m_drawAreaSeZ{0.0f};
     float m_drawAreaSwZ{0.0f};
+    bool m_drawAreaSnappedCorner{false};
+    Vector3 m_drawAreaCornerPos{0.0f, 0.0f, 0.0f};
+    float m_cornerSnapTolerance{8.0f};
 
     // Fill Area Tool
     bool m_isFillAreaMode{false};
@@ -382,8 +411,14 @@ private:
     uint32_t m_knifeHoverAreaId{0};
     bool m_knifeSplitAlongY{false};
     float m_knifeSplitCoord{0.0f};
+    float m_knifeSplitCoordX{0.0f};
+    float m_knifeSplitCoordY{0.0f};
     bool m_knifeForceAxis{false};
     bool m_knifeAxisOverride{false};
+    KnifeCutAngle m_knifeAngle{KNIFE_ANGLE_0};
+
+    // User Preferences
+    EditorPreferences m_prefs;
 
     // Handles
     SelectedHandleType m_hoveredHandle{HANDLE_NONE};

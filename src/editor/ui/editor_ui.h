@@ -30,6 +30,7 @@ public:
 
     bool CheckUnsavedChanges(EditorScene& scene, CommandManager& cmdMgr, PendingAction action, const std::string& path = "");
     void ExecutePendingAction(EditorScene& scene, CommandManager& cmdMgr);
+    void OpenPreferences() { m_showPreferencesModal = true; }
 
 private:
     void RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
@@ -38,6 +39,7 @@ private:
     void RenderInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
     void RenderStatusBar(const EditorScene& scene, const Camera& camera);
     void RenderHelpModal();
+    void RenderPreferencesModal(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
     void RenderWelcomeOverlay(EditorScene& scene);
     void RenderOpenPathModal(EditorScene& scene);
     void RenderLoadingModal(const EditorScene& scene);
@@ -97,6 +99,7 @@ private:
     bool m_showOptimizeModal{false};
     EditorScene::OptimizeMeshStats m_optimizeStats;
     bool m_showStatsOverlay{true};
+    bool m_showPreferencesModal{false};
 };
 
 #endif // EDITOR_UI_H

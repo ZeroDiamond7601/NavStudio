@@ -950,6 +950,56 @@ size_t NavGenerator::FloodFillFromSeed(
         }
     }
 
+    // Height smoothing along seam: align new border area corners with existing areas
+    for (NavArea* area : newAreas) {
+        if (!area) continue;
+        bool heightModified = false;
+        NavExtent ext = area->GetExtent();
+        float neZ = area->GetNEZ();
+        float swZ = area->GetSWZ();
+        float nwZ = ext.lo.z;
+        float seZ = ext.hi.z;
+
+        for (int d = 0; d < NUM_NAV_DIRECTIONS; ++d) {
+            for (const auto& conn : area->GetAdjacentList(static_cast<NavDirType>(d))) {
+                NavArea* existing = conn.area;
+                if (!existing || std::find(newAreas.begin(), newAreas.end(), existing) != newAreas.end()) continue;
+
+                float maxStep = options.maxStepHeight;
+                if (d == NAV_DIR_NORTH) {
+                    float exZ_NW = existing->GetZ(ext.lo.x, ext.lo.y);
+                    float exZ_NE = existing->GetZ(ext.hi.x, ext.lo.y);
+                    if (std::fabs(exZ_NW - nwZ) <= maxStep) { nwZ = exZ_NW; heightModified = true; }
+                    if (std::fabs(exZ_NE - neZ) <= maxStep) { neZ = exZ_NE; heightModified = true; }
+                } else if (d == NAV_DIR_SOUTH) {
+                    float exZ_SW = existing->GetZ(ext.lo.x, ext.hi.y);
+                    float exZ_SE = existing->GetZ(ext.hi.x, ext.hi.y);
+                    if (std::fabs(exZ_SW - swZ) <= maxStep) { swZ = exZ_SW; heightModified = true; }
+                    if (std::fabs(exZ_SE - seZ) <= maxStep) { seZ = exZ_SE; heightModified = true; }
+                } else if (d == NAV_DIR_WEST) {
+                    float exZ_NW = existing->GetZ(ext.lo.x, ext.lo.y);
+                    float exZ_SW = existing->GetZ(ext.lo.x, ext.hi.y);
+                    if (std::fabs(exZ_NW - nwZ) <= maxStep) { nwZ = exZ_NW; heightModified = true; }
+                    if (std::fabs(exZ_SW - swZ) <= maxStep) { swZ = exZ_SW; heightModified = true; }
+                } else if (d == NAV_DIR_EAST) {
+                    float exZ_NE = existing->GetZ(ext.hi.x, ext.lo.y);
+                    float exZ_SE = existing->GetZ(ext.hi.x, ext.hi.y);
+                    if (std::fabs(exZ_NE - neZ) <= maxStep) { neZ = exZ_NE; heightModified = true; }
+                    if (std::fabs(exZ_SE - seZ) <= maxStep) { seZ = exZ_SE; heightModified = true; }
+                }
+            }
+        }
+
+        if (heightModified) {
+            ext.lo.z = nwZ;
+            ext.hi.z = seZ;
+            nav.GetGrid().RemoveArea(area);
+            area->SetExtent(ext);
+            area->SetCornerHeights(neZ, swZ);
+            nav.GetGrid().AddArea(area);
+        }
+    }
+
     if (outCreatedAreaIds) {
         outCreatedAreaIds->clear();
         for (NavArea* a : newAreas) {

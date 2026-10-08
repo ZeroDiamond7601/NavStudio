@@ -176,6 +176,10 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
         RenderHelpModal();
     }
 
+    if (m_showPreferencesModal) {
+        RenderPreferencesModal(scene, camera, cmdMgr);
+    }
+
     if (m_showOpenPathModal) {
         RenderOpenPathModal(scene);
     }
@@ -328,6 +332,15 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
 
             ImGui::Separator();
+            bool hasSelection = (scene.GetSelectedAreaID() != 0 || scene.GetSelectedAreaCount() > 0);
+            if (ImGui::MenuItem("Copy Selected Areas", "Ctrl+C", false, hasSelection)) {
+                scene.CopySelectedAreas();
+            }
+            if (ImGui::MenuItem("Paste Areas", "Ctrl+V", false, scene.HasNAV())) {
+                scene.PasteAreas(nullptr, cmdMgr);
+            }
+
+            ImGui::Separator();
             NavArea* sel = scene.GetSelectedArea();
             bool drawActive = scene.IsDrawAreaMode();
             if (ImGui::MenuItem("Draw Area Box...", "N", &drawActive)) {
@@ -358,6 +371,11 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             if (ImGui::MenuItem("Clear Selection", "Escape", false, scene.GetSelectedAreaID() != 0)) {
                 scene.SelectArea(0);
             }
+
+            ImGui::Separator();
+            if (ImGui::MenuItem("Preferences...", "Ctrl+,")) {
+                m_showPreferencesModal = true;
+            }
             ImGui::EndMenu();
         }
 
@@ -375,6 +393,12 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             bool showConn = scene.GetShowConnections();
             if (ImGui::MenuItem("Show Directional Connections", nullptr, &showConn)) {
                 scene.SetShowConnections(showConn);
+            }
+
+            bool showValidity = scene.GetNavRenderer().GetShowConnectionValidity();
+            if (ImGui::MenuItem("Show Connection Step Validity Overlay", "Ctrl+Shift+V", &showValidity)) {
+                scene.GetNavRenderer().SetShowConnectionValidity(showValidity);
+                scene.RebuildNavRenderer();
             }
 
             bool showWireOnSolid = scene.GetShowWireframeOnSolid();
@@ -689,6 +713,25 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
             scene.IncreaseGridSize();
         }
 
+        // Quick Grid Presets
+        const float gridPresets[] = { 16.0f, 25.0f, 32.0f, 48.0f, 64.0f };
+        float pBtnW = (ImGui::GetContentRegionAvail().x - 16.0f) / 5.0f;
+        for (int p = 0; p < 5; ++p) {
+            if (p > 0) ImGui::SameLine(0.0f, 4.0f);
+            char pLbl[16];
+            std::snprintf(pLbl, sizeof(pLbl), "%.0f##pgrid%d", gridPresets[p], p);
+            bool isActivePreset = (std::abs(curGrid - gridPresets[p]) < 0.5f);
+            if (isActivePreset) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.50f, 0.85f, 1.0f));
+            }
+            if (ImGui::Button(pLbl, ImVec2(pBtnW, 20))) {
+                scene.SetGridSize(gridPresets[p]);
+            }
+            if (isActivePreset) {
+                ImGui::PopStyleColor();
+            }
+        }
+
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
@@ -791,12 +834,18 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click or drag across an area to slice along seam with bilinearly interpolated elevation");
 
         if (knifeActive) {
-            ImGui::SameLine();
-            if (ImGui::SmallButton(scene.GetKnifeAxisOverride() ? "Cut: Y-Axis" : "Cut: X-Axis")) {
-                scene.RotateKnifeAxis();
+            const char* angleLabel = "Cut: 0° (Horiz)";
+            auto kAngle = scene.GetKnifeAngle();
+            if (kAngle == EditorScene::KNIFE_ANGLE_45) angleLabel = "Cut: 45° (Diag)";
+            else if (kAngle == EditorScene::KNIFE_ANGLE_90) angleLabel = "Cut: 90° (Vert)";
+            else if (kAngle == EditorScene::KNIFE_ANGLE_135) angleLabel = "Cut: 135° (Diag)";
+
+            if (ImGui::Button(angleLabel, ImVec2(ImGui::GetContentRegionAvail().x - 70.0f, 22))) {
+                scene.CycleKnifeAngle();
             }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click or press R to cycle cut angle [0°, 45°, 90°, 135°]");
             ImGui::SameLine();
-            ImGui::TextDisabled("[R to rotate]");
+            ImGui::TextDisabled("[R cycle]");
         }
 
         if (ImGui::Button("Merge Areas [Shift+M]", ImVec2(-1, 26))) {
@@ -1915,6 +1964,11 @@ void EditorUI::RenderStatsOverlay(const EditorScene& scene, const Camera& camera
         ImGui::Separator();
         ImGui::TextDisabled("Camera: (%.0f, %.0f, %.0f)", camPos.x, camPos.y, camPos.z);
         ImGui::TextDisabled("Grid: %.0f [%s]", scene.GetGridSize(), scene.GetGridSnap() ? "SNAP" : "FREE");
+
+        if (scene.GetNavRenderer().GetShowConnectionValidity() && scene.GetNavRenderer().GetInvalidConnectionCount() > 0) {
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "[!] %zu Impassable Steps (> 18u)", scene.GetNavRenderer().GetInvalidConnectionCount());
+        }
     }
     ImGui::End();
 }
@@ -1924,7 +1978,7 @@ void EditorUI::RenderHelpModal() {
 
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(500, 420));
+    ImGui::SetNextWindowSize(ImVec2(500, 440));
 
     if (ImGui::BeginPopupModal("Controls and Shortcuts", &m_showHelpModal, ImGuiWindowFlags_NoResize)) {
         ImGui::Text("Camera Navigation:");
@@ -1947,6 +2001,8 @@ void EditorUI::RenderHelpModal() {
         ImGui::BulletText("Shift + Left-Drag Edge: Extrude edge interactively");
         ImGui::BulletText("Shift + X: Split selected area into two connected halves");
         ImGui::BulletText("Shift + M: Merge selected area with adjacent collinear area");
+        ImGui::BulletText("Ctrl + C / Ctrl + V: Copy / Paste areas across maps and sessions");
+        ImGui::BulletText("K / R: Knife cutter tool (R cycles angle: 0°, 45°, 90°, 135°)");
         ImGui::BulletText("[ / ]: Decrease / Increase grid snap size (1 to 512)");
         ImGui::BulletText("Shift + W: Toggle Grid Snapping");
         ImGui::BulletText("B: Bridge Mode (Click Edge 1 + Edge 2 to generate connecting area)");
@@ -1958,11 +2014,13 @@ void EditorUI::RenderHelpModal() {
         ImGui::BulletText("Space: Snap selected area elevation to BSP floor");
         ImGui::BulletText("Ctrl+Z / Ctrl+Y: Undo / Redo history");
         ImGui::BulletText("Ctrl+S: Save current navigation mesh");
+        ImGui::BulletText("Ctrl + Shift + V: Toggle connection step (>18u) validity overlay");
+        ImGui::BulletText("Ctrl + ,: Open Preferences dialog");
         ImGui::BulletText("F3: Toggle Entity 3D visualization");
         ImGui::BulletText("F4: Cycle BSP Shading Mode (Textured / Solid / Wireframe / Ghost)");
         ImGui::BulletText("Ctrl + Shift + K: Toggle 3D Skybox rendering");
-        ImGui::BulletText("N: Draw Area Marquee Tool (Click 1st corner, move cursor, click 2nd corner to create)");
-        ImGui::BulletText("Shift + Click / Ctrl + Click: Multi-select NavAreas in 3D viewport or explorer");
+        ImGui::BulletText("N: Draw Area Marquee Tool (with magnetic corner snapping)");
+        ImGui::BulletText("Shift + Click / Ctrl + Click: Multi-select NavAreas");
         ImGui::BulletText("Ctrl + A: Select All NavAreas");
         ImGui::BulletText("Escape: Clear selection / Cancel modal tool");
 
@@ -1972,6 +2030,114 @@ void EditorUI::RenderHelpModal() {
             m_showHelpModal = false;
             ImGui::CloseCurrentPopup();
         }
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
+    ImGui::OpenPopup("Preferences##NavStudioPrefs");
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(560, 480));
+
+    if (ImGui::BeginPopupModal("Preferences##NavStudioPrefs", &m_showPreferencesModal)) {
+        EditorPreferences& prefs = scene.GetPreferences();
+
+        if (ImGui::BeginTabBar("PreferencesTabs")) {
+            if (ImGui::BeginTabItem("General")) {
+                ImGui::Spacing();
+                ImGui::Text("Grid & Snapping Defaults:");
+                ImGui::SliderFloat("Default Grid Size", &prefs.defaultGridSize, 4.0f, 128.0f, "%.0f u");
+                ImGui::Checkbox("Enable Grid Snap by Default", &prefs.defaultGridSnap);
+                ImGui::Checkbox("Enable Mesh Neighbor Snap by Default", &prefs.defaultMeshSnap);
+                ImGui::SliderFloat("Mesh Snap Tolerance", &prefs.meshSnapTolerance, 1.0f, 16.0f, "%.1f u");
+                ImGui::SliderFloat("Corner Snap Radius", &prefs.cornerSnapTolerance, 2.0f, 20.0f, "%.1f u");
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::Text("Undo History:");
+                ImGui::SliderInt("Max Undo History Steps", &prefs.maxUndoSteps, 10, 500, "%d steps");
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Limits RAM usage for large mesh editing sessions");
+
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Navigation & Mesh")) {
+                ImGui::Spacing();
+                ImGui::Text("Auto-Generation Defaults:");
+                ImGui::SliderFloat("Default Step Size", &prefs.defaultGenStep, 16.0f, 64.0f, "%.0f u");
+                ImGui::SliderFloat("Max Step Height", &prefs.maxStepHeight, 12.0f, 32.0f, "%.0f u (Standard CS: 18u)");
+                ImGui::Checkbox("Auto-Optimize (Merge Coplanar Quads) After Generation", &prefs.autoOptimizeAfterGen);
+                ImGui::Checkbox("Seamless Border Height Smoothing on Flood Fill", &prefs.floodFillSmoothSeams);
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::Text("Connection Validation:");
+                ImGui::Checkbox("Highlight Impassable Steps (> 18u) in Crimson Red", &prefs.showConnectionValidity);
+
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Camera & Viewport")) {
+                ImGui::Spacing();
+                ImGui::Text("Camera Movement:");
+                float moveSpeed = prefs.cameraMoveSpeed;
+                if (ImGui::SliderFloat("Camera Move Speed", &moveSpeed, 100.0f, 3000.0f, "%.0f u/s")) {
+                    prefs.cameraMoveSpeed = moveSpeed;
+                }
+                ImGui::SliderFloat("Shift Speed Multiplier", &prefs.cameraFastMultiplier, 1.5f, 5.0f, "%.1fx");
+                ImGui::SliderFloat("Mouse Sensitivity", &prefs.mouseSensitivity, 0.02f, 0.50f, "%.2f");
+                ImGui::Checkbox("Invert Mouse Y (Pitch)", &prefs.invertY);
+                float fov = prefs.fieldOfView;
+                if (ImGui::SliderFloat("Field of View (FOV)", &fov, 50.0f, 110.0f, "%.0f deg")) {
+                    prefs.fieldOfView = fov;
+                }
+
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Visuals & Theme")) {
+                ImGui::Spacing();
+                ImGui::Text("Visual Features:");
+                ImGui::Checkbox("Show 3D Skybox Atmosphere by Default", &prefs.show3DSkybox);
+                ImGui::Checkbox("Show FPS & Performance Stats Overlay", &prefs.showFps);
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::Text("UI Theme:");
+                const char* themes[] = { "Modern Slate (Dark)", "Classic GoldSrc", "Clean Neutral" };
+                ImGui::Combo("Theme Style", &prefs.themeIndex, themes, 3);
+
+                ImGui::EndTabItem();
+            }
+
+            ImGui::EndTabBar();
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Save & Apply", ImVec2(120, 26))) {
+            prefs.Save("navstudio_prefs.ini");
+            scene.ApplyPreferences();
+            camera.SetSpeed(prefs.cameraMoveSpeed);
+            camera.SetFov(prefs.fieldOfView);
+            cmdMgr.SetMaxHistory(prefs.maxUndoSteps);
+            scene.RebuildNavRenderer();
+            m_showPreferencesModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Close", ImVec2(90, 26))) {
+            m_showPreferencesModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+
         ImGui::EndPopup();
     }
 }

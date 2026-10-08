@@ -41,6 +41,7 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
     Clear();
     if (!nav.IsLoaded()) return false;
 
+    m_invalidConnectionCount = 0;
     const auto& areas = nav.GetAreas();
     m_areaCount = areas.size();
     if (areas.empty()) return false;
@@ -203,7 +204,22 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
                 float zLiftTotal = kZLift + 2.0f;
                 float cr, cg, cb, ca;
 
-                if (isSelArea || isTargetSelected) {
+                float deltaZ = centerB.z - centerA.z;
+                bool isInvalidStep = false;
+                if (m_showConnectionValidity) {
+                    if (deltaZ > m_maxStepHeight && !(area->GetAttributes() & NAV_ATTR_JUMP)) {
+                        isInvalidStep = true;
+                    } else if (deltaZ < -200.0f) {
+                        isInvalidStep = true;
+                    }
+                }
+
+                if (isInvalidStep) {
+                    m_invalidConnectionCount++;
+                    // Impassable invalid step: glowing crimson red
+                    cr = 1.0f; cg = 0.15f; cb = 0.15f; ca = 1.0f;
+                    zLiftTotal += 3.0f;
+                } else if (isSelArea || isTargetSelected) {
                     zLiftTotal += 2.0f; // Elevate active connections
                     if (isTwoWay) {
                         // Brilliant Electric Cyan for active two-way

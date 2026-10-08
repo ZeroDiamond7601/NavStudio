@@ -285,12 +285,37 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 g_activeScene->ToggleDrawAreaMode();
             } else if (key == GLFW_KEY_K && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // K: Knife / Split Tool
                 g_activeScene->ToggleKnifeMode();
-            } else if (key == GLFW_KEY_R && action == GLFW_PRESS && g_activeScene->IsKnifeMode()) { // R: Rotate knife axis (in knife mode)
-                g_activeScene->RotateKnifeAxis();
+            } else if (key == GLFW_KEY_R && action == GLFW_PRESS && g_activeScene->IsKnifeMode()) { // R: Cycle knife angle
+                g_activeScene->CycleKnifeAngle();
             } else if (key == GLFW_KEY_F && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0 &&
                        g_activeScene->GetSelectedAreaID() == 0 && g_activeScene->GetSelectedAreaIDs().empty() &&
                        g_activeScene->GetSelectedEntityIndex() < 0) { // F: Fill Area Tool (when nothing selected)
                 g_activeScene->ToggleFillAreaMode();
+            } else if (key == GLFW_KEY_C && (mods & GLFW_MOD_CONTROL) != 0 && (mods & GLFW_MOD_SHIFT) == 0) { // Ctrl+C: Copy areas
+                g_activeScene->CopySelectedAreas();
+            } else if (key == GLFW_KEY_V && (mods & GLFW_MOD_CONTROL) != 0 && (mods & GLFW_MOD_SHIFT) == 0) { // Ctrl+V: Paste areas
+                double mouseX, mouseY;
+                glfwGetCursorPos(window, &mouseX, &mouseY);
+                int displayW = 0, displayH = 0;
+                glfwGetFramebufferSize(window, &displayW, &displayH);
+                float aspect = (displayH > 0) ? (static_cast<float>(displayW) / static_cast<float>(displayH)) : 1.0f;
+                Ray ray = ScenePicker::ScreenPointToRay(
+                    static_cast<float>(mouseX), static_cast<float>(mouseY),
+                    static_cast<float>(displayW), static_cast<float>(displayH),
+                    g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
+                );
+                Vector3 hit;
+                bool hasHit = false;
+                if (g_activeScene->HasBSP()) {
+                    hasHit = ScenePicker::PickBSPFloor(*g_activeScene, ray, &hit);
+                }
+                g_activeScene->PasteAreas(hasHit ? &hit : nullptr, *g_cmdMgr);
+            } else if (key == GLFW_KEY_V && (mods & GLFW_MOD_CONTROL) != 0 && (mods & GLFW_MOD_SHIFT) != 0) { // Ctrl+Shift+V: Toggle validity overlay
+                auto& navR = g_activeScene->GetNavRenderer();
+                navR.SetShowConnectionValidity(!navR.GetShowConnectionValidity());
+                g_activeScene->RebuildNavRenderer();
+            } else if (key == GLFW_KEY_COMMA && (mods & GLFW_MOD_CONTROL) != 0) { // Ctrl+,: Preferences
+                if (g_editorUI) g_editorUI->OpenPreferences();
             } else if (key == GLFW_KEY_A && (mods & GLFW_MOD_CONTROL) != 0) { // Ctrl+A: Select All
                 g_activeScene->SelectAllAreas();
             } else if (key == GLFW_KEY_ESCAPE) {

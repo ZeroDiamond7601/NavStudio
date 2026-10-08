@@ -34,6 +34,12 @@ public:
     bool IsLoaded() const { return m_loaded; }
     size_t GetAreaCount() const { return m_areaCount; }
 
+    bool GetShowConnectionValidity() const { return m_showConnectionValidity; }
+    void SetShowConnectionValidity(bool show) { m_showConnectionValidity = show; }
+    float GetMaxStepHeight() const { return m_maxStepHeight; }
+    void SetMaxStepHeight(float step) { m_maxStepHeight = step; }
+    size_t GetInvalidConnectionCount() const { return m_invalidConnectionCount; }
+
 private:
     void GenerateBuffers(const std::vector<NavVertex>& vertices, const std::vector<uint32_t>& indices);
     void GenerateLineBuffers(const std::vector<NavVertex>& vertices, const std::vector<uint32_t>& indices);
@@ -50,6 +56,9 @@ private:
 
     bool m_loaded;
     size_t m_areaCount;
+    bool m_showConnectionValidity{true};
+    float m_maxStepHeight{18.0f};
+    size_t m_invalidConnectionCount{0};
 };
 
 #endif // NAV_RENDERER_H

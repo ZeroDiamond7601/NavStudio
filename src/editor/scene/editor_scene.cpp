@@ -3,9 +3,11 @@
 #include "editor/commands/nav_commands.h"
 #include <cstdio>
 #include <fstream>
+#include <sstream>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <imgui.h>
 
 EditorScene::EditorScene()
     : m_bsp(std::make_unique<BSPFile>())
@@ -18,6 +20,8 @@ EditorScene::EditorScene()
     , m_showConnections(true)
 {
     LoadRecentFiles();
+    m_prefs.Load("navstudio_prefs.ini");
+    ApplyPreferences();
 
     // Auto-detect standard Half-Life / Counter-Strike game directory
     static const char* kDefaultPaths[] = {
@@ -62,6 +66,17 @@ void EditorScene::SaveRecentFiles() {
     for (const auto& path : m_recentFiles) {
         file << path << "\n";
     }
+}
+
+void EditorScene::ApplyPreferences() {
+    m_gridSize = m_prefs.defaultGridSize;
+    m_gridSnap = m_prefs.defaultGridSnap;
+    m_meshSnap = m_prefs.defaultMeshSnap;
+    m_meshSnapTolerance = m_prefs.meshSnapTolerance;
+    m_cornerSnapTolerance = m_prefs.cornerSnapTolerance;
+    m_showSkybox = m_prefs.show3DSkybox;
+    m_navRenderer.SetShowConnectionValidity(m_prefs.showConnectionValidity);
+    m_navRenderer.SetMaxStepHeight(m_prefs.maxStepHeight);
 }
 
 void EditorScene::AddRecentFile(const std::string& path) {
@@ -162,6 +177,47 @@ float EditorScene::SnapToNeighborEdge(uint32_t currentAreaId, float candidateVal
         return bestSnap;
     }
     return SnapValue(candidateVal);
+}
+
+bool EditorScene::SnapToAreaCorner(Vector3& pos, float tolerance) {
+    if (!m_nav || !m_nav->IsLoaded()) return false;
+    float bestDistSq = tolerance * tolerance;
+    Vector3 bestCorner;
+    bool found = false;
+
+    for (const NavArea* a : m_nav->GetAreas()) {
+        if (!a) continue;
+        const NavExtent& ext = a->GetExtent();
+        if (pos.x < ext.lo.x - tolerance || pos.x > ext.hi.x + tolerance ||
+            pos.y < ext.lo.y - tolerance || pos.y > ext.hi.y + tolerance) {
+            continue;
+        }
+
+        Vector3 corners[4] = {
+            Vector3(ext.lo.x, ext.lo.y, ext.lo.z),
+            Vector3(ext.hi.x, ext.lo.y, a->GetNEZ()),
+            Vector3(ext.hi.x, ext.hi.y, ext.hi.z),
+            Vector3(ext.lo.x, ext.hi.y, a->GetSWZ())
+        };
+
+        for (int i = 0; i < 4; ++i) {
+            float dx = pos.x - corners[i].x;
+            float dy = pos.y - corners[i].y;
+            float dz = pos.z - corners[i].z;
+            float d2 = dx * dx + dy * dy;
+            if (d2 <= bestDistSq && std::abs(dz) <= 32.0f) {
+                bestDistSq = d2;
+                bestCorner = corners[i];
+                found = true;
+            }
+        }
+    }
+
+    if (found) {
+        pos = bestCorner;
+        return true;
+    }
+    return false;
 }
 
 void EditorScene::SnapSelectedAreaToNeighbors(CommandManager& cmdMgr) {
@@ -967,19 +1023,49 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
                                           0.0f, 0.9f, 1.0f, 1.0f);
     }
 
+    if (m_isDrawAreaMode && m_drawAreaSnappedCorner) {
+        Vector3 cPos = m_drawAreaCornerPos;
+        m_gizmoRenderer.RenderRectMarquee(lineShader, mvp, cPos - Vector3(6, 6, 0), cPos + Vector3(6, 6, 0), 1.0f, 0.95f, 0.1f, 1.0f);
+        m_gizmoRenderer.RenderLineSegment(lineShader, mvp, cPos - Vector3(0, 0, 8), cPos + Vector3(0, 0, 8), 1.0f, 0.95f, 0.1f, 1.0f, 3.0f);
+    }
+
     // Knife Tool Mode Slicing Guideline Preview
     if (m_isKnifeMode && m_knifeHoverAreaId != 0 && m_nav && m_nav->IsLoaded()) {
         const NavArea* knifeArea = m_nav->GetAreaByID(m_knifeHoverAreaId);
         if (knifeArea) {
             const NavExtent& ext = knifeArea->GetExtent();
-            if (m_knifeSplitAlongY) {
-                Vector3 p0(ext.lo.x, m_knifeSplitCoord, knifeArea->GetZ(ext.lo.x, m_knifeSplitCoord) + 1.5f);
-                Vector3 p1(ext.hi.x, m_knifeSplitCoord, knifeArea->GetZ(ext.hi.x, m_knifeSplitCoord) + 1.5f);
+            if (m_knifeAngle == KNIFE_ANGLE_0) {
+                Vector3 p0(ext.lo.x, m_knifeSplitCoordY, knifeArea->GetZ(ext.lo.x, m_knifeSplitCoordY) + 1.5f);
+                Vector3 p1(ext.hi.x, m_knifeSplitCoordY, knifeArea->GetZ(ext.hi.x, m_knifeSplitCoordY) + 1.5f);
                 m_gizmoRenderer.RenderLineSegment(lineShader, mvp, p0, p1, 1.0f, 0.45f, 0.1f, 1.0f, 4.0f);
-            } else {
-                Vector3 p0(m_knifeSplitCoord, ext.lo.y, knifeArea->GetZ(m_knifeSplitCoord, ext.lo.y) + 1.5f);
-                Vector3 p1(m_knifeSplitCoord, ext.hi.y, knifeArea->GetZ(m_knifeSplitCoord, ext.hi.y) + 1.5f);
+            } else if (m_knifeAngle == KNIFE_ANGLE_90) {
+                Vector3 p0(m_knifeSplitCoordX, ext.lo.y, knifeArea->GetZ(m_knifeSplitCoordX, ext.lo.y) + 1.5f);
+                Vector3 p1(m_knifeSplitCoordX, ext.hi.y, knifeArea->GetZ(m_knifeSplitCoordX, ext.hi.y) + 1.5f);
                 m_gizmoRenderer.RenderLineSegment(lineShader, mvp, p0, p1, 1.0f, 0.45f, 0.1f, 1.0f, 4.0f);
+            } else if (m_knifeAngle == KNIFE_ANGLE_45) {
+                // Diagonal 45° line from SW to NE
+                Vector3 p0(ext.lo.x, ext.hi.y, knifeArea->GetZ(ext.lo.x, ext.hi.y) + 1.5f);
+                Vector3 p1(ext.hi.x, ext.lo.y, knifeArea->GetZ(ext.hi.x, ext.lo.y) + 1.5f);
+                m_gizmoRenderer.RenderLineSegment(lineShader, mvp, p0, p1, 1.0f, 0.35f, 0.1f, 1.0f, 4.0f);
+
+                Vector3 h0(ext.lo.x, m_knifeSplitCoordY, knifeArea->GetZ(ext.lo.x, m_knifeSplitCoordY) + 1.0f);
+                Vector3 h1(ext.hi.x, m_knifeSplitCoordY, knifeArea->GetZ(ext.hi.x, m_knifeSplitCoordY) + 1.0f);
+                Vector3 v0(m_knifeSplitCoordX, ext.lo.y, knifeArea->GetZ(m_knifeSplitCoordX, ext.lo.y) + 1.0f);
+                Vector3 v1(m_knifeSplitCoordX, ext.hi.y, knifeArea->GetZ(m_knifeSplitCoordX, ext.hi.y) + 1.0f);
+                m_gizmoRenderer.RenderLineSegment(lineShader, mvp, h0, h1, 1.0f, 0.6f, 0.2f, 0.5f, 2.0f);
+                m_gizmoRenderer.RenderLineSegment(lineShader, mvp, v0, v1, 1.0f, 0.6f, 0.2f, 0.5f, 2.0f);
+            } else if (m_knifeAngle == KNIFE_ANGLE_135) {
+                // Diagonal 135° line from NW to SE
+                Vector3 p0(ext.lo.x, ext.lo.y, knifeArea->GetZ(ext.lo.x, ext.lo.y) + 1.5f);
+                Vector3 p1(ext.hi.x, ext.hi.y, knifeArea->GetZ(ext.hi.x, ext.hi.y) + 1.5f);
+                m_gizmoRenderer.RenderLineSegment(lineShader, mvp, p0, p1, 1.0f, 0.35f, 0.1f, 1.0f, 4.0f);
+
+                Vector3 h0(ext.lo.x, m_knifeSplitCoordY, knifeArea->GetZ(ext.lo.x, m_knifeSplitCoordY) + 1.0f);
+                Vector3 h1(ext.hi.x, m_knifeSplitCoordY, knifeArea->GetZ(ext.hi.x, m_knifeSplitCoordY) + 1.0f);
+                Vector3 v0(m_knifeSplitCoordX, ext.lo.y, knifeArea->GetZ(m_knifeSplitCoordX, ext.lo.y) + 1.0f);
+                Vector3 v1(m_knifeSplitCoordX, ext.hi.y, knifeArea->GetZ(m_knifeSplitCoordX, ext.hi.y) + 1.0f);
+                m_gizmoRenderer.RenderLineSegment(lineShader, mvp, h0, h1, 1.0f, 0.6f, 0.2f, 0.5f, 2.0f);
+                m_gizmoRenderer.RenderLineSegment(lineShader, mvp, v0, v1, 1.0f, 0.6f, 0.2f, 0.5f, 2.0f);
             }
         }
     }
@@ -2208,11 +2294,13 @@ void EditorScene::CancelDrawArea() {
     } else {
         m_isDrawAreaMode = false;
     }
+    m_drawAreaSnappedCorner = false;
 }
 
 void EditorScene::ExitDrawAreaMode() {
     m_isDrawAreaMode = false;
     m_drawAreaActive = false;
+    m_drawAreaSnappedCorner = false;
 }
 
 void EditorScene::ToggleDrawAreaMode() {
@@ -2246,6 +2334,17 @@ void EditorScene::UpdateDrawArea(const Ray& ray) {
         hit.x = SnapToNeighborEdge(0, hit.x, true, std::min(m_drawAreaStart.y, hit.y), std::max(m_drawAreaStart.y, hit.y));
         hit.y = SnapToNeighborEdge(0, hit.y, false, std::min(m_drawAreaStart.x, hit.x), std::max(m_drawAreaStart.x, hit.x));
     }
+
+    // Magnetic corner snapping to existing navmesh areas
+    Vector3 cornerHit = hit;
+    if (SnapToAreaCorner(cornerHit, m_cornerSnapTolerance)) {
+        hit = cornerHit;
+        m_drawAreaSnappedCorner = true;
+        m_drawAreaCornerPos = cornerHit;
+    } else {
+        m_drawAreaSnappedCorner = false;
+    }
+
     m_drawAreaCurrent = hit;
 
     float minX = std::min(m_drawAreaStart.x, m_drawAreaCurrent.x);
@@ -2334,6 +2433,11 @@ void EditorScene::OnDrawAreaClick(const Ray& ray, CommandManager& cmdMgr) {
             hitPoint.y = SnapToNeighborEdge(0, hitPoint.y, false, hitPoint.x - 16.0f, hitPoint.x + 16.0f);
         }
 
+        Vector3 cornerHit = hitPoint;
+        if (SnapToAreaCorner(cornerHit, m_cornerSnapTolerance)) {
+            hitPoint = cornerHit;
+        }
+
         m_drawAreaStart = hitPoint;
         m_drawAreaElevation = hitPoint.z;
         m_drawAreaCurrent = hitPoint;
@@ -2345,6 +2449,7 @@ void EditorScene::OnDrawAreaClick(const Ray& ray, CommandManager& cmdMgr) {
     } else {
         // Step 2: 2nd Corner
         UpdateDrawArea(ray);
+        m_drawAreaSnappedCorner = false;
 
         float minX = std::min(m_drawAreaStart.x, m_drawAreaCurrent.x);
         float maxX = std::max(m_drawAreaStart.x, m_drawAreaCurrent.x);
@@ -2724,6 +2829,7 @@ void EditorScene::StartKnifeMode() {
     m_knifeHoverAreaId = 0;
     m_knifeForceAxis = false;
     m_knifeAxisOverride = false;
+    m_knifeAngle = KNIFE_ANGLE_0;
     ExitDrawAreaMode();
     ExitFillAreaMode();
     CancelBridgeMode();
@@ -2735,6 +2841,7 @@ void EditorScene::ExitKnifeMode() {
     m_knifeHoverAreaId = 0;
     m_knifeForceAxis = false;
     m_knifeAxisOverride = false;
+    m_knifeAngle = KNIFE_ANGLE_0;
 }
 
 void EditorScene::ToggleKnifeMode() {
@@ -2745,9 +2852,17 @@ void EditorScene::ToggleKnifeMode() {
     }
 }
 
-void EditorScene::RotateKnifeAxis() {
+void EditorScene::SetKnifeAngle(KnifeCutAngle angle) {
+    m_knifeAngle = angle;
     m_knifeForceAxis = true;
-    m_knifeAxisOverride = !m_knifeAxisOverride;
+}
+
+void EditorScene::CycleKnifeAngle() {
+    m_knifeForceAxis = true;
+    if (m_knifeAngle == KNIFE_ANGLE_0) m_knifeAngle = KNIFE_ANGLE_45;
+    else if (m_knifeAngle == KNIFE_ANGLE_45) m_knifeAngle = KNIFE_ANGLE_90;
+    else if (m_knifeAngle == KNIFE_ANGLE_90) m_knifeAngle = KNIFE_ANGLE_135;
+    else m_knifeAngle = KNIFE_ANGLE_0;
 }
 
 void EditorScene::UpdateKnife(const Ray& ray) {
@@ -2773,40 +2888,193 @@ void EditorScene::UpdateKnife(const Ray& ray) {
     }
 
     const NavExtent& ext = area->GetExtent();
-    float w = ext.hi.x - ext.lo.x;
-    float l = ext.hi.y - ext.lo.y;
-
-    if (l >= w) {
-        m_knifeSplitAlongY = true;
-        float rawY = hitPos.y;
-        if (m_gridSnap) rawY = SnapValue(rawY);
-        m_knifeSplitCoord = std::max(ext.lo.y + 4.0f, std::min(ext.hi.y - 4.0f, rawY));
-    } else {
-        m_knifeSplitAlongY = false;
-        float rawX = hitPos.x;
-        if (m_gridSnap) rawX = SnapValue(rawX);
-        m_knifeSplitCoord = std::max(ext.lo.x + 4.0f, std::min(ext.hi.x - 4.0f, rawX));
+    float rawX = hitPos.x;
+    float rawY = hitPos.y;
+    if (m_gridSnap) {
+        rawX = SnapValue(rawX);
+        rawY = SnapValue(rawY);
     }
 
-    // Apply axis override if user has explicitly set it
-    if (m_knifeForceAxis) {
-        m_knifeSplitAlongY = m_knifeAxisOverride;
-        if (m_knifeSplitAlongY) {
-            float rawY = hitPos.y;
-            if (m_gridSnap) rawY = SnapValue(rawY);
-            m_knifeSplitCoord = std::max(ext.lo.y + 4.0f, std::min(ext.hi.y - 4.0f, rawY));
-        } else {
-            float rawX = hitPos.x;
-            if (m_gridSnap) rawX = SnapValue(rawX);
-            m_knifeSplitCoord = std::max(ext.lo.x + 4.0f, std::min(ext.hi.x - 4.0f, rawX));
-        }
+    if (!m_knifeForceAxis) {
+        float w = ext.hi.x - ext.lo.x;
+        float l = ext.hi.y - ext.lo.y;
+        m_knifeAngle = (l >= w) ? KNIFE_ANGLE_0 : KNIFE_ANGLE_90;
     }
+
+    m_knifeSplitCoordX = std::max(ext.lo.x + 4.0f, std::min(ext.hi.x - 4.0f, rawX));
+    m_knifeSplitCoordY = std::max(ext.lo.y + 4.0f, std::min(ext.hi.y - 4.0f, rawY));
+    m_knifeSplitCoord = (m_knifeAngle == KNIFE_ANGLE_0) ? m_knifeSplitCoordY : m_knifeSplitCoordX;
+    m_knifeSplitAlongY = (m_knifeAngle == KNIFE_ANGLE_0);
 }
 
 void EditorScene::OnKnifeClick(const Ray& ray, CommandManager& cmdMgr) {
     if (!m_isKnifeMode) return;
     UpdateKnife(ray);
     if (m_knifeHoverAreaId != 0) {
-        cmdMgr.ExecuteCommand(std::make_unique<CmdSplitAreaKnife>(this, m_knifeHoverAreaId, m_knifeSplitCoord, m_knifeSplitAlongY));
+        if (m_knifeAngle == KNIFE_ANGLE_0) {
+            cmdMgr.ExecuteCommand(std::make_unique<CmdSplitAreaKnife>(this, m_knifeHoverAreaId, m_knifeSplitCoordY, true));
+        } else if (m_knifeAngle == KNIFE_ANGLE_90) {
+            cmdMgr.ExecuteCommand(std::make_unique<CmdSplitAreaKnife>(this, m_knifeHoverAreaId, m_knifeSplitCoordX, false));
+        } else if (m_knifeAngle == KNIFE_ANGLE_45) {
+            cmdMgr.ExecuteCommand(std::make_unique<CmdSplitAreaQuadKnife>(this, m_knifeHoverAreaId, m_knifeSplitCoordX, m_knifeSplitCoordY, true));
+        } else if (m_knifeAngle == KNIFE_ANGLE_135) {
+            cmdMgr.ExecuteCommand(std::make_unique<CmdSplitAreaQuadKnife>(this, m_knifeHoverAreaId, m_knifeSplitCoordX, m_knifeSplitCoordY, false));
+        }
     }
+}
+
+bool EditorScene::CopySelectedAreas() {
+    if (!m_nav || !m_nav->IsLoaded()) return false;
+
+    std::vector<uint32_t> targets;
+    if (!m_selectedAreaIds.empty()) {
+        targets = m_selectedAreaIds;
+    } else if (m_selectedAreaId != 0) {
+        targets.push_back(m_selectedAreaId);
+    }
+    if (targets.empty()) return false;
+
+    std::vector<NavArea*> areaList;
+    for (uint32_t id : targets) {
+        NavArea* a = m_nav->GetAreaByID(id);
+        if (a) areaList.push_back(a);
+    }
+    if (areaList.empty()) return false;
+
+    std::ostringstream ss;
+    ss << "{\n";
+    ss << "  \"navstudio_clipboard\": \"areas\",\n";
+    ss << "  \"version\": 1,\n";
+    ss << "  \"count\": " << areaList.size() << ",\n";
+    ss << "  \"areas\": [\n";
+
+    for (size_t i = 0; i < areaList.size(); ++i) {
+        NavArea* a = areaList[i];
+        const NavExtent& ext = a->GetExtent();
+        ss << "    {\n";
+        ss << "      \"lo\": [" << ext.lo.x << ", " << ext.lo.y << ", " << ext.lo.z << "],\n";
+        ss << "      \"hi\": [" << ext.hi.x << ", " << ext.hi.y << ", " << ext.hi.z << "],\n";
+        ss << "      \"neZ\": " << a->GetNEZ() << ",\n";
+        ss << "      \"swZ\": " << a->GetSWZ() << ",\n";
+        ss << "      \"attributes\": " << static_cast<int>(a->GetAttributes()) << ",\n";
+        ss << "      \"place\": " << a->GetPlace() << ",\n";
+        ss << "      \"placeName\": \"" << a->GetPlaceName() << "\",\n";
+        ss << "      \"connections\": [";
+
+        bool firstConn = true;
+        for (int d = 0; d < 4; ++d) {
+            for (const auto& conn : a->GetAdjacentList(static_cast<NavDirType>(d))) {
+                if (!conn.area) continue;
+                for (size_t j = 0; j < areaList.size(); ++j) {
+                    if (areaList[j]->GetID() == conn.area->GetID()) {
+                        if (!firstConn) ss << ", ";
+                        ss << "{\"to\": " << j << ", \"dir\": " << d << "}";
+                        firstConn = false;
+                        break;
+                    }
+                }
+            }
+        }
+        ss << "]\n";
+        ss << "    }" << (i + 1 < areaList.size() ? ",\n" : "\n");
+    }
+
+    ss << "  ]\n";
+    ss << "}\n";
+
+    std::string jsonStr = ss.str();
+    ImGui::SetClipboardText(jsonStr.c_str());
+    return true;
+}
+
+bool EditorScene::PasteAreas(const Vector3* targetPos, CommandManager& cmdMgr) {
+    if (!m_nav) return false;
+    const char* clipText = ImGui::GetClipboardText();
+    if (!clipText || std::string(clipText).find("\"navstudio_clipboard\": \"areas\"") == std::string::npos) {
+        return false;
+    }
+
+    std::string str(clipText);
+    std::vector<CmdPasteAreas::CopiedAreaData> copiedList;
+
+    size_t pos = 0;
+    Vector3 minLo(1e9f, 1e9f, 1e9f);
+    Vector3 maxHi(-1e9f, -1e9f, -1e9f);
+
+    while ((pos = str.find("\"lo\":", pos)) != std::string::npos) {
+        CmdPasteAreas::CopiedAreaData data;
+        float lox = 0, loy = 0, loz = 0;
+        float hix = 0, hiy = 0, hiz = 0;
+        float neZ = 0, swZ = 0;
+        int attr = 0, place = 0;
+
+        if (std::sscanf(str.c_str() + pos, "\"lo\": [%f, %f, %f]", &lox, &loy, &loz) == 3) {
+            data.extent.lo = Vector3(lox, loy, loz);
+        }
+        size_t hiPos = str.find("\"hi\":", pos);
+        if (hiPos != std::string::npos && std::sscanf(str.c_str() + hiPos, "\"hi\": [%f, %f, %f]", &hix, &hiy, &hiz) == 3) {
+            data.extent.hi = Vector3(hix, hiy, hiz);
+        }
+        size_t nePos = str.find("\"neZ\":", pos);
+        if (nePos != std::string::npos) std::sscanf(str.c_str() + nePos, "\"neZ\": %f", &neZ);
+        size_t swPos = str.find("\"swZ\":", pos);
+        if (swPos != std::string::npos) std::sscanf(str.c_str() + swPos, "\"swZ\": %f", &swZ);
+        size_t attrPos = str.find("\"attributes\":", pos);
+        if (attrPos != std::string::npos) std::sscanf(str.c_str() + attrPos, "\"attributes\": %d", &attr);
+        size_t plPos = str.find("\"place\":", pos);
+        if (plPos != std::string::npos) std::sscanf(str.c_str() + plPos, "\"place\": %d", &place);
+
+        size_t namePos = str.find("\"placeName\": \"", pos);
+        if (namePos != std::string::npos) {
+            namePos += 14;
+            size_t nameEnd = str.find('\"', namePos);
+            if (nameEnd != std::string::npos) {
+                data.placeName = str.substr(namePos, nameEnd - namePos);
+            }
+        }
+
+        data.neZ = neZ;
+        data.swZ = swZ;
+        data.attributes = static_cast<uint8_t>(attr);
+        data.place = static_cast<uint16_t>(place);
+
+        size_t connPos = str.find("\"connections\": [", pos);
+        size_t blockEnd = str.find('}', pos);
+        if (connPos != std::string::npos && connPos < blockEnd) {
+            size_t endConn = str.find(']', connPos);
+            size_t cCur = connPos;
+            while ((cCur = str.find("{\"to\":", cCur)) != std::string::npos && cCur < endConn) {
+                int toIdx = 0, dir = 0;
+                if (std::sscanf(str.c_str() + cCur, "{\"to\": %d, \"dir\": %d}", &toIdx, &dir) == 2) {
+                    data.connections.push_back({ static_cast<size_t>(toIdx), static_cast<NavDirType>(dir) });
+                }
+                cCur += 6;
+            }
+        }
+
+        minLo.x = std::min(minLo.x, data.extent.lo.x);
+        minLo.y = std::min(minLo.y, data.extent.lo.y);
+        minLo.z = std::min(minLo.z, data.extent.lo.z);
+        maxHi.x = std::max(maxHi.x, data.extent.hi.x);
+        maxHi.y = std::max(maxHi.y, data.extent.hi.y);
+        maxHi.z = std::max(maxHi.z, data.extent.hi.z);
+
+        copiedList.push_back(std::move(data));
+        pos = (hiPos != std::string::npos) ? hiPos + 5 : pos + 5;
+    }
+
+    if (copiedList.empty()) return false;
+
+    Vector3 groupCenter = (minLo + maxHi) * 0.5f;
+    Vector3 offset(32.0f, 32.0f, 0.0f);
+    if (targetPos) {
+        offset = *targetPos - groupCenter;
+        if (m_gridSnap) {
+            offset.x = SnapValue(offset.x);
+            offset.y = SnapValue(offset.y);
+        }
+    }
+
+    cmdMgr.ExecuteCommand(std::make_unique<CmdPasteAreas>(this, copiedList, offset));
+    return true;
 }

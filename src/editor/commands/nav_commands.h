@@ -1648,4 +1648,258 @@ private:
     std::vector<OptimizeMergeRecord> m_records;
 };
 
+// Command: Paste Nav Areas from Clipboard Data
+class CmdPasteAreas : public IEditCommand {
+public:
+    struct CopiedAreaData {
+        NavExtent extent;
+        float neZ{0.0f};
+        float swZ{0.0f};
+        uint8_t attributes{0};
+        uint16_t place{0};
+        std::string placeName;
+        std::vector<std::pair<size_t, NavDirType>> connections;
+    };
+
+    CmdPasteAreas(EditorScene* scene, const std::vector<CopiedAreaData>& copiedAreas, const Vector3& offset)
+        : m_scene(scene), m_copiedAreas(copiedAreas), m_offset(offset) {}
+
+    void Execute() override {
+        m_createdAreaIds.clear();
+        if (!m_scene->HasNAV()) return;
+        NavMesh& nav = m_scene->GetNAV();
+
+        std::vector<NavArea*> newAreas;
+        newAreas.reserve(m_copiedAreas.size());
+
+        for (const auto& data : m_copiedAreas) {
+            NavExtent ext = data.extent;
+            ext.lo += m_offset;
+            ext.hi += m_offset;
+            float neZ = data.neZ + m_offset.z;
+            float swZ = data.swZ + m_offset.z;
+
+            NavArea* area = nav.CreateArea(ext, neZ, swZ);
+            if (area) {
+                area->SetAttributes(data.attributes);
+                area->SetPlace(data.place);
+                area->SetPlaceName(data.placeName);
+                m_createdAreaIds.push_back(area->GetID());
+                newAreas.push_back(area);
+            }
+        }
+
+        for (size_t i = 0; i < m_copiedAreas.size() && i < newAreas.size(); ++i) {
+            NavArea* from = newAreas[i];
+            if (!from) continue;
+            for (const auto& conn : m_copiedAreas[i].connections) {
+                if (conn.first < newAreas.size() && newAreas[conn.first]) {
+                    from->ConnectTo(newAreas[conn.first], conn.second);
+                }
+            }
+        }
+
+        m_scene->ClearSelection();
+        for (uint32_t id : m_createdAreaIds) {
+            m_scene->SelectArea(id, true, false);
+        }
+        m_scene->SetModified(true);
+        m_scene->RebuildNavRenderer();
+    }
+
+    void Undo() override {
+        if (!m_scene->HasNAV()) return;
+        NavMesh& nav = m_scene->GetNAV();
+        for (uint32_t id : m_createdAreaIds) {
+            nav.RemoveArea(id);
+        }
+        m_createdAreaIds.clear();
+        m_scene->ClearSelection();
+        m_scene->SetModified(true);
+        m_scene->RebuildNavRenderer();
+    }
+
+    const char* GetName() const override { return "Paste Areas"; }
+    const std::vector<uint32_t>& GetCreatedAreaIds() const { return m_createdAreaIds; }
+
+private:
+    EditorScene* m_scene;
+    std::vector<CopiedAreaData> m_copiedAreas;
+    Vector3 m_offset;
+    std::vector<uint32_t> m_createdAreaIds;
+};
+
+// Command: Split Area into 4 Quadrants / Diagonal Bisect (Knife Tool 45°/135°)
+class CmdSplitAreaQuadKnife : public IEditCommand {
+public:
+    CmdSplitAreaQuadKnife(EditorScene* scene, uint32_t areaId, float splitX, float splitY, bool is45Diag)
+        : m_scene(scene), m_areaId(areaId), m_splitX(splitX), m_splitY(splitY), m_is45Diag(is45Diag), m_valid(false) {
+        NavArea* area = m_scene->GetNAV().GetAreaByID(areaId);
+        if (!area) return;
+
+        m_oldExt = area->GetExtent();
+        m_neZ = area->GetNEZ();
+        m_swZ = area->GetSWZ();
+        m_attributes = area->GetAttributes();
+        m_place = area->GetPlace();
+        m_placeName = area->GetPlaceName();
+
+        for (int d = 0; d < 4; ++d) {
+            for (const auto& conn : area->GetAdjacentList(static_cast<NavDirType>(d))) {
+                if (conn.area) {
+                    m_outgoing.push_back({ conn.area->GetID(), static_cast<NavDirType>(d) });
+                }
+            }
+        }
+        for (const NavArea* other : m_scene->GetNAV().GetAreas()) {
+            if (other && other->GetID() != areaId) {
+                for (int d = 0; d < 4; ++d) {
+                    if (other->IsConnected(area, d)) {
+                        m_incoming.push_back({ other->GetID(), static_cast<NavDirType>(d) });
+                    }
+                }
+            }
+        }
+        m_valid = true;
+    }
+
+    void Execute() override {
+        if (!m_valid) return;
+        NavArea* origArea = m_scene->GetNAV().GetAreaByID(m_areaId);
+        if (!origArea) return;
+
+        float sx = std::max(m_oldExt.lo.x + 4.0f, std::min(m_oldExt.hi.x - 4.0f, m_splitX));
+        float sy = std::max(m_oldExt.lo.y + 4.0f, std::min(m_oldExt.hi.y - 4.0f, m_splitY));
+
+        float zNW = m_oldExt.lo.z;
+        float zNE = m_neZ;
+        float zSE = m_oldExt.hi.z;
+        float zSW = m_swZ;
+
+        float zNorthMid = origArea->GetZ(sx, m_oldExt.lo.y);
+        float zSouthMid = origArea->GetZ(sx, m_oldExt.hi.y);
+        float zWestMid  = origArea->GetZ(m_oldExt.lo.x, sy);
+        float zEastMid  = origArea->GetZ(m_oldExt.hi.x, sy);
+        float zCenter   = origArea->GetZ(sx, sy);
+
+        // Subquad 0: NW [lo.x .. sx, lo.y .. sy] -> reuse origArea (m_areaId)
+        NavExtent extNW(Vector3(m_oldExt.lo.x, m_oldExt.lo.y, zNW), Vector3(sx, sy, zCenter));
+        float neZ_NW = zNorthMid;
+        float swZ_NW = zWestMid;
+
+        // Subquad 1: NE [sx .. hi.x, lo.y .. sy]
+        NavExtent extNE(Vector3(sx, m_oldExt.lo.y, zNorthMid), Vector3(m_oldExt.hi.x, sy, zEastMid));
+        float neZ_NE = zNE;
+        float swZ_NE = zCenter;
+
+        // Subquad 2: SW [lo.x .. sx, sy .. hi.y]
+        NavExtent extSW(Vector3(m_oldExt.lo.x, sy, zWestMid), Vector3(sx, m_oldExt.hi.y, zSouthMid));
+        float neZ_SW = zCenter;
+        float swZ_SW = zSW;
+
+        // Subquad 3: SE [sx .. hi.x, sy .. hi.y]
+        NavExtent extSE(Vector3(sx, sy, zCenter), Vector3(m_oldExt.hi.x, m_oldExt.hi.y, zSE));
+        float neZ_SE = zEastMid;
+        float swZ_SE = zSouthMid;
+
+        m_scene->GetNAV().GetGrid().RemoveArea(origArea);
+        origArea->SetExtent(extNW);
+        origArea->SetCornerHeights(neZ_NW, swZ_NW);
+        m_scene->GetNAV().GetGrid().AddArea(origArea);
+
+        NavArea* areaNE = m_scene->GetNAV().CreateArea(extNE, neZ_NE, swZ_NE);
+        NavArea* areaSW = m_scene->GetNAV().CreateArea(extSW, neZ_SW, swZ_SW);
+        NavArea* areaSE = m_scene->GetNAV().CreateArea(extSE, neZ_SE, swZ_SE);
+
+        if (areaNE && areaSW && areaSE) {
+            m_createdIds = { areaNE->GetID(), areaSW->GetID(), areaSE->GetID() };
+            for (NavArea* sub : { areaNE, areaSW, areaSE }) {
+                sub->SetAttributes(m_attributes);
+                sub->SetPlace(m_place);
+                sub->SetPlaceName(m_placeName);
+            }
+
+            // Quadrant connectivity
+            m_scene->GetNAV().ConnectAreas(m_areaId, areaNE->GetID(), true, NAV_DIR_EAST);
+            m_scene->GetNAV().ConnectAreas(areaSW->GetID(), areaSE->GetID(), true, NAV_DIR_EAST);
+            m_scene->GetNAV().ConnectAreas(m_areaId, areaSW->GetID(), true, NAV_DIR_SOUTH);
+            m_scene->GetNAV().ConnectAreas(areaNE->GetID(), areaSE->GetID(), true, NAV_DIR_SOUTH);
+
+            if (m_is45Diag) {
+                // 45° diagonal cut: SW to NE
+                m_scene->GetNAV().ConnectAreas(areaSW->GetID(), areaNE->GetID(), true, NAV_DIR_NORTH);
+            } else {
+                // 135° diagonal cut: NW to SE
+                m_scene->GetNAV().ConnectAreas(m_areaId, areaSE->GetID(), true, NAV_DIR_SOUTH);
+            }
+
+            for (const auto& out : m_outgoing) {
+                m_scene->GetNAV().ConnectAreas(m_areaId, out.targetId, false, out.dir);
+                m_scene->GetNAV().ConnectAreas(areaNE->GetID(), out.targetId, false, out.dir);
+                m_scene->GetNAV().ConnectAreas(areaSW->GetID(), out.targetId, false, out.dir);
+                m_scene->GetNAV().ConnectAreas(areaSE->GetID(), out.targetId, false, out.dir);
+            }
+            for (const auto& in : m_incoming) {
+                m_scene->GetNAV().ConnectAreas(in.targetId, m_areaId, false, in.dir);
+                m_scene->GetNAV().ConnectAreas(in.targetId, areaNE->GetID(), false, in.dir);
+                m_scene->GetNAV().ConnectAreas(in.targetId, areaSW->GetID(), false, in.dir);
+                m_scene->GetNAV().ConnectAreas(in.targetId, areaSE->GetID(), false, in.dir);
+            }
+
+            m_scene->SelectArea(m_areaId);
+            m_scene->SetModified(true);
+            m_scene->RebuildNavRenderer();
+        }
+    }
+
+    void Undo() override {
+        if (!m_valid || m_createdIds.size() < 3) return;
+        NavArea* origArea = m_scene->GetNAV().GetAreaByID(m_areaId);
+        if (origArea) {
+            m_scene->GetNAV().GetGrid().RemoveArea(origArea);
+            origArea->SetExtent(m_oldExt);
+            origArea->SetCornerHeights(m_neZ, m_swZ);
+            m_scene->GetNAV().GetGrid().AddArea(origArea);
+        }
+
+        for (uint32_t cid : m_createdIds) {
+            m_scene->GetNAV().RemoveArea(cid);
+        }
+        m_createdIds.clear();
+
+        if (origArea) {
+            for (const auto& out : m_outgoing) {
+                m_scene->GetNAV().ConnectAreas(m_areaId, out.targetId, false, out.dir);
+            }
+            for (const auto& in : m_incoming) {
+                m_scene->GetNAV().ConnectAreas(in.targetId, m_areaId, false, in.dir);
+            }
+        }
+
+        m_scene->SelectArea(m_areaId);
+        m_scene->SetModified(true);
+        m_scene->RebuildNavRenderer();
+    }
+
+    const char* GetName() const override { return "Diagonal Knife Split Area"; }
+
+private:
+    EditorScene* m_scene;
+    uint32_t m_areaId;
+    float m_splitX;
+    float m_splitY;
+    bool m_is45Diag;
+    bool m_valid;
+    NavExtent m_oldExt;
+    float m_neZ{0.0f};
+    float m_swZ{0.0f};
+    uint8_t m_attributes{0};
+    uint16_t m_place{0};
+    std::string m_placeName;
+    std::vector<uint32_t> m_createdIds;
+    struct ConnRec { uint32_t targetId; NavDirType dir; };
+    std::vector<ConnRec> m_outgoing;
+    std::vector<ConnRec> m_incoming;
+};
+
 #endif // NAV_COMMANDS_H

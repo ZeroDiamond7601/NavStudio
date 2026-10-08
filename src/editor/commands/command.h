@@ -28,6 +28,7 @@ public:
         cmd->Execute();
         m_history.push_back(std::move(cmd));
         m_historyIndex = m_history.size();
+        TrimHistory();
     }
 
     bool CanUndo() const {
@@ -74,10 +75,29 @@ public:
         return m_history[m_historyIndex]->GetName();
     }
 
+    void SetMaxHistory(size_t maxSteps) {
+        m_maxHistory = maxSteps;
+        TrimHistory();
+    }
+
+    size_t GetMaxHistory() const { return m_maxHistory; }
+
 private:
+    void TrimHistory() {
+        if (m_maxHistory > 0 && m_history.size() > m_maxHistory) {
+            size_t excess = m_history.size() - m_maxHistory;
+            m_history.erase(m_history.begin(), m_history.begin() + excess);
+            if (m_historyIndex >= excess) m_historyIndex -= excess;
+            else m_historyIndex = 0;
+            if (m_savedHistoryIndex >= excess) m_savedHistoryIndex -= excess;
+            else m_savedHistoryIndex = 0;
+        }
+    }
+
     std::vector<std::unique_ptr<IEditCommand>> m_history;
-    size_t m_historyIndex;
-    size_t m_savedHistoryIndex;
+    size_t m_historyIndex{0};
+    size_t m_savedHistoryIndex{0};
+    size_t m_maxHistory{100};
 };
 
 #endif // COMMAND_H
