@@ -320,8 +320,123 @@ bool EditorScene::GenerateNavMesh(const NavGenerateOptions& options) {
     m_selectedAreaId = 0;
     m_hoveredAreaId = 0;
     m_isModified = true;
+    PostGenerateOptimize();
     RebuildNavRenderer();
     return true;
+}
+
+void EditorScene::PostGenerateOptimize() {
+    if (!m_nav || !m_nav->IsLoaded()) return;
+
+    bool mergedAny;
+    do {
+        mergedAny = false;
+        std::vector<NavArea*> areas = m_nav->GetAreas();
+        for (size_t i = 0; i < areas.size() && !mergedAny; ++i) {
+            NavArea* a = areas[i];
+            if (!a) continue;
+            for (size_t j = i + 1; j < areas.size() && !mergedAny; ++j) {
+                NavArea* b = areas[j];
+                if (!b) continue;
+                if (a->GetAttributes() != b->GetAttributes()) continue;
+                if (a->GetPlace() != b->GetPlace() || a->GetPlaceName() != b->GetPlaceName()) continue;
+
+                NavArea* first = a;
+                NavArea* second = b;
+                bool isXMerge = false;
+                bool isYMerge = false;
+
+                // Horizontal (along X): first is west of second
+                if (first->GetExtent().lo.x > second->GetExtent().lo.x) std::swap(first, second);
+                {
+                    const NavExtent& ext1 = first->GetExtent();
+                    const NavExtent& ext2 = second->GetExtent();
+                    if (std::fabs(ext1.hi.x - ext2.lo.x) <= 0.25f &&
+                        std::fabs(ext1.lo.y - ext2.lo.y) <= 0.25f &&
+                        std::fabs(ext1.hi.y - ext2.hi.y) <= 0.25f) {
+                        float w1 = ext1.hi.x - ext1.lo.x;
+                        float w2 = ext2.hi.x - ext2.lo.x;
+                        float wTot = w1 + w2;
+                        if (wTot > 0.001f) {
+                            float r = w1 / wTot;
+                            float expN = ext1.lo.z + (second->GetNEZ() - ext1.lo.z) * r;
+                            float expS = first->GetSWZ() + (ext2.hi.z - first->GetSWZ()) * r;
+                            if (std::fabs(first->GetNEZ() - expN) <= 2.5f &&
+                                std::fabs(ext1.hi.z - expS) <= 2.5f) {
+                                isXMerge = true;
+                            }
+                        }
+                    }
+                }
+
+                if (!isXMerge) {
+                    // Vertical (along Y): first is north of second
+                    first = a; second = b;
+                    if (first->GetExtent().lo.y > second->GetExtent().lo.y) std::swap(first, second);
+                    const NavExtent& yExt1 = first->GetExtent();
+                    const NavExtent& yExt2 = second->GetExtent();
+                    if (std::fabs(yExt1.hi.y - yExt2.lo.y) <= 0.25f &&
+                        std::fabs(yExt1.lo.x - yExt2.lo.x) <= 0.25f &&
+                        std::fabs(yExt1.hi.x - yExt2.hi.x) <= 0.25f) {
+                        float l1 = yExt1.hi.y - yExt1.lo.y;
+                        float l2 = yExt2.hi.y - yExt2.lo.y;
+                        float lTot = l1 + l2;
+                        if (lTot > 0.001f) {
+                            float r = l1 / lTot;
+                            float expW = yExt1.lo.z + (second->GetSWZ() - yExt1.lo.z) * r;
+                            float expE = first->GetNEZ() + (yExt2.hi.z - first->GetNEZ()) * r;
+                            if (std::fabs(first->GetSWZ() - expW) <= 2.5f &&
+                                std::fabs(yExt1.hi.z - expE) <= 2.5f) {
+                                isYMerge = true;
+                            }
+                        }
+                    }
+                }
+
+                if (isXMerge || isYMerge) {
+                    NavExtent merged = first->GetExtent();
+                    if (isXMerge) {
+                        merged.hi.x = second->GetExtent().hi.x;
+                        merged.hi.y = second->GetExtent().hi.y;
+                        merged.hi.z = second->GetExtent().hi.z;
+                    } else {
+                        merged.hi.x = second->GetExtent().hi.x;
+                        merged.hi.y = second->GetExtent().hi.y;
+                        merged.hi.z = second->GetExtent().hi.z;
+                    }
+                    float mergedNeZ = isXMerge ? second->GetNEZ() : first->GetNEZ();
+                    float mergedSwZ = isYMerge ? second->GetSWZ() : first->GetSWZ();
+
+                    uint32_t keepId  = first->GetID();
+                    uint32_t removeId = second->GetID();
+
+                    // Transfer second's connections to first
+                    for (int d = 0; d < 4; ++d) {
+                        for (const auto& conn : second->GetAdjacentList(static_cast<NavDirType>(d))) {
+                            if (conn.area && conn.area->GetID() != keepId && conn.area->GetID() != removeId) {
+                                m_nav->ConnectAreas(keepId, conn.area->GetID(), false, static_cast<NavDirType>(d));
+                            }
+                        }
+                    }
+                    for (NavArea* other : m_nav->GetAreas()) {
+                        if (!other || other->GetID() == removeId || other->GetID() == keepId) continue;
+                        for (int d = 0; d < 4; ++d) {
+                            if (other->IsConnected(second, d)) {
+                                m_nav->ConnectAreas(other->GetID(), keepId, false, static_cast<NavDirType>(d));
+                            }
+                        }
+                    }
+
+                    m_nav->GetGrid().RemoveArea(first);
+                    first->SetExtent(merged);
+                    first->SetCornerHeights(mergedNeZ, mergedSwZ);
+                    m_nav->GetGrid().AddArea(first);
+                    m_nav->RemoveArea(removeId);
+                    mergedAny = true;
+                }
+            }
+        }
+    } while (mergedAny);
 }
 
 void EditorScene::UnloadNAV() {
@@ -2607,6 +2722,8 @@ void EditorScene::StartKnifeMode() {
     m_isKnifeMode = true;
     m_knifeActive = false;
     m_knifeHoverAreaId = 0;
+    m_knifeForceAxis = false;
+    m_knifeAxisOverride = false;
     ExitDrawAreaMode();
     ExitFillAreaMode();
     CancelBridgeMode();
@@ -2616,6 +2733,8 @@ void EditorScene::ExitKnifeMode() {
     m_isKnifeMode = false;
     m_knifeActive = false;
     m_knifeHoverAreaId = 0;
+    m_knifeForceAxis = false;
+    m_knifeAxisOverride = false;
 }
 
 void EditorScene::ToggleKnifeMode() {
@@ -2624,6 +2743,11 @@ void EditorScene::ToggleKnifeMode() {
     } else {
         StartKnifeMode();
     }
+}
+
+void EditorScene::RotateKnifeAxis() {
+    m_knifeForceAxis = true;
+    m_knifeAxisOverride = !m_knifeAxisOverride;
 }
 
 void EditorScene::UpdateKnife(const Ray& ray) {
@@ -2662,6 +2786,20 @@ void EditorScene::UpdateKnife(const Ray& ray) {
         float rawX = hitPos.x;
         if (m_gridSnap) rawX = SnapValue(rawX);
         m_knifeSplitCoord = std::max(ext.lo.x + 4.0f, std::min(ext.hi.x - 4.0f, rawX));
+    }
+
+    // Apply axis override if user has explicitly set it
+    if (m_knifeForceAxis) {
+        m_knifeSplitAlongY = m_knifeAxisOverride;
+        if (m_knifeSplitAlongY) {
+            float rawY = hitPos.y;
+            if (m_gridSnap) rawY = SnapValue(rawY);
+            m_knifeSplitCoord = std::max(ext.lo.y + 4.0f, std::min(ext.hi.y - 4.0f, rawY));
+        } else {
+            float rawX = hitPos.x;
+            if (m_gridSnap) rawX = SnapValue(rawX);
+            m_knifeSplitCoord = std::max(ext.lo.x + 4.0f, std::min(ext.hi.x - 4.0f, rawX));
+        }
     }
 }
 

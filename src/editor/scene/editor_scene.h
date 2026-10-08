@@ -229,6 +229,9 @@ public:
     uint32_t GetKnifeHoverArea() const { return m_knifeHoverAreaId; }
     bool GetKnifeSplitAlongY() const { return m_knifeSplitAlongY; }
     float GetKnifeSplitCoord() const { return m_knifeSplitCoord; }
+    void RotateKnifeAxis();
+    bool GetKnifeAxisOverride() const { return m_knifeForceAxis ? m_knifeAxisOverride : m_knifeSplitAlongY; }
+    bool IsKnifeAxisForced() const { return m_knifeForceAxis; }
 
     // Auto-Crouch & Obstacle Flag Analyzer
     struct AnalyzerStats {
@@ -379,6 +382,8 @@ private:
     uint32_t m_knifeHoverAreaId{0};
     bool m_knifeSplitAlongY{false};
     float m_knifeSplitCoord{0.0f};
+    bool m_knifeForceAxis{false};
+    bool m_knifeAxisOverride{false};
 
     // Handles
     SelectedHandleType m_hoveredHandle{HANDLE_NONE};
@@ -418,6 +423,8 @@ private:
 
     AsyncLoadContext m_loadCtx;
     std::thread m_loadThread;
+
+    void PostGenerateOptimize();
 };
 
 #endif // EDITOR_SCENE_H

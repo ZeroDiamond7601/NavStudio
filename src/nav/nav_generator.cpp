@@ -728,6 +728,14 @@ size_t NavGenerator::FloodFillFromSeed(
 ) {
     if (!bsp.IsLoaded()) return 0;
 
+    // Snapshot pre-existing area extents to avoid overlapping them during fill
+    struct ExistingArea { NavExtent ext; float centerZ; };
+    std::vector<ExistingArea> existingAreas;
+    existingAreas.reserve(nav.GetAreaCount());
+    for (const NavArea* a : nav.GetAreas()) {
+        if (a) existingAreas.push_back({ a->GetExtent(), a->GetCenter().z });
+    }
+
     float step = options.stepSize;
     float sx = std::round(seedPos.x / step) * step;
     float sy = std::round(seedPos.y / step) * step;
@@ -853,6 +861,21 @@ size_t NavGenerator::FloodFillFromSeed(
                     newNode->to[opp] = curr;
                 }
                 openQueue.push(newNode);
+            }
+        }
+    }
+
+    // Mark BFS nodes that overlap pre-existing nav areas as covered
+    if (!existingAreas.empty()) {
+        for (NavGenNode* node : nodeMap.GetAllNodes()) {
+            if (node->isCovered) continue;
+            for (const auto& ea : existingAreas) {
+                if (node->pos.x >= ea.ext.lo.x - 1.0f && node->pos.x <= ea.ext.hi.x + 1.0f &&
+                    node->pos.y >= ea.ext.lo.y - 1.0f && node->pos.y <= ea.ext.hi.y + 1.0f &&
+                    std::fabs(node->pos.z - ea.centerZ) <= 24.0f) {
+                    node->isCovered = true;
+                    break;
+                }
             }
         }
     }

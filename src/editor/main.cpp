@@ -285,6 +285,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 g_activeScene->ToggleDrawAreaMode();
             } else if (key == GLFW_KEY_K && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // K: Knife / Split Tool
                 g_activeScene->ToggleKnifeMode();
+            } else if (key == GLFW_KEY_R && action == GLFW_PRESS && g_activeScene->IsKnifeMode()) { // R: Rotate knife axis (in knife mode)
+                g_activeScene->RotateKnifeAxis();
             } else if (key == GLFW_KEY_F && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0 &&
                        g_activeScene->GetSelectedAreaID() == 0 && g_activeScene->GetSelectedAreaIDs().empty() &&
                        g_activeScene->GetSelectedEntityIndex() < 0) { // F: Fill Area Tool (when nothing selected)

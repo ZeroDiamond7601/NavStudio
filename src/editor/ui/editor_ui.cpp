@@ -790,6 +790,15 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         if (knifeActive) ImGui::PopStyleColor();
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click or drag across an area to slice along seam with bilinearly interpolated elevation");
 
+        if (knifeActive) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton(scene.GetKnifeAxisOverride() ? "Cut: Y-Axis" : "Cut: X-Axis")) {
+                scene.RotateKnifeAxis();
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("[R to rotate]");
+        }
+
         if (ImGui::Button("Merge Areas [Shift+M]", ImVec2(-1, 26))) {
             if (hasSel) scene.MergeSelectedArea(cmdMgr);
         }
