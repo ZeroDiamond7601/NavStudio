@@ -74,7 +74,7 @@ void EditorScene::ApplyPreferences() {
     m_meshSnap = m_prefs.defaultMeshSnap;
     m_meshSnapTolerance = m_prefs.meshSnapTolerance;
     m_cornerSnapTolerance = m_prefs.cornerSnapTolerance;
-    m_showSkybox = m_prefs.show3DSkybox;
+    SetShowSkybox(m_prefs.show3DSkybox);
     m_navRenderer.SetShowConnectionValidity(m_prefs.showConnectionValidity);
     m_navRenderer.SetMaxStepHeight(m_prefs.maxStepHeight);
 }

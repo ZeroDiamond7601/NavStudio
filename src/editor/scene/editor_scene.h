@@ -73,6 +73,7 @@ public:
     void SelectArea(uint32_t id, bool additive = false, bool toggle = false);
     bool IsAreaSelected(uint32_t id) const;
     const std::vector<uint32_t>& GetSelectedAreaIDs() const { return m_selectedAreaIds; }
+    size_t GetSelectedAreaCount() const { return m_selectedAreaIds.size(); }
     void ClearSelection();
     void SelectAllAreas();
 
@@ -105,6 +106,8 @@ public:
     void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& view, const Matrix4& proj, const Vector3& camPos);
     void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, const Vector3& camPos);
     void RebuildNavRenderer();
+    NavRenderer& GetNavRenderer() { return m_navRenderer; }
+    const NavRenderer& GetNavRenderer() const { return m_navRenderer; }
 
     const BSPFile& GetBSP() const { return *m_bsp; }
     BSPFile& GetBSP() { return *m_bsp; }
