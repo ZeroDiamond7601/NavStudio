@@ -3750,7 +3750,7 @@ void EditorScene::AlignSelectedAreas(AlignMode mode, CommandManager& cmdMgr) {
             }
         }
 
-        subCmds.push_back(std::make_unique<CmdTransformArea>(this, aid, oldExt, newExt, oldNeZ, oldSwZ, newNeZ, newSwZ));
+        subCmds.push_back(std::make_unique<CmdTransformArea>(this, aid, oldExt, oldNeZ, oldSwZ, newExt, newNeZ, newSwZ, "Align Area"));
     }
 
     if (!subCmds.empty()) {
