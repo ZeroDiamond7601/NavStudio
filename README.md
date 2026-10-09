@@ -1,511 +1,158 @@
-# NavMesh Core - AMX Mod X Navigation System
+# NavStudio - 3D BSP Visualizer & Navigation Mesh Editor
 
-[![CI & Build](https://github.com/ZeroDiamond7601/amxmodx-navmesh/actions/workflows/build.yml/badge.svg)](https://github.com/ZeroDiamond7601/amxmodx-navmesh/actions)
+[![CI & Build](https://github.com/ZeroDiamond7601/NavStudio/actions/workflows/build.yml/badge.svg)](https://github.com/ZeroDiamond7601/NavStudio/actions)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Platform](https://img.shields.io/badge/Platform-Debian%20%7C%20Linux%20%7C%20Windows%20(x86)-brightgreen.svg)]()
-[![Compatibility](https://img.shields.io/badge/AMXX-1.8.x%20--%201.10.x%20%7C%20ReHLDS-orange.svg)]()
+[![Platform](https://img.shields.io/badge/Platform-Windows%20(x86)%20%7C%20Linux-brightgreen.svg)]()
+[![Release](https://img.shields.io/badge/Version-v1.5.3-orange.svg)](https://github.com/ZeroDiamond7601/NavStudio/releases)
 
-**NavMesh Core** is a high-performance C++ module for **AMX Mod X** (GoldSrc / Counter-Strike 1.6 / Counter-Strike: Condition Zero). It provides direct, memory-mapped access to GoldSrc **`.bsp`** maps (Version 30) and Counter-Strike **`.nav`** navigation meshes (Versions 4 & 5), featuring ultra-fast collision tracing, spatial partitioning, full **A\* pathfinding** with portal smoothing, a standalone verification CLI, and **NavStudio**, a hardware-accelerated 3D desktop visualizer and mesh editor.
+**NavStudio** is a standalone, hardware-accelerated 3D desktop visualizer, navigation mesh editor, and verification suite for **GoldSrc** (`.bsp` v30) maps and **Counter-Strike 1.6 / Condition Zero** (`.nav` v4 & v5) navigation meshes.
+
+It provides real-time OpenGL 3.3 Core rendering with Dear ImGui docking, Valve Hammer Editor-style 3D textured rendering, WAD3 archive texture resolution, interactive mesh modeling tools, collision tracing, and Wavefront OBJ export.
+
+> [!TIP]
+> **Game Server Module:** Looking for the server-side AMX Mod X module with runtime pathfinding and Pawn natives? Visit **[amxmodx-navmesh](https://github.com/ZeroDiamond7601/amxmodx-navmesh)**!
 
 ---
 
-## Features
+## Key Features
 
-### GoldSrc BSP Engine (`.bsp`)
-* **Direct Lump Parsing:** Reads and caches GoldSrc BSP lumps (Planes, Nodes, Clipnodes, Leaves, Models, Visibility, Textures, Texinfo, Faces, Vertices, Edges, Surfedges, Marksurfaces, Entities, Lighting) directly in memory with strict bounds safety.
-* **Exact Ray & Hull Tracing:** Supports exact Hull 0 (Point / Bullets) and Hulls 1-3 (Player standing, crouch, large hull) raycasting against world geometry and brush models (`*1`, `*2`, doors, breakables).
-* **Surface Lightmap & Illumination Sampling:** Samples exact luxel lighting along arbitrary rays or at 3D face coordinates with bilinear interpolation across the 16-unit lightmap grid, returning both scalar brightness and full RGB channels.
-* **Material Classification & Texture Flags:** Automatically parses and classifies surfaces into physical engine material types (`MAT_CONCRETE`, `MAT_METAL`, `MAT_WOOD`, `MAT_VENT`, `MAT_GRATE`, `MAT_TILE`, `MAT_SLOSH`, `MAT_GLASS`, `MAT_FLESH`, etc.) and detects transparency, fluid, sky, and animated texture flags.
-* **Face Polygon Vertices Extraction:** Extracts ordered 3D world polygon vertices for any face in the map via surfedge/edge index chains.
-* **Worldspawn Metadata:** Direct extraction of environment skybox prefix (`skyname`), map title, and referenced WAD files.
-* **Leaf Marksurfaces & Spatial Partitions:** Queries the faces touching any leaf via marksurfaces indices.
-* **Entity Target Graphs:** High-speed lookup of entity linkages by `target` and `targetname` attributes.
-* **Visibility & Audibility Engine:** PVS (Potentially Visible Set) and PAS (Potentially Audible Set) decompressed bitmasks, direct point-to-point visibility and audibility checks, and visible leaf count queries.
-* **Map Geometry & Bounds:** Fast access to world bounds, leaf bounding boxes, contents codes, ambient audio levels, planes, and node/leaf counts.
-* **Entity & Texture Metadata:** Key-value property lookups on BSP entities and texture dimension queries.
+### 3D Hardware-Accelerated Viewport & Shading Modes (`F4`)
+* **Hammer 3D Textured View:** Renders full GoldSrc textures mapped onto BSP brush faces with directional sun lighting, ambient hemisphere fill, and specular highlights matching Valve Hammer Editor.
+* **WAD3 Archive Loader & Texture Management:** Parses GoldSrc `WAD3` and `WAD2` archives (`cstrike.wad`, `halflife.wad`, etc.), decoding 4-level miptex lumps (`TYP_MIPTEX`) and 256-color RGB palettes into high-resolution 32-bit RGBA OpenGL textures with automatic mipmap generation and repeat wrapping.
+* **Embedded & External Texture Resolution:** Automatically resolves external WAD files referenced by `worldspawn` entity `"wad"` key strings, scans map and game mod directories (`cstrike/`, `valve/`), and extracts embedded textures directly from BSP `LUMP_TEXTURES`.
+* **Masked Alpha Cutouts:** Transparent alpha-test masking for `{`-prefixed textures (grates, chainlink fences, ladders, vents) discarding masked pixels for clean silhouettes without sorting artifacts.
+* **Solid Clay Shading:** Clean neutral studio clay view with GoldSrc Z-Up hemisphere lighting and brush edge outlines.
+* **Wireframe & Ghost / X-Ray:** Wireframe edge view and translucent Ghost view to inspect navigation meshes through complex walls and multi-story geometry.
 
-### Navigation Mesh System (`.nav`)
-* **Format Compatibility:** Fully parses Counter-Strike 1.6 / Condition Zero `.nav` files (Magic `0xFEEDFACE`, Versions 4 and 5).
-* **Bilinear Quad Elevation:** Calculates exact ground elevation at any `(x, y)` coordinate inside an area quad using 4-corner bilinear interpolation.
-* **Spatial Grid:** Uniform 2D hash grid (cell size 300 units) providing O(1) spatial queries for nearest area lookups.
-* **Tactical Data:** Access to hiding spots (cover, sniper spots), approach areas, encounter paths, and named map places (e.g. `"BombsiteA"`, `"TSpawn"`).
-* **Ladder Support:** Automatically extracts and links `func_ladder` entities from the BSP into the navigation graph.
+### Interactive Hammer-Style Mesh Editing Tools
+* **3D Position Gizmo & Arrows:** Interactive Red (+X East), Green (+Y North), and Blue (+Z Up) axis arrows and center box handle for precise dragging and elevation control.
+* **Move / Grab (`G`):** Areas smoothly glide and track the 3D mouse cursor position on the ground plane, with optional `X`, `Y`, `Z` axis constraints.
+* **Radial Scale Tool (`S`):** Screen-space radial scaling tool to resize area dimensions smoothly, with optional `X` or `Y` width/length constraints.
+* **Individual Edge Manipulation:** Click and drag any of the 4 perimeter edges (North, East, South, West) to resize area bounds, just like Hammer brush faces.
+* **Camera-Facing Edge Extrude (`E` / Shift+Drag Edge):** Extrude edges in the camera-facing direction to spawn new adjacent areas automatically stitched with bidirectional connections.
+* **Magnetic Edge Snapping on Move:** Seamlessly snaps moved areas flush against neighboring edges and automatically welds lateral connections.
+* **Split Knife Tool (`K` / `Shift+X`):** Interactive cutter with cycling angles (`0°`, `45°`, `90°`, `135°`) to slice areas into connected sub-areas while preserving external connections.
+* **Bridge Tool (`B`):** 2-click interactive tool to create intermediate connecting areas between any two nav area edges.
+* **Draw Area Marquee Tool (`N`):** 2-click rectangular area creation directly on floor and sloped geometry.
+* **Flood Fill Area Tool (`F`):** Click any room floor or brush surface to auto-generate connected nav meshes spanning the room.
+* **Coplanar Mesh Optimizer:** 1-click simplification that merges contiguous coplanar areas into unified bounding quads.
+* **Sloped Corner Elevation Rotation (`R`):** Rotates area 90 degrees clockwise around center while cycling corner elevations to preserve ramp grade and sloped stairs.
+* **Duplicate (`Shift+D`):** Clones selected areas with unique IDs and immediately enters Move mode.
+* **Delete (`Delete` / `Backspace` / `X`):** Deletes areas or connections with non-destructive Undo/Redo stack support (`Ctrl+Z` / `Ctrl+Y`).
+* **Connection Link Management:** Dedicated connection inspection, two-way toggling (`2`), reverse direction (`R`), and midpoint focus (`F`).
+* **Place Names Manager & Dropdown:** Assign designated map locations (e.g. `BombsiteA`, `TSpawn`) from an auto-suggested dropdown of existing places.
+* **Marquee Box Selection (`Shift+B`):** 2D screen-space rectangle selection for multi-area manipulation.
+* **Wavefront OBJ Export:** Export complete navigation meshes with quad geometry and ladder meshes to `.obj` format for Blender, 3ds Max, or game engines.
 
-### A* Pathfinding Engine
-* **Portal Waypoints:** Uses portal boundaries between adjacent areas so calculated paths route cleanly through doorways instead of blindly aiming for area centers.
-* **Custom Traversal Costs:** Supports options to avoid crouching, avoid jumping, or prefer paths with cover.
-* **Line-of-Sight Smoothing:** Optional string-pulling optimization that checks line-of-sight against BSP geometry to remove redundant waypoints.
-* **Active Path Handles:** High-performance path instance management exposed directly to AMXX Pawn scripting.
-* **Asynchronous Offloaded Pathfinding:** Non-blocking worker threads handle multi-route A* calculations and dispatch results via event forwards (`nav_on_path_computed`).
-
-### NavStudio: 3D BSP Visualizer & NavMesh Editor
-* **Hardware-Accelerated 3D Viewport:** OpenGL 3.3 Core rendering with Dear ImGui docking interface.
-* **Valve Hammer Editor 3D Textured Rendering & Shading Modes (`F4`):**
-  * **Hammer 3D Textured View:** Renders full GoldSrc textures mapped onto BSP brush faces with directional sun lighting, ambient hemisphere fill, and specular highlights matching Valve Hammer Editor.
-  * **WAD3 Archive Loader & Texture Management:** Parses GoldSrc `WAD3` and `WAD2` archives (`cstrike.wad`, `halflife.wad`, etc.), decoding 4-level miptex lumps (`TYP_MIPTEX`) and 256-color RGB palettes into high-resolution 32-bit RGBA OpenGL textures with automatic mipmap generation and repeat wrapping.
-  * **Embedded & External Texture Resolution:** Automatically resolves external WAD files referenced by `worldspawn` entity `"wad"` key strings, scans map and game mod directories (`cstrike/`, `valve/`), and extracts embedded textures directly from BSP `LUMP_TEXTURES`.
-  * **Mathematical UV Projection:** Calculates exact texture coordinates per vertex using `texinfo_t` spatial vectors:
-    $$u = \frac{P \cdot \vec{s}_{xyz} + s_w}{\text{texture\_width}}, \quad v = \frac{P \cdot \vec{t}_{xyz} + t_w}{\text{texture\_height}}$$
-  * **Masked Alpha Cutouts:** Transparent alpha-test masking for `{`-prefixed textures (grates, chainlink fences, ladders, vents) discarding masked pixels for clean silhouettes without sorting artifacts.
-  * **Missing Texture Fallback:** Classic Hammer-style amber and dark slate checkerboard for missing textures so maps always render stably.
-  * **WAD Drag & Drop:** Drag and drop `.wad` files directly into the viewport or use `File -> Load Texture WAD...` to hot-load custom texture packages.
-  * **Solid Clay Shading:** Clean neutral studio clay view with GoldSrc Z-Up hemisphere lighting and brush edge outlines.
-  * **Wireframe & Ghost / X-Ray:** Wireframe edge view and translucent Ghost view to see navigation areas through complex walls and multi-story rooms.
-* **Interactive 3D Controls & Hammer Editor Tools:**
-  * **3D Position Gizmo & Arrows:** Interactive Red (+X East), Green (+Y North), and Blue (+Z Up) axis arrows and center box handle for precise dragging and elevation control.
-  * **Move / Grab (`G`):** Areas smoothly glide and track the 3D mouse cursor position on the ground plane, with optional `X`, `Y`, `Z` axis constraints.
-  * **Radial Scale Tool (`S`):** Screen-space radial scaling tool to resize area dimensions smoothly, with optional `X` or `Y` width/length constraints.
-  * **Individual Edge Manipulation:** Click and drag any of the 4 perimeter edges (North, East, South, West) to resize area bounds, just like Hammer brush faces.
-  * **Hammer Edge Extrude (`E` / Shift+Drag Edge):** Extrude any edge outward to spawn a new adjacent area automatically linked bidirectionally.
-  * **Hammer Split / Clipping Tool (`Shift+X`):** Slice any area into two connected halves along its length or width while preserving external connections.
-  * **Hammer Merge Tool (`Shift+M`):** Merge adjacent collinear areas into a single unified area quad.
-  * **Hammer 3D Ground Grid:** Viewport reference grid with configurable grid sizes from 1 to 512 units (`[` to decrease, `]` to increase), snapping toggle (`Shift+W`), and visual minor/major grid lines.
-  * **Open Recent Files:** Persistent recent file list under `File -> Open Recent` for quick access to recently edited maps and meshes.
-  * **Connect Mode (`C`):** Interactive raycast linking between areas in 3D (Left-Click for bidirectional, Shift+Click for one-way).
-  * **Rotate (`R`):** Rotate area bounding orientation 90 degrees around center.
-  * **Duplicate (`Shift+D`):** Clones selected area with a unique ID and immediately enters Move mode.
-  * **Delete (`X` / `Delete`):** Deletes area with lossless graph connection restoration via Undo.
-  * **3D Transform Gizmo:** Center axis arrows (+X Red, +Y Green, +Z Blue) and 4 corner vertex handles.
-* **Interactive Connection Manager & Connect Mode (`C`):**
-  * **Connect Mode (`C`):** Click any target area in the 3D viewport to link (Left-Click for Two-Way, Shift+Click for One-Way) with live connecting beam preview.
-  * **Inspector Manager:** One-click `[2-Way]` / `[1-Way]` reciprocity toggle buttons, jump buttons, disconnect buttons, and manual Area ID connection forms.
-* **Floor Snapping (`Space` / `S`):** Casts downward rays to the BSP collision hull to ground floating area corner vertices.
-* **GoldSrc Entity System & Hammer-Style 3D Archetypes:**
-  * **Player Spawns:** Humanoid 3D hulls (32x32x72) with head indicators and forward-facing yaw orientation arrows:
-    * Counter-Terrorist spawns (`info_player_start`) in CT Blue.
-    * Terrorist spawns (`info_player_deathmatch`) in T Red.
-    * VIP spawns (`info_vip_start`) in Cyan.
-  * **Objectives & Hostages:**
-    * Bomb targets (`info_bomb_target`, `func_bomb_target`) with hazard markers and red objective diamonds.
-    * Hostages (`hostage_entity`) with humanoid green hulls and rescue zones (`info_hostage_rescue`, `func_hostage_rescue`).
-    * Buy zones (`func_buyzone`) and escape zones (`func_escapezone`).
-  * **Light Sources:** 3D yellow diamonds/octahedrons for point lights (`light`), spotlight cones and direction vectors for `light_spot`, and ambient sun icons for `light_environment`.
-  * **Weapons & Armoury:** 3D item crates and diamonds for `armoury_entity` with automatic weapon name resolution (AK-47, M4A1, AWP, Deagle, etc.) and item count.
-  * **Ambient Audio:** Magenta emitter nodes for `ambient_generic` with sound file and volume inspect.
-  * **Brush Entities & Triggers:** Bounding volumes with wireframe edges for `func_door`, `func_button`, `func_breakable`, `func_ladder`, and `trigger_*`.
-  * **Entity Target Connections:** Visualizes cause-and-effect wiring in 3D by rendering cyan-amber linkage lines with directional mid-point arrows between triggers (`target`) and destination entities (`targetname`).
-  * **Interactive Entity Picking & Explorer:** Click entities in the 3D viewport or browse the dedicated Entities tab in the Explorer panel with quick category filter chips (`[All]`, `[Spawns]`, `[Objectives]`, `[Lights]`, `[Items]`, `[Brushes]`).
-  * **Comprehensive Property Inspector:** View classname, category, coordinates, angles, model, weapon names, and a full key-values dictionary table for selected entities.
-  * **Category Visibility Filters (`F3`):** Toggle display of spawns, objectives, lights, items, brushes, and connection lines independently.
-* **Attribute Flag Editor:** Toggle `NAV_ATTR_CROUCH`, `NAV_ATTR_JUMP`, `NAV_ATTR_PRECISE`, and `NAV_ATTR_NO_JUMP`.
-* **Place Name Manager:** Search, filter, and assign designated map locations.
-* **Undo / Redo System:** Command-pattern history stack (`Ctrl+Z` / `Ctrl+Y`) for non-destructive mesh authoring.
-* **Area Hierarchy Search:** Filterable tree view of all areas with instant camera focus (`F` key).
+### GoldSrc Entity System & Hammer-Style 3D Archetypes (`F3`)
+* **Player Spawns:** Humanoid 3D hulls (32x32x72) with head indicators and forward-facing yaw orientation arrows:
+  * Counter-Terrorist spawns (`info_player_start`) in CT Blue.
+  * Terrorist spawns (`info_player_deathmatch`) in T Red.
+  * VIP spawns (`info_vip_start`) in Cyan.
+* **Objectives & Hostages:**
+  * Bomb targets (`info_bomb_target`, `func_bomb_target`) with hazard markers and red objective diamonds.
+  * Hostages (`hostage_entity`) with humanoid green hulls and rescue zones (`info_hostage_rescue`, `func_hostage_rescue`).
+  * Buy zones (`func_buyzone`) and escape zones (`func_escapezone`).
+* **Light Sources:** 3D yellow diamonds/octahedrons for point lights (`light`), spotlight cones and direction vectors for `light_spot`, and ambient sun icons for `light_environment`.
+* **Weapons & Armoury:** 3D item crates and diamonds for `armoury_entity` with automatic weapon name resolution (AK-47, M4A1, AWP, Deagle, etc.) and item count.
+* **Ambient Audio:** Magenta emitter nodes for `ambient_generic` with sound file and volume inspect.
+* **Brush Entities & Triggers:** Bounding volumes with wireframe edges for `func_door`, `func_button`, `func_breakable`, `func_ladder`, and `trigger_*`.
+* **Entity Target Connections:** Visualizes cause-and-effect wiring in 3D by rendering cyan-amber linkage lines with directional mid-point arrows between triggers (`target`) and destination entities (`targetname`).
 
 ---
 
 ## Directory Structure
 
 ```text
-nav_module/
+NavStudio/
 ├── .github/
 │   └── workflows/
-│       └── build.yml               # Debian container & Windows CI workflow
-├── sdk/                            # Self-contained AMXX / Metamod / HLSDK headers
-│   ├── amxmodx/
-│   ├── metamod/
-│   └── hlsdk/
+│       └── build.yml               # CI build & release workflow
 ├── src/
-│   ├── math/
-│   │   └── vector3.h               # Vector math library
-│   ├── bsp/
-│   │   ├── bsp_types.h             # GoldSrc BSP v30 lump definitions
-│   │   ├── bsp_file.h / .cpp       # BSP loader and ray casting engine
-│   │   └── bsp_entity.h / .cpp     # Map entity parsing
-│   ├── nav/
-│   │   ├── nav_types.h             # Navigation mesh constants and structs
-│   │   ├── nav_area.h / .cpp       # Area quad elevation and connections
-│   │   ├── nav_grid.h / .cpp       # Spatial uniform 2D grid
-│   │   ├── nav_path.h / .cpp       # A* Pathfinding engine
-│   │   └── nav_file.h / .cpp       # .nav file parser and serializer
-│   ├── amxx/
-│   │   ├── amxx_api.h / .cpp       # Module lifecycle and exports
-│   │   ├── amxx_bsp_natives.cpp    # BSP Pawn natives
-│   │   └── amxx_nav_natives.cpp    # NAV Pawn natives
-│   ├── cli/
-│   │   └── main.cpp                # Standalone verification & benchmark CLI
+│   ├── math/                       # Vector3, Ray, Matrix4 math library
+│   ├── bsp/                        # GoldSrc BSP v30 lump parsing & collision tracing
+│   │   ├── bsp_file.h / .cpp
+│   │   ├── bsp_entity.h / .cpp
+│   │   └── wad_file.h / .cpp
+│   ├── nav/                        # Counter-Strike .nav mesh parser, grid & generator
+│   │   ├── nav_area.h / .cpp
+│   │   ├── nav_file.h / .cpp
+│   │   ├── nav_grid.h / .cpp
+│   │   ├── nav_path.h / .cpp
+│   │   └── nav_generator.h / .cpp
+│   ├── cli/                        # Standalone verification & generator CLI tool
+│   │   └── main.cpp
 │   └── editor/                     # NavStudio 3D desktop visualizer & editor
 │       ├── camera/                 # FPS Flycam, Orbit, and 2D cameras
 │       ├── commands/               # Command pattern undo/redo engine
 │       ├── glad/                   # Embedded OpenGL 3.3 Core loader
-│       ├── math/                   # Matrix4 MVP and unprojection math
-│       ├── render/                 # BSP and NavMesh OpenGL renderers and shaders
-│       ├── scene/                  # Scene manager and raycast picker
+│       ├── render/                 # OpenGL shaders, BSP/NAV/Entity/Skybox renderers
+│       ├── scene/                  # Editor scene graph, handles, and ray picker
 │       ├── ui/                     # Dear ImGui dockspace, inspector, and hierarchy
 │       └── main.cpp                # GLFW window and application loop
-├── scripting/
-│   ├── include/
-│   │   └── navmesh.inc             # Pawn include file with documentation
-│   └── navmesh_test.sma            # Example test plugin
-├── CMakeLists.txt                  # Modular CMake configuration (nav_core, amxx, cli, editor)
-├── Makefile                        # Linux direct Makefile
-├── .gitignore
+├── third_party/                    # GLFW & Dear ImGui
+├── CMakeLists.txt                  # Standalone CMake build file
 ├── LICENSE
 └── README.md
 ```
 
 ---
 
-## Installation
+## Keyboard Shortcuts
 
-1. Download the latest release from the [GitHub Releases](https://github.com/ZeroDiamond7601/amxmodx-navmesh/releases) page:
-   * **Linux Module:** `navmesh_amxx_i386.so` (Compiled in Debian Bookworm with static libstdc++)
-   * **Windows Module:** `navmesh_amxx.dll`
-   * **Windows GUI Editor:** `nav_editor.exe`
-   * **Command-Line Tool:** `nav_cli.exe` / `nav_cli`
-2. Copy the module binary to your server:
-   * `cstrike/addons/amxmodx/modules/navmesh_amxx_i386.so` (Linux)
-   * `cstrike/addons/amxmodx/modules/navmesh_amxx.dll` (Windows)
-3. Open `cstrike/addons/amxmodx/configs/modules.ini` and add:
-   ```ini
-   navmesh
-   ```
-4. Copy `scripting/include/navmesh.inc` to your compiler's `include/` directory.
-5. Restart your server.
+| Shortcut | Action |
+| :--- | :--- |
+| **Right-Click Drag** | FPS Freelook / Flycam rotation |
+| **W, A, S, D** | Move camera (Flycam) |
+| **Shift** | Fast camera move speed multiplier |
+| **F4** | Cycle Shading Mode (Textured, Clay, Wireframe, Translucent) |
+| **F3** | Toggle Entity Archetypes display |
+| **G** | Move / Grab selected areas (tracks ground plane) |
+| **S** | Radial Scale tool (when area selected) |
+| **E** | Extrude camera-facing edge |
+| **K / Shift+X** | Knife cut tool (press **R** to cycle angles: 0°, 45°, 90°, 135°) |
+| **B** | Bridge tool (2-click edge bridge) |
+| **N** | Draw area marquee tool (2-click floor rect) |
+| **F** | Flood fill area tool (when nothing selected) / Focus camera (when area/connection selected) |
+| **R** | Rotate selected area 90° / Reverse selected connection direction |
+| **2** | Toggle selected connection bidirectional / Set Gizmo to Rotate |
+| **Shift+D** | Duplicate selected area |
+| **Delete / Backspace / X** | Delete selected connection or area |
+| **Ctrl+Z / Ctrl+Y** | Undo / Redo |
+| **Ctrl+A** | Select All areas |
+| **Shift+B** | Toggle Marquee Box Select tool |
+| **[ / ]** | Decrease / Increase reference grid size |
+| **Shift+W** | Toggle grid snapping |
+| **Ctrl+,** | Preferences window |
+| **Esc** | Cancel current tool mode / Deselect connection / Clear area selection |
 
 ---
 
 ## Building from Source
 
-### CMake Build Options
+### Requirements
+* CMake 3.15+
+* C++17 compatible compiler (MSVC 2019/2022 on Windows, GCC/Clang on Linux)
 
-| Option | Default | Description |
-| :--- | :--- | :--- |
-| `BUILD_AMXX_MODULE` | `ON` | Compiles the AMX Mod X server binary (`navmesh_amxx`) |
-| `BUILD_CLI` | `ON` | Compiles the headless map verification tool (`nav_cli`) |
-| `BUILD_EDITOR` | `OFF` | Compiles the NavStudio 3D GUI editor (`nav_editor`) |
-
-### Linux (Debian / Ubuntu x86)
-
-```bash
-# 1. Install 32-bit compilation dependencies
-sudo dpkg --add-architecture i386
-sudo apt-get update
-sudo apt-get install -y gcc-multilib g++-multilib cmake make
-
-# 2. Build the AMXX module and CLI tool
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release -j$(nproc)
-
-# Output binaries:
-# build/navmesh_amxx_i386.so
-# build/nav_cli
-```
-
-To build NavStudio on Linux, install `libgl1-mesa-dev` and `libx11-dev`, then pass `-DBUILD_EDITOR=ON`:
-```bash
-sudo apt-get install -y libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_EDITOR=ON
-cmake --build build --config Release -j$(nproc)
-
-# Output binary: build/nav_editor
-```
-
-### Windows (MSVC)
-
-Open **Developer Command Prompt for Visual Studio** or PowerShell:
-
+### Windows (Visual Studio)
 ```powershell
-# 1. Configure with the GUI editor enabled
-cmake -B build -A Win32 -DBUILD_EDITOR=ON
-
-# 2. Compile the Release build
+cmake -B build -A Win32 -DBUILD_EDITOR=ON -DBUILD_CLI=ON
 cmake --build build --config Release
-
-# Output binaries:
-# build\Release\navmesh_amxx.dll
-# build\Release\nav_cli.exe
-# build\Release\nav_editor.exe
 ```
+Output binaries:
+* `build/Release/nav_editor.exe`
+* `build/Release/nav_cli.exe`
 
----
-
-## NavStudio Usage Guide
-
-Launch NavStudio by double-clicking `nav_editor.exe` or directly from the terminal:
-
-```cmd
-nav_editor.exe cstrike/maps/de_dust2.bsp
-```
-
-### Loading Maps and Navigation Meshes
-
-NavStudio supports multiple methods to open files:
-* **Drag and Drop:** Drag any `.bsp` or `.nav` file directly from Windows Explorer or your file manager into the 3D viewport window. A dedicated visual drop target highlights the zone, and real-time animated loading progress bars provide live feedback as geometry and navigation data are processed.
-* **Native File Dialog:** Select `File -> Open BSP Map...` (`Ctrl + O`) or `File -> Open NAV Mesh...` (`Ctrl + Shift + O`).
-* **Tool Palette Buttons:** Click `Open BSP Map...` or `Open NAV Mesh...` in the Tool Palette on the left sidebar.
-* **Direct Path Prompt:** Select `File -> Open File from Path...` to type or paste any file path directly.
-* **Automatic Pairing:** Loading a `.bsp` map automatically searches for and loads the matching `.nav` file in the same directory.
-* **Asynchronous Progress:** Map parsing and navigation extraction run in a dedicated background worker thread, ensuring responsive UI frame rates and smooth progress animations without freezing.
-
-
-### Controls and Shortcuts
-
-| Action | Shortcut | Description |
-| :--- | :--- | :--- |
-| **Move Camera (Flycam)** | `W / A / S / D` | Fly forward, backward, strafe left and right |
-| **Elevate Camera Up / Down** | `E / Q` | Fly vertically up and down |
-| **Look Around** | Right-Click + Drag | First-person camera freelook |
-| **Adjust Camera Speed** | Mouse Wheel | Speed up or slow down flycam (holding Right-Click) |
-| **Orbit Selected Area** | `Alt` + Left-Click + Drag | Orbit around the selected area centroid |
-| **Focus Camera on Selection** | `F` | Smoothly centers camera view on selected area |
-| **Reset Camera** | `Home` | Restores camera position and orientation to defaults |
-| **Select NavArea / Drag Handle**| Left-Click | Selects area or grabs gizmo arrows / edges / corners |
-| **Move / Grab Area** | `G` | Area smoothly follows mouse cursor in 3D ground plane |
-| **Radial Scale Area** | `S` | Smooth screen-space radial scaling |
-| **Constrain Axis** | `X` / `Y` / `Z` | Constrain Move or Scale strictly to X, Y, or Z axis |
-| **Extrude Selected Edge** | `E` or `Shift` + Drag Edge | Extrudes edge outward creating connected adjacent area |
-| **Split / Slice Area** | `Shift + X` | Slices area in half along width/length (Hammer clipping) |
-| **Merge Adjacent Areas** | `Shift + M` | Combines adjacent collinear areas into single quad |
-| **Decrease / Increase Grid** | `[` / `]` | Halves or doubles Hammer grid size (1 to 512 units) |
-| **Toggle Grid Snapping** | `Shift + W` | Toggles grid snapping on or off |
-| **Connect Mode** | `C` | Click candidate area (Left=2-Way, Shift+Left=1-Way) |
-| **Rotate Area 90°** | `R` | Rotates area 90 degrees around center |
-| **Duplicate Area** | `Shift + D` | Duplicates selected area and enters Move mode |
-| **Delete Area** | `X` / `Delete` | Deletes selected area with lossless connection undo |
-| **Snap Area to Floor** | `Space` | Snaps area elevation corners to underlying BSP floor |
-| **Undo / Redo** | `Ctrl + Z` / `Ctrl + Y` | Full multi-step undo and redo history |
-| **Open Recent File** | Menu `File -> Open Recent` | Quickly load recently opened `.bsp` and `.nav` files |
-| **Open BSP Map** | `Ctrl + O` | Opens native file dialog for GoldSrc maps |
-| **Open NAV Mesh** | `Ctrl + Shift + O` | Opens native file dialog for `.nav` files |
-| **Save Navigation Mesh** | `Ctrl + S` | Overwrites active `.nav` file |
-| **Save NAV Mesh As** | `Ctrl + Shift + S` | Saves navigation mesh to new target file |
-
-
----
-
-## Standalone CLI Tool (`nav_cli`)
-
-The project includes a headless CLI tool to analyze maps, verify geometry, and benchmark A* pathfinding without running a game server:
-
+### Linux
 ```bash
-./build/nav_cli cstrike/maps/de_dust2.bsp czero/maps/de_dust2.nav
+sudo apt-get install -y cmake make g++ libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_CLI=ON
+cmake --build build --config Release -j$(nproc)
 ```
-
-**Sample Output:**
-```text
-=========================================================
- NavMesh Core - CS 1.6 BSP & NAV Verification CLI
-=========================================================
-
-[BSP] Loading: de_dust2.bsp...
-  -> BSP loaded successfully!
-  -> Entities: 147
-  -> Models: 43
-  -> CT Spawns: 32
-  -> T Spawns: 32
-
-[NAV] Loading: de_dust2.nav...
-  -> NAV loaded successfully!
-  -> Format version: 5
-  -> Total Navigation Areas: 718
-  -> Places: TSpawn, BombsiteB, CTSpawn, Side, Middle, BombsiteA...
-
-[PATHFINDING] Running A* Benchmark...
-  -> Start Position: (-1680, -840, 128)
-  -> Goal Position:  (280, 2240, 32)
-  -> Path found!
-  -> Waypoints count: 18
-  -> Total Path length: 3412.50 units
-```
-
----
-
-## Pawn API Overview (`navmesh.inc`)
-
-### BSP Functions
-```pawn
-// Map loading & status
-native bsp_load_map(const mapname[]);
-native bsp_is_loaded();
-
-// Visibility & Audibility (PVS & PAS)
-native bsp_get_leaf(const Float:origin[3]);
-native bsp_check_vis(leaf_a, leaf_b);
-native bsp_check_pas(leaf_a, leaf_b);
-native bsp_is_point_visible(const Float:ptA[3], const Float:ptB[3]);
-native bsp_is_point_audible(const Float:ptA[3], const Float:ptB[3]);
-native bsp_get_pvs_size();
-native bsp_get_leaf_pvs(leaf_index, buffer[], maxlen);
-native bsp_get_leaf_pas(leaf_index, buffer[], maxlen);
-native bsp_get_visible_leaf_count(leaf_index);
-
-// Collision & Tracing
-native bsp_trace_line(const Float:start[3], const Float:end[3], Float:hitPos[3] = Float:{0.0,0.0,0.0}, Float:hitNormal[3] = Float:{0.0,0.0,0.0});
-native bsp_trace_line_ex(const Float:start[3], const Float:end[3], Float:hitPos[3], Float:hitNormal[3], texture[], maxlen);
-native bsp_trace_hull(const Float:start[3], const Float:end[3], hull_type, Float:hitPos[3] = Float:{0.0,0.0,0.0}, Float:hitNormal[3] = Float:{0.0,0.0,0.0});
-native bsp_trace_hull_ex(const Float:start[3], const Float:end[3], hull_type, Float:hitPos[3], Float:hitNormal[3], texture[], maxlen);
-native bsp_trace_texture(const Float:start[3], const Float:end[3], texture[], maxlen);
-native bsp_trace_wall(const Float:start[3], const Float:end[3], hull_type);
-native bsp_trace_model(model_idx, const Float:start[3], const Float:end[3], hull_type);
-native bsp_get_ground(const Float:start[3], Float:out[3], Float:max_drop = 2000.0);
-native bsp_get_contents(const Float:origin[3]);
-
-// World, Leaves & Geometry
-native bsp_get_world_bounds(Float:mins[3], Float:maxs[3]);
-native bsp_get_leaf_bounds(leaf_index, Float:mins[3], Float:maxs[3]);
-native bsp_get_leaf_contents(leaf_index);
-native bsp_get_leaf_ambient(leaf_index, channel);
-native bsp_get_leaf_count();
-native bsp_get_node_count();
-native bsp_get_plane_count();
-native bsp_get_face_count();
-native bsp_get_plane(plane_index, Float:normal[3], &Float:dist, &type);
-
-// Textures & Surfaces
-native bsp_get_texture_count();
-native bsp_get_texture_name(texture_index, name[], maxlen);
-native bsp_get_texture_size(texture_index, &width, &height);
-native bsp_find_texture(const name[]);
-native BSPMaterialType:bsp_get_surface_material(const texture_name[]);
-native BSPMaterialType:bsp_trace_material(const Float:start[3], const Float:end[3], texture[] = "", maxlen = 0);
-native bsp_get_texture_flags(texture_index, &flags = 0, &is_transparent = 0, &is_fluid = 0, &is_sky = 0, &is_animated = 0);
-
-// Illumination & Lightmaps
-native bsp_get_point_light(const Float:start[3], const Float:end[3], &Float:brightness, Float:color[3] = Float:{0.0,0.0,0.0});
-native bsp_get_face_light(face_index, const Float:point[3], &Float:brightness, Float:color[3] = Float:{0.0,0.0,0.0});
-
-// Geometry & Polygons
-native bsp_get_face_vertex_count(face_index);
-native bsp_get_face_polygon(face_index, Float:output[][3], max_vertices);
-native bsp_get_leaf_face_count(leaf_index);
-native bsp_get_leaf_faces(leaf_index, faces[], max_faces);
-
-// Worldspawn Metadata
-native bsp_get_skyname(output[], maxlen);
-native bsp_get_map_title(output[], maxlen);
-native bsp_get_wad_list(output[], maxlen);
-
-// Entities & Submodels
-native bsp_get_entity_count(const classname[] = "");
-native bsp_get_entity_origin(const classname[], target_index, Float:output[3]);
-native bsp_get_entity_key(entity_index, const key[], value[], maxlen);
-native bsp_find_entity_by_key(const key[], const value[], start_index = 0);
-native bsp_get_brush_model(const classname[], target_index, Float:out_mins[3], Float:out_maxs[3]);
-native bsp_find_entities_by_target(const target[], output[], max_found);
-native bsp_find_entities_by_targetname(const targetname[], output[], max_found);
-native bsp_get_entity_target(entity_index, output[], maxlen);
-native bsp_get_entity_targetname(entity_index, output[], maxlen);
-native bsp_get_model_count();
-native bsp_get_model_bounds(model_index, Float:mins[3], Float:maxs[3]);
-native bsp_get_model_origin(model_index, Float:origin[3]);
-native bsp_get_entities(const classname[], Float:output[], max_found);
-```
-
-### NavMesh & Pathfinding Functions
-```pawn
-native nav_load(const mapname[] = "");
-native nav_unload();
-native nav_is_loaded();
-native nav_get_area_count();
-native nav_get_area_by_id(area_id);
-native nav_get_area_id(area_index);
-native nav_get_nearest_area(const Float:pos[3], Float:max_dist = 1000.0);
-native nav_get_area_at_point(const Float:pos[3], Float:max_z_delta = 40.0);
-native nav_get_area_center(area_index, Float:center[3]);
-native nav_get_area_extent(area_index, Float:mins[3], Float:maxs[3]);
-native Float:nav_get_area_z(area_index, Float:x, Float:y);
-native nav_get_area_flags(area_index);
-native nav_is_point_in_area(area_index, const Float:pos[3], Float:max_z_delta = 40.0);
-native nav_get_closest_point(area_index, const Float:pos[3], Float:closest[3]);
-native Float:nav_get_distance_to_area(area_index, const Float:pos[3]);
-native nav_get_adjacent_count(area_index, NavDirType:direction);
-native nav_get_adjacent_area(area_index, NavDirType:direction, adj_index);
-native nav_is_connected(area_a, area_b, direction = -1);
-native nav_get_place_name(area_index, output[], maxlen);
-native nav_get_hiding_spot_count(area_index);
-native nav_get_hiding_spot(area_index, spot_index, Float:pos[3], &flags);
-native nav_get_ladder_count();
-native nav_get_ladder_info(ladder_index, Float:top[3], Float:bottom[3], &Float:length, &Float:width, &direction);
-
-// Pathfinding
-native nav_build_path(const Float:start[3], const Float:goal[3], &path_id, flags = NAV_PATH_DEFAULT);
-native nav_build_path_async(const Float:start[3], const Float:goal[3], flags = NAV_PATH_DEFAULT);
-native nav_process_async();
-native nav_path_get_segment_count(path_id);
-native nav_path_get_point(path_id, segment_index, Float:pos[3]);
-native nav_path_get_area(path_id, segment_index);
-native NavTraverseType:nav_path_get_how(path_id, segment_index);
-native Float:nav_path_get_length(path_id);
-native nav_path_get_point_along(path_id, Float:dist, Float:pos[3]);
-native nav_path_destroy(path_id);
-native nav_path_clear_all();
-```
-
-### Forwards
-```pawn
-forward nav_on_map_loaded(bsp_loaded, nav_loaded, area_count);
-forward nav_on_path_computed(task_id, path_id, Float:length, success);
-```
-
----
-
-## Example Usage
-
-### Synchronous Pathfinding
-```pawn
-#include <amxmodx>
-#include <fakemeta>
-#include <navmesh>
-
-public plugin_init()
-{
-    register_plugin("Nav Example", "1.0", "Author");
-    register_clcmd("say /path", "Cmd_Path");
-}
-
-public Cmd_Path(id)
-{
-    new Float:start[3], Float:goal[3];
-    pev(id, pev_origin, start);
-
-    // Set goal 500 units away
-    goal[0] = start[0] + 500.0;
-    goal[1] = start[1] + 500.0;
-    goal[2] = start[2];
-
-    new pathId = 0;
-    if (nav_build_path(start, goal, pathId, NAV_PATH_SMOOTH))
-    {
-        new count = nav_path_get_segment_count(pathId);
-        new Float:length = nav_path_get_length(pathId);
-        client_print(id, print_chat, "Path found! Waypoints: %d, Length: %.1f units", count, length);
-
-        for (new i = 0; i < count; i++)
-        {
-            new Float:wp[3];
-            nav_path_get_point(pathId, i, wp);
-            // Process waypoint...
-        }
-
-        nav_path_destroy(pathId);
-    }
-    return PLUGIN_HANDLED;
-}
-```
-
-### Asynchronous Offloaded Pathfinding
-```pawn
-// Queue non-blocking pathfinding job on background worker thread
-new taskId = nav_build_path_async(start, goal, NAV_PATH_SMOOTH);
-
-// Fired on the main server thread when worker completes:
-public nav_on_path_computed(task_id, path_id, Float:length, success)
-{
-    if (!success || !path_id)
-        return;
-
-    new count = nav_path_get_segment_count(path_id);
-    server_print("Async path computed: %d waypoints, %.1f units", count, length);
-
-    // Process waypoints and destroy handle
-    nav_path_destroy(path_id);
-}
-```
+Output binary:
+* `build/nav_cli`
 
 ---
 
 ## License
-
-This project is licensed under the [GNU General Public License v3.0](LICENSE).
-Portions based on AMX Mod X SDK, Metamod, and ReGameDLL.
+NavStudio is licensed under the [GNU General Public License v3.0](LICENSE).

@@ -1,21 +1,14 @@
 cmake_minimum_required(VERSION 3.15)
-project(NavMeshCore VERSION 1.5.3 LANGUAGES C CXX)
+project(NavStudio VERSION 1.5.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option(BUILD_AMXX_MODULE "Build AMX Mod X module library" ON)
+option(BUILD_EDITOR "Build NavStudio standalone GUI editor" ON)
 option(BUILD_CLI "Build standalone command-line verification tool" ON)
-option(BUILD_EDITOR "Build NavStudio standalone GUI editor" OFF)
 
-# Force 32-bit target for Linux when building AMXX module
+# Linux compiler options
 if(UNIX AND NOT APPLE)
-    if(BUILD_AMXX_MODULE)
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
-        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -m32 -static-libgcc -static-libstdc++")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -m32 -static-libgcc -static-libstdc++")
-    endif()
     add_compile_options(-Wall -Wno-narrowing -Wno-write-strings -fPIC)
 endif()
 
@@ -29,21 +22,8 @@ if(MSVC)
         NOMINMAX
         NO_MSVC8_AUTO_COMPAT
     )
-    # Statically link MSVC runtime (/MT) for standalone portability on game servers
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
-
-# Include directories for SDK
-set(SDK_INCLUDES
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/sdk/amxmodx/public
-    ${CMAKE_CURRENT_SOURCE_DIR}/sdk/amxmodx/public/sdk
-    ${CMAKE_CURRENT_SOURCE_DIR}/sdk/metamod
-    ${CMAKE_CURRENT_SOURCE_DIR}/sdk/hlsdk/common
-    ${CMAKE_CURRENT_SOURCE_DIR}/sdk/hlsdk/engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/sdk/hlsdk/dlls
-    ${CMAKE_CURRENT_SOURCE_DIR}/sdk/hlsdk/pm_shared
-)
 
 find_package(Threads REQUIRED)
 
@@ -62,36 +42,6 @@ set(CORE_SOURCES
 add_library(nav_core STATIC ${CORE_SOURCES})
 target_include_directories(nav_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(nav_core PUBLIC Threads::Threads)
-
-# AMXX Module Target
-if(BUILD_AMXX_MODULE)
-    set(MODULE_SOURCES
-        src/nav/async_pathfinder.cpp
-        src/amxx/amxx_api.cpp
-        src/amxx/amxx_bsp_natives.cpp
-        src/amxx/amxx_nav_natives.cpp
-        sdk/amxmodx/public/sdk/amxxmodule.cpp
-    )
-
-    add_library(navmesh_amxx SHARED ${MODULE_SOURCES})
-    target_include_directories(navmesh_amxx PRIVATE ${SDK_INCLUDES})
-    target_link_libraries(navmesh_amxx PRIVATE nav_core)
-
-    if(MSVC)
-        target_compile_definitions(navmesh_amxx PRIVATE _USRDLL)
-        set_target_properties(navmesh_amxx PROPERTIES
-            OUTPUT_NAME "navmesh_amxx"
-            PREFIX ""
-            SUFFIX ".dll"
-        )
-    else()
-        set_target_properties(navmesh_amxx PROPERTIES
-            OUTPUT_NAME "navmesh_amxx_i386"
-            PREFIX ""
-            SUFFIX ".so"
-        )
-    endif()
-endif()
 
 # Standalone CLI / Verification Target
 if(BUILD_CLI)
