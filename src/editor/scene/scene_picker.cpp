@@ -587,17 +587,6 @@ bool ScenePicker::PickConnection(
     float bestDepth = std::numeric_limits<float>::max();
     bool found = false;
 
-    auto DistToSegment2D = [](float px, float py, float x1, float y1, float x2, float y2) -> float {
-        float dx = x2 - x1;
-        float dy = y2 - y1;
-        float lenSq = dx * dx + dy * dy;
-        if (lenSq < 0.0001f) return std::hypot(px - x1, py - y1);
-        float t = std::max(0.0f, std::min(1.0f, ((px - x1) * dx + (py - y1) * dy) / lenSq));
-        float projX = x1 + t * dx;
-        float projY = y1 + t * dy;
-        return std::hypot(px - projX, py - projY);
-    };
-
     for (const auto* area : nav.GetAreas()) {
         if (!area) continue;
         Vector3 centerA = area->GetCenter();
@@ -628,7 +617,7 @@ bool ScenePicker::PickConnection(
                     Vector3 mid = (start + end) * 0.5f;
                     Vector4 clip = viewProj * Vector4(mid.x, mid.y, mid.z, 1.0f);
                     float depth = clip.w;
-                    if (dist < bestDist - 1.5f || (std::abs(dist - bestDist) <= 1.5f && depth < bestDepth)) {
+                    if (dist < bestDist - 1.5f || (std::fabs(dist - bestDist) <= 1.5f && depth < bestDepth)) {
                         bestDist = dist;
                         bestDepth = depth;
                         outFromId = area->GetID();

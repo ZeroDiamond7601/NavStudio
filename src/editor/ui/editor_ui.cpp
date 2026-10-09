@@ -2149,6 +2149,7 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
                 ImGui::Text("Map: %s | Entity #%d (%s) @ (%.0f, %.0f, %.0f) | Entities: %zu | Grid: %.0f [%s]",
                     bspName, selEnt->index, selEnt->classname.c_str(), selEnt->origin.x, selEnt->origin.y, selEnt->origin.z,
                     entCount, grid, snap ? "SNAP" : "FREE");
+            }
         } else if (scene.HasSelectedConnection()) {
             const auto& conn = scene.GetSelectedConnection();
             ImGui::Text("Map: %s | Selected Connection: #%u -> #%u | Del: Delete | Esc: Deselect | Grid: %.0f [%s]",
