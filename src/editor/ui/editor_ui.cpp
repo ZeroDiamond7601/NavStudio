@@ -3568,7 +3568,7 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
             { "View", "Snap View: Side / Right", "", [&]() { camera.SnapToPreset(2); } },
             { "View", "Snap View: 3D Isometric", "", [&]() { camera.SnapToPreset(3); } },
             { "View", "Toggle 3D Skybox", "", [&]() { scene.SetShowSkybox(!scene.GetShowSkybox()); } },
-            { "View", "Toggle Entities", "F3", [&]() { scene.GetEntityRenderer().SetEnabled(!scene.GetEntityRenderer().IsEnabled()); } },
+            { "View", "Toggle Entities", "F3", [&]() { auto& r = scene.GetEntityRenderer(); r.SetShowEntities(!r.GetShowEntities()); } },
             { "View", "Cycle Shading Mode", "F4", [&]() { int n = (static_cast<int>(scene.GetBSPMode()) + 1) % 4; scene.SetBSPMode(static_cast<BSPRenderMode>(n)); } },
             { "View", "Toggle Connection Validity Overlay", "Ctrl+Shift+V", [&]() { auto& r = scene.GetNavRenderer(); r.SetShowConnectionValidity(!r.GetShowConnectionValidity()); scene.RebuildNavRenderer(); } },
             { "View", "Toggle Island Color Coding", "", [&]() { scene.ToggleIslandColors(); } },

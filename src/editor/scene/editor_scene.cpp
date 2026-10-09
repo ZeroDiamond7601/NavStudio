@@ -3387,7 +3387,7 @@ bool EditorScene::RecomputePath() {
         m_pathPreview.jumpFlags.reserve(segs.size());
         for (const auto& seg : segs) {
             m_pathPreview.renderPoints.push_back(seg.pos);
-            bool isJump = (seg.type == NAV_PATH_SEGMENT_JUMP) || (seg.area && seg.area->HasAttributes(NAV_ATTR_JUMP));
+            bool isJump = (seg.how == NAV_TRAVERSE_JUMP) || (seg.area && seg.area->HasAttributes(NAV_ATTR_JUMP));
             m_pathPreview.jumpFlags.push_back(isJump);
         }
     }
