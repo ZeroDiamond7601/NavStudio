@@ -40,7 +40,15 @@ static double g_boxSelectStartY = 0.0;
 static double g_boxSelectCurrentX = 0.0;
 static double g_boxSelectCurrentY = 0.0;
 
-static bool SaveScreenToBMP(const std::string& filename, int width, int height) {
+bool SaveScreenToBMP(const char* filename, int width, int height) {
+    if (width <= 0 || height <= 0) {
+        GLint vp[4] = {0, 0, 0, 0};
+        glGetIntegerv(GL_VIEWPORT, vp);
+        width = vp[2];
+        height = vp[3];
+    }
+    if (width <= 0 || height <= 0) return false;
+
 #pragma pack(push, 1)
     struct BMPHeader {
         uint16_t bfType = 0x4D42;
@@ -83,13 +91,21 @@ static bool SaveScreenToBMP(const std::string& filename, int width, int height) 
         }
     }
 
-    FILE* f = std::fopen(filename.c_str(), "wb");
+    FILE* f = std::fopen(filename, "wb");
     if (!f) return false;
     std::fwrite(&header, 1, sizeof(header), f);
     std::fwrite(bmpData.data(), 1, bmpData.size(), f);
     std::fclose(f);
-    std::printf("[Screenshot] Saved %dx%d screenshot to: %s\n", width, height, filename.c_str());
+    std::printf("[Screenshot] Saved %dx%d screenshot to: %s\n", width, height, filename);
     return true;
+}
+
+bool SaveScreenToBMP(const char* filename) {
+    return SaveScreenToBMP(filename, 0, 0);
+}
+
+bool SaveScreenToBMP(const std::string& filename, int width, int height) {
+    return SaveScreenToBMP(filename.c_str(), width, height);
 }
 
 static void WindowCloseCallback(GLFWwindow* window) {
