@@ -504,7 +504,7 @@ bool NavMesh::ConnectAreas(uint32_t fromId, uint32_t toId, bool bidirectional, i
         if (std::abs(delta.x) > std::abs(delta.y)) {
             dirFrom = (delta.x > 0) ? NAV_DIR_EAST : NAV_DIR_WEST;
         } else {
-            dirFrom = (delta.y > 0) ? NAV_DIR_NORTH : NAV_DIR_SOUTH;
+            dirFrom = (delta.y > 0) ? NAV_DIR_SOUTH : NAV_DIR_NORTH;
         }
     }
 

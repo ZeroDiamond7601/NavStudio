@@ -547,27 +547,38 @@ public:
         NavExtent newExt;
         NavDirType dirFromSrc = NAV_DIR_NORTH;
 
+        float newNeZ = src->GetNEZ();
+        float newSwZ = src->GetSWZ();
+
         if (m_edge == HANDLE_EDGE_NORTH) {
-            newExt.lo = Vector3(srcExt.lo.x, srcExt.hi.y, srcExt.lo.z);
-            newExt.hi = Vector3(srcExt.hi.x, srcExt.hi.y + m_length, srcExt.hi.z);
+            newExt.lo = Vector3(srcExt.lo.x, srcExt.lo.y - m_length, srcExt.lo.z);
+            newExt.hi = Vector3(srcExt.hi.x, srcExt.lo.y, src->GetNEZ());
+            newNeZ = src->GetNEZ();
+            newSwZ = srcExt.lo.z;
             dirFromSrc = NAV_DIR_NORTH;
         } else if (m_edge == HANDLE_EDGE_SOUTH) {
-            newExt.lo = Vector3(srcExt.lo.x, srcExt.lo.y - m_length, srcExt.lo.z);
-            newExt.hi = Vector3(srcExt.hi.x, srcExt.lo.y, srcExt.hi.z);
+            newExt.lo = Vector3(srcExt.lo.x, srcExt.hi.y, src->GetSWZ());
+            newExt.hi = Vector3(srcExt.hi.x, srcExt.hi.y + m_length, srcExt.hi.z);
+            newNeZ = srcExt.hi.z;
+            newSwZ = src->GetSWZ();
             dirFromSrc = NAV_DIR_SOUTH;
         } else if (m_edge == HANDLE_EDGE_EAST) {
-            newExt.lo = Vector3(srcExt.hi.x, srcExt.lo.y, srcExt.lo.z);
+            newExt.lo = Vector3(srcExt.hi.x, srcExt.lo.y, src->GetNEZ());
             newExt.hi = Vector3(srcExt.hi.x + m_length, srcExt.hi.y, srcExt.hi.z);
+            newNeZ = src->GetNEZ();
+            newSwZ = srcExt.hi.z;
             dirFromSrc = NAV_DIR_EAST;
         } else if (m_edge == HANDLE_EDGE_WEST) {
             newExt.lo = Vector3(srcExt.lo.x - m_length, srcExt.lo.y, srcExt.lo.z);
-            newExt.hi = Vector3(srcExt.lo.x, srcExt.hi.y, srcExt.hi.z);
+            newExt.hi = Vector3(srcExt.lo.x, srcExt.hi.y, src->GetSWZ());
+            newNeZ = srcExt.lo.z;
+            newSwZ = src->GetSWZ();
             dirFromSrc = NAV_DIR_WEST;
         } else {
             return;
         }
 
-        NavArea* created = m_scene->GetNAV().CreateArea(newExt, src->GetNEZ(), src->GetSWZ());
+        NavArea* created = m_scene->GetNAV().CreateArea(newExt, newNeZ, newSwZ);
         if (created) {
             m_createdId = created->GetID();
             created->SetAttributes(src->GetAttributes());
@@ -663,7 +674,7 @@ public:
             area2->SetPlaceName(m_placeName);
 
             if (m_splitAlongY) {
-                m_scene->GetNAV().ConnectAreas(m_areaId, m_createdId, true, NAV_DIR_NORTH);
+                m_scene->GetNAV().ConnectAreas(m_areaId, m_createdId, true, NAV_DIR_SOUTH);
             } else {
                 m_scene->GetNAV().ConnectAreas(m_areaId, m_createdId, true, NAV_DIR_EAST);
             }
@@ -959,10 +970,10 @@ public:
             return w1 * a1->GetZ(x, y) + w2 * a2->GetZ(x, y);
         };
 
-        float nwZ = CalcZ(ext.lo.x, ext.hi.y);
-        float neZ = CalcZ(ext.hi.x, ext.hi.y);
-        float seZ = CalcZ(ext.hi.x, ext.lo.y);
-        float swZ = CalcZ(ext.lo.x, ext.lo.y);
+        float nwZ = CalcZ(ext.lo.x, ext.lo.y);
+        float neZ = CalcZ(ext.hi.x, ext.lo.y);
+        float seZ = CalcZ(ext.hi.x, ext.hi.y);
+        float swZ = CalcZ(ext.lo.x, ext.hi.y);
 
         ext.lo.z = nwZ;
         ext.hi.z = seZ;
@@ -1503,29 +1514,42 @@ public:
             NavExtent newExt;
             NavDirType dirFromSrc = NAV_DIR_NORTH;
 
+            float newNeZ = src->GetNEZ();
+            float newSwZ = src->GetSWZ();
+
             if (m_edge == HANDLE_EDGE_NORTH) {
-                newExt.lo = Vector3(srcExt.lo.x, srcExt.hi.y, srcExt.lo.z);
-                newExt.hi = Vector3(srcExt.hi.x, srcExt.hi.y + m_length, srcExt.hi.z);
+                newExt.lo = Vector3(srcExt.lo.x, srcExt.lo.y - m_length, srcExt.lo.z);
+                newExt.hi = Vector3(srcExt.hi.x, srcExt.lo.y, src->GetNEZ());
+                newNeZ = src->GetNEZ();
+                newSwZ = srcExt.lo.z;
                 dirFromSrc = NAV_DIR_NORTH;
             } else if (m_edge == HANDLE_EDGE_SOUTH) {
-                newExt.lo = Vector3(srcExt.lo.x, srcExt.lo.y - m_length, srcExt.lo.z);
-                newExt.hi = Vector3(srcExt.hi.x, srcExt.lo.y, srcExt.hi.z);
+                newExt.lo = Vector3(srcExt.lo.x, srcExt.hi.y, src->GetSWZ());
+                newExt.hi = Vector3(srcExt.hi.x, srcExt.hi.y + m_length, srcExt.hi.z);
+                newNeZ = srcExt.hi.z;
+                newSwZ = src->GetSWZ();
                 dirFromSrc = NAV_DIR_SOUTH;
             } else if (m_edge == HANDLE_EDGE_EAST) {
-                newExt.lo = Vector3(srcExt.hi.x, srcExt.lo.y, srcExt.lo.z);
+                newExt.lo = Vector3(srcExt.hi.x, srcExt.lo.y, src->GetNEZ());
                 newExt.hi = Vector3(srcExt.hi.x + m_length, srcExt.hi.y, srcExt.hi.z);
+                newNeZ = src->GetNEZ();
+                newSwZ = srcExt.hi.z;
                 dirFromSrc = NAV_DIR_EAST;
             } else if (m_edge == HANDLE_EDGE_WEST) {
                 newExt.lo = Vector3(srcExt.lo.x - m_length, srcExt.lo.y, srcExt.lo.z);
-                newExt.hi = Vector3(srcExt.lo.x, srcExt.hi.y, srcExt.hi.z);
+                newExt.hi = Vector3(srcExt.lo.x, srcExt.hi.y, src->GetSWZ());
+                newNeZ = srcExt.lo.z;
+                newSwZ = src->GetSWZ();
                 dirFromSrc = NAV_DIR_WEST;
             } else {
-                newExt.lo = Vector3(srcExt.lo.x, srcExt.hi.y, srcExt.lo.z);
-                newExt.hi = Vector3(srcExt.hi.x, srcExt.hi.y + m_length, srcExt.hi.z);
+                newExt.lo = Vector3(srcExt.lo.x, srcExt.lo.y - m_length, srcExt.lo.z);
+                newExt.hi = Vector3(srcExt.hi.x, srcExt.lo.y, src->GetNEZ());
+                newNeZ = src->GetNEZ();
+                newSwZ = srcExt.lo.z;
                 dirFromSrc = NAV_DIR_NORTH;
             }
 
-            NavArea* created = m_scene->GetNAV().CreateArea(newExt, src->GetNEZ(), src->GetSWZ());
+            NavArea* created = m_scene->GetNAV().CreateArea(newExt, newNeZ, newSwZ);
             if (created) {
                 uint32_t cId = created->GetID();
                 m_createdIds.push_back(cId);

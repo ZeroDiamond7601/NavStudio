@@ -65,9 +65,9 @@ inline const char* GetHandleName(SelectedHandleType h) {
         case HANDLE_ROTATE_Y: return "Rotate Roll (Around Y)";
         case HANDLE_ROTATE_Z: return "Rotate Yaw (Around Z)";
         case HANDLE_ROTATE_SCREEN: return "Rotate Screen Trackball";
-        case HANDLE_EDGE_NORTH: return "North Edge (+Y)";
+        case HANDLE_EDGE_NORTH: return "North Edge (-Y)";
         case HANDLE_EDGE_EAST: return "East Edge (+X)";
-        case HANDLE_EDGE_SOUTH: return "South Edge (-Y)";
+        case HANDLE_EDGE_SOUTH: return "South Edge (+Y)";
         case HANDLE_EDGE_WEST: return "West Edge (-X)";
         case HANDLE_CORNER_NW: return "North-West Corner";
         case HANDLE_CORNER_NE: return "North-East Corner";

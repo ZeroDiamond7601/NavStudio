@@ -1990,18 +1990,18 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
             }
         }
     } else if (area && m_draggedHandle == HANDLE_EDGE_NORTH) {
-        float candidateHiY = m_dragStartExtent.hi.y + groundDelta.y;
-        float targetHiY = SnapToNeighborEdge(area->GetID(), candidateHiY, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x);
-        targetHiY = std::max(m_dragStartExtent.lo.y + 8.0f, targetHiY);
-        NavExtent nextExt = m_dragStartExtent;
-        nextExt.hi.y = targetHiY;
-        area->SetExtent(nextExt);
-    } else if (area && m_draggedHandle == HANDLE_EDGE_SOUTH) {
         float candidateLoY = m_dragStartExtent.lo.y + groundDelta.y;
         float targetLoY = SnapToNeighborEdge(area->GetID(), candidateLoY, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x);
         targetLoY = std::min(m_dragStartExtent.hi.y - 8.0f, targetLoY);
         NavExtent nextExt = m_dragStartExtent;
         nextExt.lo.y = targetLoY;
+        area->SetExtent(nextExt);
+    } else if (area && m_draggedHandle == HANDLE_EDGE_SOUTH) {
+        float candidateHiY = m_dragStartExtent.hi.y + groundDelta.y;
+        float targetHiY = SnapToNeighborEdge(area->GetID(), candidateHiY, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x);
+        targetHiY = std::max(m_dragStartExtent.lo.y + 8.0f, targetHiY);
+        NavExtent nextExt = m_dragStartExtent;
+        nextExt.hi.y = targetHiY;
         area->SetExtent(nextExt);
     } else if (area && m_draggedHandle == HANDLE_EDGE_EAST) {
         float candidateHiX = m_dragStartExtent.hi.x + groundDelta.x;
@@ -2019,31 +2019,31 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
         area->SetExtent(nextExt);
     } else if (area && m_draggedHandle == HANDLE_CORNER_NW) {
         float targetLoX = std::min(m_dragStartExtent.hi.x - 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.lo.x + groundDelta.x, true, m_dragStartExtent.lo.y, m_dragStartExtent.hi.y));
-        float targetHiY = std::max(m_dragStartExtent.lo.y + 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.hi.y + groundDelta.y, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x));
+        float targetLoY = std::min(m_dragStartExtent.hi.y - 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.lo.y + groundDelta.y, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x));
         NavExtent nextExt = m_dragStartExtent;
         nextExt.lo.x = targetLoX;
-        nextExt.hi.y = targetHiY;
+        nextExt.lo.y = targetLoY;
         area->SetExtent(nextExt);
     } else if (area && m_draggedHandle == HANDLE_CORNER_NE) {
         float targetHiX = std::max(m_dragStartExtent.lo.x + 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.hi.x + groundDelta.x, true, m_dragStartExtent.lo.y, m_dragStartExtent.hi.y));
+        float targetLoY = std::min(m_dragStartExtent.hi.y - 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.lo.y + groundDelta.y, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x));
+        NavExtent nextExt = m_dragStartExtent;
+        nextExt.hi.x = targetHiX;
+        nextExt.lo.y = targetLoY;
+        area->SetExtent(nextExt);
+    } else if (area && m_draggedHandle == HANDLE_CORNER_SE) {
+        float targetHiX = std::max(m_dragStartExtent.lo.x + 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.hi.x + groundDelta.x, true, m_dragStartExtent.lo.y, m_dragStartExtent.hi.y));
         float targetHiY = std::max(m_dragStartExtent.lo.y + 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.hi.y + groundDelta.y, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x));
         NavExtent nextExt = m_dragStartExtent;
         nextExt.hi.x = targetHiX;
         nextExt.hi.y = targetHiY;
         area->SetExtent(nextExt);
-    } else if (area && m_draggedHandle == HANDLE_CORNER_SE) {
-        float targetHiX = std::max(m_dragStartExtent.lo.x + 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.hi.x + groundDelta.x, true, m_dragStartExtent.lo.y, m_dragStartExtent.hi.y));
-        float targetLoY = std::min(m_dragStartExtent.hi.y - 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.lo.y + groundDelta.y, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x));
-        NavExtent nextExt = m_dragStartExtent;
-        nextExt.hi.x = targetHiX;
-        nextExt.lo.y = targetLoY;
-        area->SetExtent(nextExt);
     } else if (area && m_draggedHandle == HANDLE_CORNER_SW) {
         float targetLoX = std::min(m_dragStartExtent.hi.x - 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.lo.x + groundDelta.x, true, m_dragStartExtent.lo.y, m_dragStartExtent.hi.y));
-        float targetLoY = std::min(m_dragStartExtent.hi.y - 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.lo.y + groundDelta.y, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x));
+        float targetHiY = std::max(m_dragStartExtent.lo.y + 8.0f, SnapToNeighborEdge(area->GetID(), m_dragStartExtent.hi.y + groundDelta.y, false, m_dragStartExtent.lo.x, m_dragStartExtent.hi.x));
         NavExtent nextExt = m_dragStartExtent;
         nextExt.lo.x = targetLoX;
-        nextExt.lo.y = targetLoY;
+        nextExt.hi.y = targetHiY;
         area->SetExtent(nextExt);
     }
 
