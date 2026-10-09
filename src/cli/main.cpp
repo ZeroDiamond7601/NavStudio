@@ -531,7 +531,7 @@ static int HandleAnalyze(int argc, char* argv[]) {
 
 int main(int argc, char* argv[]) {
     std::cout << "=========================================================\n";
-    std::cout << " NavStudio CLI v1.5.3 - CS 1.6 BSP & NAV Tool\n";
+    std::cout << " NavStudio CLI v1.6.0 - CS 1.6 BSP & NAV Tool\n";
     std::cout << "=========================================================\n\n";
 
     if (argc < 2) {

@@ -3,7 +3,7 @@
 [![CI & Build](https://github.com/ZeroDiamond7601/NavStudio/actions/workflows/build.yml/badge.svg)](https://github.com/ZeroDiamond7601/NavStudio/actions)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20(x86)%20%7C%20Linux-brightgreen.svg)]()
-[![Release](https://img.shields.io/badge/Version-v1.5.3-orange.svg)](https://github.com/ZeroDiamond7601/NavStudio/releases)
+[![Release](https://img.shields.io/badge/Version-v1.6.0-orange.svg)](https://github.com/ZeroDiamond7601/NavStudio/releases)
 
 **NavStudio** is a standalone, hardware-accelerated 3D desktop visualizer, navigation mesh editor, and verification suite for **GoldSrc** (`.bsp` v30) maps and **Counter-Strike 1.6 / Condition Zero** (`.nav` v4 & v5) navigation meshes.
 
@@ -84,6 +84,28 @@ It provides real-time OpenGL 3.3 Core rendering with Dear ImGui docking, Valve H
 * **Brush Entities & Triggers:** Bounding volumes with wireframe edges for `func_door`, `func_button`, `func_breakable`, `func_ladder`, and `trigger_*`.
 * **Entity Target Connections:** Visualizes cause-and-effect wiring in 3D by rendering cyan-amber linkage lines with directional mid-point arrows between triggers (`target`) and destination entities (`targetname`).
 
+### Bot Waypoint System & Dual-Engine Analyzer (`F6`)
+* **Universal Multi-Bot Format Support:**
+  * **CS-EBOT (`.ewp`):** Full read/write support for v127 (Haruhiko Okumura LZSS compression), v126, and v125 formats.
+  * **SyPB (`.spt` / `.pwf`):** SyPB format graph import/export with mod-specific team and state flags.
+  * **YaPB (`.pwf`):** YaPB binary format with LZSS compression and 2-axis camp aim pitch/yaw preservation.
+  * **POD-Bot mm (`.pwf` / `.wpt`):** Legacy and modern POD-Bot waypoint structures.
+* **Game Mod Specialization:**
+  * **Standard Counter-Strike:** Bomb sites, hostage rescue routes, sniper perches, and team-restricted zones.
+  * **Zombie Plague / Biohazard:** Human camping perches, dead-end clusters, barricades, and zombie jump paths.
+  * **Deathmatch / FFA:** Uniform distribution flow and distributed spawn waypoints.
+* **Bidirectional NavMesh <-> Waypoint Conversion:**
+  * **NavMesh to Waypoints:** Samples navigation area centers, corners, and centroids; creates graph nodes with height snapping; establishes bi-directional and one-way links based on step/drop limits; and infers team/mod flags.
+  * **Waypoints to NavMesh:** Generates contiguous polygonal navigation mesh quads from node clusters and interconnecting pathways.
+* **Dual-Engine Automated Waypoint Analyzer:**
+  * **CS-EBOT Analysis:** Headroom collision ray-casting against BSP geometry to detect crouching requirements; automated dead-end camp mesh clustering for Zombie Plague.
+  * **YaPB Analysis:** 16-angle radial 360-degree sightline ray-casting for sniper/camp perches (calculating exact pitch and yaw aim vectors); step-jump flag derivation from slope differentials; wall-obstructed link pruning.
+  * Headless automated analysis via CLI: `nav_cli analyze <file> [map.bsp]`.
+* **Interactive 3D Waypoint Visualizer:**
+  * Diamond nodes color-coded by bot type and team flags (CT Blue, T Red, Neutral White, Camp Green, Ladder Yellow).
+  * Ground contact discs, directional link arrows, parabolic jump arcs, and camp aim vector rays.
+  * Direct 3D ray-picking selection, manual node dropping, auto-linking within customizable radius, and inspector flag editing.
+
 ---
 
 ## Directory Structure
@@ -107,6 +129,11 @@ NavStudio/
 │   │   └── nav_generator.h / .cpp
 │   ├── cli/                        # Standalone verification & generator CLI tool
 │   │   └── main.cpp
+│   ├── waypoint/                   # Multi-bot waypoint engine (CS-EBOT, SyPB, YaPB, POD-Bot)
+│   │   ├── compressor.h            # Haruhiko Okumura LZSS compressor & decompressor
+│   │   ├── waypoint_types.h        # Node, link, bot format, and game mod definitions
+│   │   ├── waypoint_graph.h / .cpp # Node graph, auto-linking, file codecs, and analyzer
+│   │   └── waypoint_nav_converter.h / .cpp # Bidirectional NavMesh <-> Waypoint converter
 │   └── editor/                     # NavStudio 3D desktop visualizer & editor
 │       ├── camera/                 # FPS Flycam, Orbit, and 2D cameras
 │       ├── commands/               # Command pattern undo/redo engine
@@ -132,6 +159,7 @@ NavStudio/
 | **Shift** | Fast camera move speed multiplier |
 | **F4** | Cycle Shading Mode (Textured, Clay, Wireframe, Translucent) |
 | **F3** | Toggle Entity Archetypes display |
+| **F6** | Toggle Bot Waypoint rendering & overlays |
 | **G** | Move / Grab selected areas (tracks ground plane) |
 | **S** | Radial Scale tool (when area selected) |
 | **E** | Extrude camera-facing edge |
