@@ -214,6 +214,38 @@ uint32_t ScenePicker::PickLadder(const EditorScene& scene, const Ray& ray, float
     return closestLadderId;
 }
 
+uint32_t ScenePicker::PickWaypoint(const EditorScene& scene, const Ray& ray, float* outT) {
+    if (!scene.HasWaypoints() || !scene.GetShowWaypoints()) return 0;
+
+    const auto& nodes = scene.GetWaypoints().GetNodes();
+    uint32_t closestId = 0;
+    float closestDist = std::numeric_limits<float>::max();
+
+    for (const auto& node : nodes) {
+        Vector3 center = node.origin + Vector3(0.0f, 0.0f, 12.0f);
+        float pickRadius = std::max(16.0f, node.radius * 0.5f);
+
+        // Ray-Sphere intersection test
+        Vector3 oc = ray.origin - center;
+        float b = oc.Dot(ray.direction);
+        float c = oc.Dot(oc) - pickRadius * pickRadius;
+        float discriminant = b * b - c;
+
+        if (discriminant >= 0.0f) {
+            float t = -b - std::sqrt(discriminant);
+            if (t > 0.0f && t < closestDist) {
+                closestDist = t;
+                closestId = node.id;
+            }
+        }
+    }
+
+    if (closestId != 0 && outT) {
+        *outT = closestDist;
+    }
+    return closestId;
+}
+
 bool ScenePicker::PickBSPFloor(const EditorScene& scene, const Ray& ray, Vector3* outHitPoint) {
     if (!scene.HasBSP()) return false;
 

@@ -46,6 +46,8 @@ public:
     void OpenDiagnosticsModal() { m_showDiagnosticsModal = true; }
     void OpenLadderCreateModal() { m_showLadderCreateModal = true; }
     void OpenPawnExportModal() { m_showPawnExportModal = true; }
+    void OpenWaypointExportModal() { m_showWaypointExportModal = true; }
+    void OpenNavToWaypointModal() { m_showNavToWaypointModal = true; }
     void SetMarqueeBox(bool active, float startX, float startY, float curX, float curY) {
         m_marqueeActive = active;
         m_marqueeStartX = startX;
@@ -98,6 +100,11 @@ private:
     void RenderPawnExportModal(EditorScene& scene);
     void RenderLadderCreateModal(EditorScene& scene, Camera& camera);
     void RenderToastHUD(const EditorScene& scene);
+
+    // Bot Waypoint System UI
+    void RenderWaypointInspector(EditorScene& scene, CommandManager& cmdMgr);
+    void RenderWaypointExportModal(EditorScene& scene);
+    void RenderNavToWaypointModal(EditorScene& scene);
 
     bool m_marqueeActive{false};
     float m_marqueeStartX{0.0f};
@@ -173,6 +180,14 @@ private:
     bool m_showLadderCreateModal{false};
     float m_ladderCreateWidth{32.0f};
     int m_ladderCreateDir{0};
+
+    // Bot Waypoint UI State
+    bool m_showWaypointExportModal{false};
+    bool m_showNavToWaypointModal{false};
+    int m_waypointExportBot{0}; // 0=EBot, 1=SyPB, 2=YaPB, 3=PODBot
+    int m_waypointExportMod{0}; // 0=Standard, 1=ZombiePlague, 2=Deathmatch
+    char m_waypointExportPath[512]{""};
+    char m_waypointFilter[64]{""};
 };
 
 #endif // EDITOR_UI_H

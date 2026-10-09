@@ -1,6 +1,7 @@
 #include "editor/scene/editor_scene.h"
 #include "editor/scene/scene_picker.h"
 #include "editor/commands/nav_commands.h"
+#include "waypoint/waypoint_nav_converter.h"
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -1286,6 +1287,10 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
 
     if (m_showNAV && m_navRenderer.IsLoaded()) {
         m_navRenderer.Render(meshShader, lineShader, mvp);
+    }
+
+    if (m_showWaypoints && m_waypointRenderer.IsLoaded()) {
+        m_waypointRenderer.Render(lineShader, mvp);
     }
 
     // 3D Transform Gizmo (Blender / Hammer style cones, rings, boxes)
@@ -4696,5 +4701,86 @@ std::string EditorScene::GeneratePawnWaypointsCode(bool fromSelectionOnly) const
     }
     ss << "};\n";
     return ss.str();
+}
+
+// --- Bot Waypoint System Implementation ---
+
+void EditorScene::SetShowWaypoints(bool show) {
+    m_showWaypoints = show;
+    m_waypointRenderer.SetShowWaypoints(show);
+}
+
+void EditorScene::ToggleShowWaypoints() {
+    SetShowWaypoints(!m_showWaypoints);
+    ShowToast(m_showWaypoints ? "Waypoints: Visible" : "Waypoints: Hidden");
+}
+
+void EditorScene::SelectWaypoint(uint32_t id) {
+    m_selectedWaypointId = id;
+    RebuildWaypointRenderer();
+}
+
+WaypointNode* EditorScene::GetSelectedWaypoint() {
+    return (m_selectedWaypointId != 0) ? m_waypoints.GetNodeByID(m_selectedWaypointId) : nullptr;
+}
+
+const WaypointNode* EditorScene::GetSelectedWaypoint() const {
+    return (m_selectedWaypointId != 0) ? m_waypoints.GetNodeByID(m_selectedWaypointId) : nullptr;
+}
+
+bool EditorScene::LoadWaypoints(const std::string& path) {
+    if (m_waypoints.Load(path)) {
+        RebuildWaypointRenderer();
+        ShowToast("Loaded " + std::to_string(m_waypoints.GetNodeCount()) + " waypoints from " + path);
+        return true;
+    }
+    ShowToast("Failed to load waypoints from " + path);
+    return false;
+}
+
+bool EditorScene::SaveWaypoints(const std::string& path, BotType bot, GameMod mod) {
+    if (m_waypoints.Save(path, bot, mod)) {
+        ShowToast("Saved " + std::to_string(m_waypoints.GetNodeCount()) + " waypoints to " + path);
+        return true;
+    }
+    ShowToast("Failed to save waypoints to " + path);
+    return false;
+}
+
+bool EditorScene::ConvertNavToWaypoints(BotType bot, GameMod mod) {
+    if (!m_nav || !m_nav->IsLoaded()) {
+        ShowToast("No NavMesh loaded to convert!");
+        return false;
+    }
+    auto stats = WaypointNavConverter::NavToWaypoints(*m_nav, m_waypoints, bot, mod);
+    RebuildWaypointRenderer();
+    ShowToast("Converted NavMesh: " + std::to_string(stats.waypointsCreated) + " waypoints, " +
+              std::to_string(stats.connectionsCreated) + " links!");
+    return true;
+}
+
+size_t EditorScene::ConvertWaypointsToNav() {
+    if (m_waypoints.IsEmpty()) {
+        ShowToast("No waypoints loaded to convert!");
+        return 0;
+    }
+    if (!m_nav) {
+        m_nav = std::make_unique<NavMesh>();
+    }
+    size_t created = WaypointNavConverter::WaypointsToNav(m_waypoints, *m_nav);
+    if (created > 0) {
+        m_isModified = true;
+        RebuildNavRenderer();
+        ShowToast("Generated " + std::to_string(created) + " NavAreas from waypoints!");
+    }
+    return created;
+}
+
+void EditorScene::RebuildWaypointRenderer() {
+    if (m_waypoints.IsEmpty()) {
+        m_waypointRenderer.Clear();
+    } else {
+        m_waypointRenderer.BuildFromGraph(m_waypoints, m_selectedWaypointId);
+    }
 }
 

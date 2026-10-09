@@ -325,12 +325,18 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     }
                 }
 
-                // Pick ladder, entity, and NavArea with accurate distance comparison
+                // Pick ladder, entity, waypoint, and NavArea with accurate distance comparison
                 float ladDist = std::numeric_limits<float>::max();
                 uint32_t hitLadder = ScenePicker::PickLadder(*g_activeScene, ray, &ladDist);
 
                 float entDist = std::numeric_limits<float>::max();
                 int hitEntity = ScenePicker::PickEntity(*g_activeScene, ray, &entDist);
+
+                float wptDist = std::numeric_limits<float>::max();
+                uint32_t hitWpt = 0;
+                if (g_activeScene->IsShowWaypoints()) {
+                    hitWpt = ScenePicker::PickWaypoint(*g_activeScene, ray, &wptDist);
+                }
 
                 Vector3 navHit(0, 0, 0);
                 uint32_t hitArea = ScenePicker::PickNavArea(*g_activeScene, ray, &navHit);
@@ -339,8 +345,17 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                 bool additive = (mods & GLFW_MOD_SHIFT) != 0;
                 bool toggle = (mods & GLFW_MOD_CONTROL) != 0;
 
-                // Priority: ladder -> area -> entity
-                if (hitLadder != 0 && (hitLadder && ladDist <= navDist + 8.0f && ladDist <= entDist + 8.0f)) {
+                // Priority: waypoint -> ladder -> area -> entity
+                if (hitWpt != 0 && (wptDist <= navDist + 8.0f && wptDist <= ladDist + 8.0f && wptDist <= entDist + 8.0f)) {
+                    g_activeScene->SelectWaypoint(hitWpt);
+                    g_activeScene->SelectLadder(0);
+                    g_activeScene->ClearSelection();
+                    g_activeScene->SelectEntity(-1);
+                    if (g_activeScene->HasSelectedConnection()) {
+                        g_activeScene->ClearSelectedConnection();
+                    }
+                } else if (hitLadder != 0 && (ladDist <= navDist + 8.0f && ladDist <= entDist + 8.0f)) {
+                    g_activeScene->SelectWaypoint(0);
                     g_activeScene->SelectLadder(hitLadder);
                     g_activeScene->ClearSelection();
                     g_activeScene->SelectEntity(-1);
@@ -348,6 +363,7 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                         g_activeScene->ClearSelectedConnection();
                     }
                 } else if (hitArea != 0 && (hitEntity < 0 || navDist <= entDist + 16.0f)) {
+                    g_activeScene->SelectWaypoint(0);
                     g_activeScene->SelectLadder(0);
                     g_activeScene->SelectArea(hitArea, additive, toggle);
                     g_activeScene->SelectEntity(-1);
@@ -355,6 +371,7 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                         g_activeScene->ClearSelectedConnection();
                     }
                 } else if (hitEntity >= 0) {
+                    g_activeScene->SelectWaypoint(0);
                     g_activeScene->SelectLadder(0);
                     g_activeScene->SelectEntity(hitEntity);
                     g_activeScene->ClearSelection();
@@ -363,6 +380,7 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     }
                 } else {
                     if (!additive && !toggle) {
+                        g_activeScene->SelectWaypoint(0);
                         g_activeScene->SelectLadder(0);
                         g_activeScene->ClearSelection();
                         g_activeScene->ClearSelectedConnection();
@@ -465,6 +483,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 auto cur = g_activeScene->GetBSPMode();
                 int next = (static_cast<int>(cur) + 1) % 4;
                 g_activeScene->SetBSPMode(static_cast<BSPRenderMode>(next));
+            } else if (key == GLFW_KEY_F6) { // F6: Toggle Bot Waypoint System
+                g_activeScene->ToggleShowWaypoints();
             } else if (key == GLFW_KEY_1 && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // 1: Move Gizmo
                 g_activeScene->SetGizmoMode(GIZMO_MODE_TRANSLATE);
             } else if (key == GLFW_KEY_2 && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // 2: Rotate Gizmo
@@ -563,6 +583,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                     g_activeScene->ClearSelectedConnection();
                 } else if (g_activeScene->GetSelectedLadderID() != 0) {
                     g_activeScene->SelectLadder(0);
+                } else if (g_activeScene->GetSelectedWaypointID() != 0) {
+                    g_activeScene->SelectWaypoint(0);
                 } else if (!g_activeScene->GetSelectedAreaIDs().empty() || g_activeScene->GetSelectedAreaID() != 0) {
                     g_activeScene->ClearSelection();
                 } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {
@@ -663,6 +685,27 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                             g_activeScene->BatchSnapToFloor(*g_cmdMgr);
                         } else if (g_activeScene->HasBSP() && sel) {
                             g_cmdMgr->ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(g_activeScene, sel->GetID()));
+                        }
+                    }
+                } else if (g_activeScene->GetSelectedWaypointID() != 0) {
+                    uint32_t selWpt = g_activeScene->GetSelectedWaypointID();
+                    WaypointNode* node = g_activeScene->GetWaypoints().GetNode(selWpt);
+                    if (node) {
+                        if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
+                            g_activeScene->SelectWaypoint(0);
+                            g_activeScene->GetWaypoints().DeleteNode(selWpt);
+                            g_activeScene->RebuildWaypointRenderer();
+                            g_activeScene->ShowToast("Waypoint #" + std::to_string(selWpt) + " deleted.");
+                        } else if (key == GLFW_KEY_F) {
+                            g_camera.FocusOn(node->origin);
+                        } else if (key == GLFW_KEY_SPACE && g_activeScene->HasBSP()) {
+                            Vector3 start(node->origin.x, node->origin.y, node->origin.z + 32.0f);
+                            Vector3 end(node->origin.x, node->origin.y, node->origin.z - 4096.0f);
+                            BSPTraceResult tr;
+                            if (g_activeScene->GetBSP().TraceWorld(start, end, HULL_POINT, &tr) && !tr.startsolid && !tr.allsolid) {
+                                node->origin.z = tr.endpos.z + 18.0f;
+                                g_activeScene->RebuildWaypointRenderer();
+                            }
                         }
                     }
                 } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {

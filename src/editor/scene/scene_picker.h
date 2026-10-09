@@ -22,6 +22,9 @@ public:
     // Tests ray against all NavLadders in the scene and returns the closest hit ladder ID (or 0 if none)
     static uint32_t PickLadder(const EditorScene& scene, const Ray& ray, float* outT = nullptr);
 
+    // Tests ray against all Waypoints in the scene and returns the closest hit waypoint ID (or 0 if none)
+    static uint32_t PickWaypoint(const EditorScene& scene, const Ray& ray, float* outT = nullptr);
+
     // Tests ray against entities and returns the closest hit entity index (or -1 if none)
     static int PickEntity(const EditorScene& scene, const Ray& ray, float* outT = nullptr);
 

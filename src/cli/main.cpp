@@ -8,15 +8,19 @@
 #include "../nav/nav_file.h"
 #include "../nav/nav_path.h"
 #include "../nav/nav_generator.h"
+#include "../waypoint/waypoint_graph.h"
+#include "../waypoint/waypoint_nav_converter.h"
 
 static void PrintHelp() {
     std::cout << "Usage:\n";
     std::cout << "  nav_cli <path_to_bsp_or_nav> [optional_second_file]\n";
     std::cout << "  nav_cli generate <map.bsp> [output.nav] [options]\n";
-    std::cout << "  nav_cli batch <maps_directory> [options]\n\n";
+    std::cout << "  nav_cli batch <maps_directory> [options]\n";
+    std::cout << "  nav_cli convert <input> <output> [options]\n\n";
     std::cout << "Commands:\n";
     std::cout << "  generate <map.bsp> [out.nav]  Auto-generate navigation mesh for a BSP map\n";
     std::cout << "  batch <maps_dir>              Mass-produce navigation meshes for all maps in directory\n";
+    std::cout << "  convert <in> <out> [opts]     Convert bidirectionally between NAV and Bot Waypoints\n";
     std::cout << "  <map.bsp|map.nav>             Verify BSP data, NAV headers, places, and A* pathfinding\n\n";
     std::cout << "Options:\n";
     std::cout << "  --output, -o <dir|file>       Specify output directory or file path\n";
@@ -25,10 +29,14 @@ static void PrintHelp() {
     std::cout << "  --force, -f                   Overwrite existing .nav files\n";
     std::cout << "  --recursive, -r               Recursively search directories for BSP files\n";
     std::cout << "  --no-jump                     Disable jump drop connections\n";
-    std::cout << "  --no-merge                    Disable adjacent coplanar area merging\n\n";
+    std::cout << "  --no-merge                    Disable adjacent coplanar area merging\n";
+    std::cout << "  --bot <ebot|sypb|yapb|podbot> Bot engine target (default: ebot)\n";
+    std::cout << "  --mod <standard|zp|dm>        Game mod rules (default: standard)\n\n";
     std::cout << "Examples:\n";
     std::cout << "  nav_cli generate cstrike/maps/de_dust2.bsp\n";
     std::cout << "  nav_cli batch \"C:\\Steam\\Half-Life\\cstrike\\maps\" --threads 8\n";
+    std::cout << "  nav_cli convert de_dust2.nav de_dust2.ewp --bot ebot --mod standard\n";
+    std::cout << "  nav_cli convert zm_toxic.nav zm_toxic.pwf --bot yapb --mod zp\n";
     std::cout << "  nav_cli de_dust2.bsp de_dust2.nav\n";
 }
 
@@ -297,21 +305,112 @@ static int HandleInspect(std::string bspPath, std::string navPath) {
     return 0;
 }
 
+static int HandleConvert(int argc, char* argv[]) {
+    if (argc < 4) {
+        std::cerr << "Error: 'convert' requires input file and output file.\n";
+        std::cerr << "Usage: nav_cli convert <input.nav|wpt> <output.wpt|nav> [--bot ebot|sypb|yapb|podbot] [--mod standard|zp|dm]\n";
+        return 1;
+    }
+
+    std::string inputPath = argv[2];
+    std::string outputPath = argv[3];
+    BotType botType = BotType::EBot;
+    GameMod gameMod = GameMod::Standard;
+
+    for (int i = 4; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--bot" && i + 1 < argc) {
+            std::string b = argv[++i];
+            std::transform(b.begin(), b.end(), b.begin(), ::tolower);
+            if (b == "ebot" || b == "cs-ebot") botType = BotType::EBot;
+            else if (b == "sypb") botType = BotType::SyPB;
+            else if (b == "yapb") botType = BotType::YaPB;
+            else if (b == "podbot" || b == "pod-bot" || b == "pod") botType = BotType::PODBot;
+        } else if (arg == "--mod" && i + 1 < argc) {
+            std::string m = argv[++i];
+            std::transform(m.begin(), m.end(), m.begin(), ::tolower);
+            if (m == "standard" || m == "cs") gameMod = GameMod::Standard;
+            else if (m == "zp" || m == "zombie" || m == "zombieplague") gameMod = GameMod::ZombiePlague;
+            else if (m == "dm" || m == "deathmatch") gameMod = GameMod::Deathmatch;
+        }
+    }
+
+    auto GetExt = [](const std::string& p) {
+        size_t dot = p.find_last_of('.');
+        if (dot == std::string::npos) return std::string("");
+        std::string ext = p.substr(dot);
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        return ext;
+    };
+
+    std::string inExt = GetExt(inputPath);
+    std::string outExt = GetExt(outputPath);
+
+    if (inExt == ".nav") {
+        NavMesh nav;
+        if (!nav.Load(inputPath)) {
+            std::cerr << "[ERROR] Failed to load NavMesh: " << inputPath << "\n";
+            return 1;
+        }
+        std::cout << "[CONVERT] Loaded NavMesh: " << nav.GetAreaCount() << " areas.\n";
+        WaypointGraph graph;
+        auto stats = WaypointNavConverter::NavToWaypoints(nav, graph, botType, gameMod);
+        std::cout << "[CONVERT] Generated " << stats.waypointsCreated << " waypoints ("
+                  << stats.connectionsCreated << " links, " << stats.laddersConverted << " ladders, "
+                  << stats.sniperPointsMapped << " snipers, " << stats.campPointsMapped << " camps, "
+                  << stats.zombieCampsMapped << " zombie perches).\n";
+        if (graph.Save(outputPath, botType, gameMod)) {
+            std::cout << "[SUCCESS] Saved bot waypoints to: " << outputPath << "\n";
+            return 0;
+        } else {
+            std::cerr << "[ERROR] Failed to write waypoint file: " << outputPath << "\n";
+            return 1;
+        }
+    } else {
+        WaypointGraph graph;
+        if (!graph.Load(inputPath)) {
+            std::cerr << "[ERROR] Failed to load waypoints: " << inputPath << "\n";
+            return 1;
+        }
+        std::cout << "[CONVERT] Loaded waypoint graph: " << graph.GetNodeCount() << " waypoints.\n";
+        if (outExt == ".nav") {
+            NavMesh nav;
+            size_t areas = WaypointNavConverter::WaypointsToNav(graph, nav);
+            std::cout << "[CONVERT] Generated " << areas << " NavAreas.\n";
+            if (nav.Save(outputPath)) {
+                std::cout << "[SUCCESS] Saved NavMesh to: " << outputPath << "\n";
+                return 0;
+            } else {
+                std::cerr << "[ERROR] Failed to write NavMesh file: " << outputPath << "\n";
+                return 1;
+            }
+        } else {
+            if (graph.Save(outputPath, botType, gameMod)) {
+                std::cout << "[SUCCESS] Converted and saved waypoints to: " << outputPath << "\n";
+                return 0;
+            } else {
+                std::cerr << "[ERROR] Failed to convert waypoint file: " << outputPath << "\n";
+                return 1;
+            }
+        }
+    }
+}
+
 int main(int argc, char* argv[]) {
     std::cout << "=========================================================\n";
     std::cout << " NavStudio CLI v1.5.3 - CS 1.6 BSP & NAV Tool\n";
     std::cout << "=========================================================\n\n";
 
     if (argc < 2) {
-        // Interactive Console Session (keeps console open when double-clicked in Windows Explorer)
         std::cout << "Interactive Mode (Console opened with no arguments)\n\n";
         std::cout << "Select an action:\n";
         std::cout << "  [1] Generate Navigation Mesh for a BSP map\n";
         std::cout << "  [2] Batch Generate Navigation Meshes for a directory\n";
         std::cout << "  [3] Inspect & Verify a BSP or NAV file\n";
-        std::cout << "  [4] View Help & Command-Line Usage\n";
+        std::cout << "  [4] Convert between NavMesh and Bot Waypoints\n";
+        std::cout << "  [5] View Help & Command-Line Usage\n";
         std::cout << "  [0] Exit\n\n";
-        std::cout << "Enter choice [0-4]: ";
+        std::cout << "Enter choice [0-5]: ";
 
         std::string choice;
         if (!std::getline(std::cin, choice) || choice == "0" || choice == "q" || choice == "exit") {
@@ -352,6 +451,19 @@ int main(int argc, char* argv[]) {
                 std::string navP = (path.size() > 4 && path.substr(path.size() - 4) == ".nav") ? path : "";
                 HandleInspect(bspP, navP);
             }
+        } else if (choice == "4") {
+            std::cout << "\nEnter input file (.nav, .ewp, .spt, .pwf, .wpt): ";
+            std::string inPath;
+            std::getline(std::cin, inPath);
+            inPath = CleanPath(inPath);
+            std::cout << "Enter output file: ";
+            std::string outPath;
+            std::getline(std::cin, outPath);
+            outPath = CleanPath(outPath);
+            if (!inPath.empty() && !outPath.empty()) {
+                char* customArgv[] = { argv[0], (char*)"convert", (char*)inPath.c_str(), (char*)outPath.c_str() };
+                HandleConvert(4, customArgv);
+            }
         } else {
             PrintHelp();
         }
@@ -375,6 +487,9 @@ int main(int argc, char* argv[]) {
     if (firstArg == "batch" || firstArg == "mass" || firstArg == "generate-all") {
         return HandleBatch(argc, argv);
     }
+    if (firstArg == "convert" || firstArg == "-c") {
+        return HandleConvert(argc, argv);
+    }
 
     std::string bspPath = "";
     std::string navPath = "";
@@ -390,5 +505,6 @@ int main(int argc, char* argv[]) {
 
     return HandleInspect(bspPath, navPath);
 }
+
 
 

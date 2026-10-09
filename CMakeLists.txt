@@ -37,6 +37,8 @@ set(CORE_SOURCES
     src/nav/nav_path.cpp
     src/nav/nav_file.cpp
     src/nav/nav_generator.cpp
+    src/waypoint/waypoint_graph.cpp
+    src/waypoint/waypoint_nav_converter.cpp
 )
 
 add_library(nav_core STATIC ${CORE_SOURCES})
@@ -108,6 +110,7 @@ if(BUILD_EDITOR)
         src/editor/render/image_loader.cpp
         src/editor/render/skybox_renderer.cpp
         src/editor/render/nav_renderer.cpp
+        src/editor/render/waypoint_renderer.cpp
         src/editor/render/gizmo_renderer.cpp
         src/editor/render/entity_renderer.cpp
         src/editor/scene/editor_scene.cpp

@@ -19,6 +19,8 @@
 
 #include "editor/scene/editor_handles.h"
 #include "editor/scene/editor_preferences.h"
+#include "waypoint/waypoint_graph.h"
+#include "editor/render/waypoint_renderer.h"
 #include <vector>
 
 struct AsyncLoadContext {
@@ -467,6 +469,29 @@ public:
     bool ExportNavToJSON(const std::string& jsonFilePath) const;
     std::string GeneratePawnWaypointsCode(bool fromSelectionOnly = false) const;
 
+    // Bot Waypoint System (CS-EBOT, SyPB, YaPB, POD-Bot)
+    WaypointGraph& GetWaypoints() { return m_waypoints; }
+    const WaypointGraph& GetWaypoints() const { return m_waypoints; }
+    WaypointRenderer& GetWaypointRenderer() { return m_waypointRenderer; }
+    const WaypointRenderer& GetWaypointRenderer() const { return m_waypointRenderer; }
+
+    bool HasWaypoints() const { return !m_waypoints.IsEmpty(); }
+    bool GetShowWaypoints() const { return m_showWaypoints; }
+    bool IsShowWaypoints() const { return m_showWaypoints; }
+    void SetShowWaypoints(bool show);
+    void ToggleShowWaypoints();
+
+    uint32_t GetSelectedWaypointID() const { return m_selectedWaypointId; }
+    void SelectWaypoint(uint32_t id);
+    WaypointNode* GetSelectedWaypoint();
+    const WaypointNode* GetSelectedWaypoint() const;
+
+    bool LoadWaypoints(const std::string& path);
+    bool SaveWaypoints(const std::string& path, BotType bot, GameMod mod);
+    bool ConvertNavToWaypoints(BotType bot, GameMod mod);
+    size_t ConvertWaypointsToNav();
+    void RebuildWaypointRenderer();
+
     // User Preferences
     EditorPreferences& GetPreferences() { return m_prefs; }
     const EditorPreferences& GetPreferences() const { return m_prefs; }
@@ -699,6 +724,12 @@ private:
 
     // Toast notifications
     std::vector<ToastNotification> m_toasts;
+
+    // Waypoint state
+    WaypointGraph m_waypoints;
+    WaypointRenderer m_waypointRenderer;
+    bool m_showWaypoints{true};
+    uint32_t m_selectedWaypointId{0};
 
     void PostGenerateOptimize();
 };

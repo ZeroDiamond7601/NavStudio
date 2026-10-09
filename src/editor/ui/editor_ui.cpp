@@ -412,6 +412,12 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     if (m_showLadderCreateModal) {
         RenderLadderCreateModal(scene, camera);
     }
+    if (m_showWaypointExportModal) {
+        RenderWaypointExportModal(scene);
+    }
+    if (m_showNavToWaypointModal) {
+        RenderNavToWaypointModal(scene);
+    }
     RenderToastHUD(scene);
 }
 
@@ -529,6 +535,16 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                         m_saveSuccessMessage = "JSON navigation mesh exported successfully:\n" + path;
                     }
                 }
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Open Bot Waypoints (.ewp, .spt, .pwf, .wpt)...")) {
+                std::string path = FileDialog::OpenFile("Bot Waypoints (*.ewp;*.spt;*.pwf;*.wpt)\0*.ewp;*.spt;*.pwf;*.wpt\0All Files (*.*)\0*.*\0", "Open Bot Waypoints");
+                if (!path.empty()) {
+                    scene.LoadWaypoints(path);
+                }
+            }
+            if (ImGui::MenuItem("Export Bot Waypoints...", nullptr, false, scene.HasWaypoints() || scene.HasNAV())) {
+                OpenWaypointExportModal();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Reload Map & NAV", "Ctrl+R", false, scene.HasBSP() || scene.HasNAV())) {
@@ -852,6 +868,11 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                 scene.RebuildNavRenderer();
             }
 
+            bool showWpts = scene.GetShowWaypoints();
+            if (ImGui::MenuItem("Show Bot Waypoints", "F6", &showWpts)) {
+                scene.SetShowWaypoints(showWpts);
+            }
+
             if (ImGui::MenuItem("Take Screenshot", "F12")) {
                 std::filesystem::create_directories("screenshots");
                 auto now = std::chrono::system_clock::now();
@@ -945,6 +966,19 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
             if (ImGui::MenuItem("Export Waypoints for AMXX Pawn...", nullptr, m_showPawnExportModal, scene.HasNAV())) {
                 m_showPawnExportModal = true;
+            }
+
+            ImGui::Separator();
+            if (ImGui::MenuItem("Convert NAV to Bot Waypoints...", nullptr, false, scene.HasNAV())) {
+                OpenNavToWaypointModal();
+            }
+            if (ImGui::MenuItem("Convert Bot Waypoints to NAV", nullptr, false, scene.HasWaypoints())) {
+                scene.ConvertWaypointsToNav();
+            }
+            if (ImGui::MenuItem("Auto-Link Waypoints", nullptr, false, scene.HasWaypoints())) {
+                size_t links = scene.GetWaypoints().AutoLinkNodes();
+                scene.ShowToast("Auto-linked " + std::to_string(links) + " waypoint connections!");
+                scene.RebuildWaypointRenderer();
             }
 
             ImGui::Separator();
@@ -1438,6 +1472,97 @@ void EditorUI::RenderHierarchy(EditorScene& scene, Camera& camera) {
                 ImGui::EndTabItem();
             }
 
+            char wptTabTitle[64];
+            size_t wptCount = scene.GetWaypoints().GetNodeCount();
+            std::snprintf(wptTabTitle, sizeof(wptTabTitle), "Waypoints (%zu)", wptCount);
+
+            if (ImGui::BeginTabItem(wptTabTitle)) {
+                if (wptCount == 0) {
+                    ImGui::TextDisabled("No waypoints loaded.");
+                    if (ImGui::Button("+ Drop Waypoint at Camera", ImVec2(-1, 24))) {
+                        Vector3 camPos = camera.GetPosition();
+                        Vector3 fwd = camera.GetForward();
+                        Vector3 dropPos = camPos + fwd * 120.0f;
+                        scene.GetWaypoints().AddNode(dropPos);
+                        scene.RebuildWaypointRenderer();
+                    }
+                    if (scene.HasNAV()) {
+                        if (ImGui::Button("Convert NAV to Waypoints...", ImVec2(-1, 24))) {
+                            OpenNavToWaypointModal();
+                        }
+                    }
+                } else {
+                    const char* botNames[] = { "EBot (.ewp)", "SyPB (.spt)", "YaPB (.pwf)", "POD-Bot (.wpt)" };
+                    const char* modNames[] = { "Standard CS", "Zombie Plague", "Deathmatch" };
+                    int curBot = static_cast<int>(scene.GetWaypoints().GetActiveBot());
+                    int curMod = static_cast<int>(scene.GetWaypoints().GetActiveMod());
+
+                    ImGui::SetNextItemWidth(110);
+                    if (ImGui::Combo("Bot", &curBot, botNames, 4)) {
+                        scene.GetWaypoints().SetActiveBot(static_cast<BotType>(curBot));
+                    }
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(110);
+                    if (ImGui::Combo("Mod", &curMod, modNames, 3)) {
+                        scene.GetWaypoints().SetActiveMod(static_cast<GameMod>(curMod));
+                        scene.RebuildWaypointRenderer();
+                    }
+
+                    ImGui::InputTextWithHint("##WptFilter", "Search ID...", m_waypointFilter, sizeof(m_waypointFilter));
+
+                    if (ImGui::Button("+ Drop Node", ImVec2(100, 22))) {
+                        Vector3 camPos = camera.GetPosition();
+                        Vector3 fwd = camera.GetForward();
+                        Vector3 dropPos = camPos + fwd * 120.0f;
+                        auto* n = scene.GetWaypoints().AddNode(dropPos);
+                        if (n) scene.SelectWaypoint(n->id);
+                        scene.RebuildWaypointRenderer();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Auto-Link All", ImVec2(-1, 22))) {
+                        size_t created = scene.GetWaypoints().AutoLinkNodes();
+                        scene.ShowToast("Auto-linked " + std::to_string(created) + " connections!");
+                        scene.RebuildWaypointRenderer();
+                    }
+
+                    ImGui::Separator();
+                    ImGui::BeginChild("WaypointListChild", ImVec2(0, 0), false);
+                    std::string filterStr = m_waypointFilter;
+                    std::transform(filterStr.begin(), filterStr.end(), filterStr.begin(), ::tolower);
+
+                    for (const auto& node : scene.GetWaypoints().GetNodes()) {
+                        std::string idStr = std::to_string(node.id);
+                        if (!filterStr.empty() && idStr.find(filterStr) == std::string::npos) {
+                            continue;
+                        }
+
+                        char label[64];
+                        const char* tag = "Crossing";
+                        if (node.flags & WPT_FLAG_HMCAMPMESH) tag = "HumanCamp";
+                        else if (node.flags & WPT_FLAG_ZMHMCAMP) tag = "ZombieCamp";
+                        else if (node.flags & WPT_FLAG_SNIPER) tag = "Sniper";
+                        else if (node.flags & WPT_FLAG_CAMP) tag = "Camp";
+                        else if (node.flags & WPT_FLAG_GOAL) tag = "Goal";
+                        else if (node.flags & WPT_FLAG_LADDER) tag = "Ladder";
+                        else if (node.flags & WPT_FLAG_DJUMP) tag = "DoubleJump";
+
+                        std::snprintf(label, sizeof(label), "WP #%u [%s]", node.id, tag);
+                        bool isSel = (scene.GetSelectedWaypointID() == node.id);
+                        if (ImGui::Selectable(label, isSel)) {
+                            scene.SelectWaypoint(node.id);
+                            scene.ClearSelection();
+                            scene.SelectLadder(0);
+                            scene.SelectEntity(-1);
+                        }
+                        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
+                            camera.FocusOn(node.origin);
+                        }
+                    }
+                    ImGui::EndChild();
+                }
+                ImGui::EndTabItem();
+            }
+
             ImGui::EndTabBar();
         }
     }
@@ -1685,6 +1810,12 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
 
         if (scene.GetSelectedLadderID() != 0) {
             RenderLadderInspector(scene, cmdMgr);
+            ImGui::End();
+            return;
+        }
+
+        if (scene.GetSelectedWaypointID() != 0) {
+            RenderWaypointInspector(scene, cmdMgr);
             ImGui::End();
             return;
         }
@@ -4688,5 +4819,376 @@ void EditorUI::RenderToastHUD(const EditorScene& scene) {
         curY -= 36.0f;
     }
 }
+
+void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmdMgr*/) {
+    uint32_t selId = scene.GetSelectedWaypointID();
+    WaypointNode* node = scene.GetWaypoints().GetNode(selId);
+    if (!node) {
+        scene.SelectWaypoint(0);
+        return;
+    }
+
+    const char* botNames[] = { "CS-EBOT", "SyPB", "YaPB", "POD-Bot mm" };
+    const char* modNames[] = { "Standard CS", "Zombie Plague", "Deathmatch" };
+    int curBot = static_cast<int>(scene.GetWaypoints().GetActiveBot());
+    int curMod = static_cast<int>(scene.GetWaypoints().GetActiveMod());
+
+    ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1.0f), "[WAYPOINT #%u]", node->id);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%s - %s)", botNames[std::clamp(curBot, 0, 3)], modNames[std::clamp(curMod, 0, 2)]);
+    ImGui::Separator();
+
+    // Coordinates
+    float pos[3] = { node->origin.x, node->origin.y, node->origin.z };
+    if (ImGui::DragFloat3("Origin (X/Y/Z)", pos, 1.0f)) {
+        node->origin = Vector3(pos[0], pos[1], pos[2]);
+        scene.RebuildWaypointRenderer();
+    }
+
+    // Radius
+    if (ImGui::SliderFloat("Radius", &node->radius, 0.0f, 255.0f, "%.0f units")) {
+        scene.RebuildWaypointRenderer();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Navigation tolerance zone around node (0-255 units)");
+    }
+
+    // Camp Pitch & Yaw
+    ImGui::Spacing();
+    ImGui::Text("Aim / Camp Orientation:");
+    if (ImGui::SliderFloat("Pitch", &node->campPitch, -89.0f, 89.0f, "%.1f deg")) {
+        scene.RebuildWaypointRenderer();
+    }
+    if (ImGui::SliderFloat("Yaw", &node->campYaw, 0.0f, 360.0f, "%.1f deg")) {
+        scene.RebuildWaypointRenderer();
+    }
+    if (ImGui::Button("0 deg (E)", ImVec2(50, 20))) { node->campYaw = 0.0f; scene.RebuildWaypointRenderer(); }
+    ImGui::SameLine();
+    if (ImGui::Button("90 deg (N)", ImVec2(50, 20))) { node->campYaw = 90.0f; scene.RebuildWaypointRenderer(); }
+    ImGui::SameLine();
+    if (ImGui::Button("180 deg (W)", ImVec2(50, 20))) { node->campYaw = 180.0f; scene.RebuildWaypointRenderer(); }
+    ImGui::SameLine();
+    if (ImGui::Button("270 deg (S)", ImVec2(50, 20))) { node->campYaw = 270.0f; scene.RebuildWaypointRenderer(); }
+
+    int meshVal = static_cast<int>(node->mesh);
+    if (ImGui::SliderInt("Mesh Group", &meshVal, 0, 255)) {
+        node->mesh = static_cast<uint8_t>(meshVal);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Camp mesh cluster group identifier");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    auto FlagBox = [&](const char* label, uint32_t flag, const char* tip = nullptr) {
+        bool checked = (node->flags & flag) != 0;
+        if (ImGui::Checkbox(label, &checked)) {
+            if (checked) node->flags |= flag;
+            else node->flags &= ~flag;
+            scene.RebuildWaypointRenderer();
+        }
+        if (tip && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", tip);
+        }
+    };
+
+    if (scene.GetWaypoints().GetActiveMod() == GameMod::ZombiePlague) {
+        ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f), "Zombie Plague Mod Flags:");
+        FlagBox("Human Camp Mesh", WPT_FLAG_HMCAMPMESH, "Designates human barricade and camp defense area");
+        FlagBox("Zombie/Human Camp", WPT_FLAG_ZMHMCAMP, "General camp perch for zombies or humans");
+        FlagBox("Double Jump Boost", WPT_FLAG_DJUMP, "Requires bot team boost or double-jump skill");
+        FlagBox("Zombie Only", WPT_FLAG_ZOMBIEONLY, "Restricted exclusively to zombie players");
+        FlagBox("Human Only", WPT_FLAG_HUMANONLY, "Restricted exclusively to human players");
+        FlagBox("Zombie Rush / Push", WPT_FLAG_ZOMBIEPUSH, "Aggressive zombie advance node");
+        FlagBox("Helicopter Evac", WPT_FLAG_HELICOPTER, "Zombie escape extraction zone");
+        FlagBox("Crouch / Duck", WPT_FLAG_CROUCH, "Requires crouching through duct or obstacle");
+        FlagBox("Ladder Climb", WPT_FLAG_LADDER, "Ladder navigation point");
+        FlagBox("Jump Required", WPT_FLAG_JUMP, "Requires single jump across gap");
+        FlagBox("Fall Risk Hazard", WPT_FLAG_FALLRISK, "High ledge - prevents evasive strafing");
+        FlagBox("Only One Bot", WPT_FLAG_ONLYONE, "Only 1 bot allowed at once to prevent jamming");
+    } else {
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Standard Tactical Flags:");
+        FlagBox("Mission Goal (Bomb/Hostage)", WPT_FLAG_GOAL, "Bomb target or hostage holding point");
+        FlagBox("Camping Perch", WPT_FLAG_CAMP, "Ambush and defensive perch");
+        FlagBox("Sniper Nest", WPT_FLAG_SNIPER, "Long-range sniper vantage point");
+        FlagBox("Hostage Rescue Zone", WPT_FLAG_RESCUE, "CT rescue extraction point");
+        FlagBox("Crouch / Duck", WPT_FLAG_CROUCH, "Requires crouching");
+        FlagBox("Ladder Climb", WPT_FLAG_LADDER, "Ladder navigation point");
+        FlagBox("Jump Required", WPT_FLAG_JUMP, "Requires jump across obstacle");
+        FlagBox("Double Jump Boost", WPT_FLAG_DJUMP, "Requires teammate boost / double jump");
+        FlagBox("Elevator / Lift", WPT_FLAG_LIFT, "Wait for elevator trigger");
+        FlagBox("Use Button Trigger", WPT_FLAG_USEBUTTON, "Bot presses button or switch");
+        FlagBox("Terrorist Exclusive", WPT_FLAG_TERRORIST, "Only T team may pathfind here");
+        FlagBox("CT Exclusive", WPT_FLAG_COUNTER, "Only CT team may pathfind here");
+        FlagBox("Fall Risk Hazard", WPT_FLAG_FALLRISK, "High ledge - prevents evasive strafing");
+        FlagBox("Only One Bot", WPT_FLAG_ONLYONE, "Only 1 bot allowed at once");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    ImGui::Text("Outgoing Connections (Max 8):");
+    int activeLinks = 0;
+    for (int i = 0; i < WPT_MAX_CONNECTIONS; ++i) {
+        if (node->connections[i] >= 0) activeLinks++;
+    }
+    ImGui::TextDisabled("Active Links: %d / %d", activeLinks, WPT_MAX_CONNECTIONS);
+
+    for (int i = 0; i < WPT_MAX_CONNECTIONS; ++i) {
+        int16_t targetId = node->connections[i];
+        if (targetId < 0) continue;
+
+        ImGui::PushID(i);
+        char linkLabel[64];
+        std::snprintf(linkLabel, sizeof(linkLabel), "-> #%d", targetId);
+        if (ImGui::Button(linkLabel, ImVec2(70, 20))) {
+            scene.SelectWaypoint(static_cast<uint32_t>(targetId));
+            scene.RebuildWaypointRenderer();
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click to select target waypoint #%d", targetId);
+
+        ImGui::SameLine();
+        bool jumpConn = (node->connectionFlags[i] & WPT_CONN_JUMP) != 0;
+        if (ImGui::Checkbox("Jump", &jumpConn)) {
+            if (jumpConn) node->connectionFlags[i] |= WPT_CONN_JUMP;
+            else node->connectionFlags[i] &= ~WPT_CONN_JUMP;
+            scene.RebuildWaypointRenderer();
+        }
+
+        ImGui::SameLine();
+        bool djumpConn = (node->connectionFlags[i] & WPT_CONN_DOUBLE) != 0;
+        if (ImGui::Checkbox("DJump", &djumpConn)) {
+            if (djumpConn) node->connectionFlags[i] |= WPT_CONN_DOUBLE;
+            else node->connectionFlags[i] &= ~WPT_CONN_DOUBLE;
+            scene.RebuildWaypointRenderer();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::SmallButton("X")) {
+            node->connections[i] = -1;
+            node->connectionFlags[i] = 0;
+            scene.RebuildWaypointRenderer();
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove connection");
+
+        ImGui::PopID();
+    }
+
+    static int addTargetId = 0;
+    static bool addBidi = true;
+    ImGui::Spacing();
+    ImGui::SetNextItemWidth(80);
+    ImGui::InputInt("##TargetWptInput", &addTargetId, 0);
+    ImGui::SameLine();
+    ImGui::Checkbox("2-Way", &addBidi);
+    ImGui::SameLine();
+    if (ImGui::Button("Link Node", ImVec2(-1, 22))) {
+        if (addTargetId >= 0 && addTargetId != static_cast<int>(node->id)) {
+            if (scene.GetWaypoints().GetNode(static_cast<uint32_t>(addTargetId))) {
+                scene.GetWaypoints().AddConnection(node->id, static_cast<uint32_t>(addTargetId), WPT_CONN_NONE, addBidi);
+                scene.RebuildWaypointRenderer();
+            } else {
+                scene.ShowToast("Target waypoint ID does not exist!");
+            }
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (ImGui::Button("Snap to Floor [Space]", ImVec2(-1, 24))) {
+        if (scene.HasBSP()) {
+            Vector3 start(node->origin.x, node->origin.y, node->origin.z + 32.0f);
+            Vector3 end(node->origin.x, node->origin.y, node->origin.z - 4096.0f);
+            BSPTraceResult tr;
+            if (scene.GetBSP().TraceWorld(start, end, HULL_POINT, &tr) && !tr.startsolid && !tr.allsolid) {
+                node->origin.z = tr.endpos.z + 18.0f;
+                scene.RebuildWaypointRenderer();
+            }
+        }
+    }
+
+    if (ImGui::Button("Deselect [Escape]", ImVec2(-1, 24))) {
+        scene.SelectWaypoint(0);
+    }
+
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.25f, 0.2f, 1.0f));
+    if (ImGui::Button("Delete Waypoint [Delete]", ImVec2(-1, 24))) {
+        uint32_t toDel = node->id;
+        scene.SelectWaypoint(0);
+        scene.GetWaypoints().DeleteNode(toDel);
+        scene.RebuildWaypointRenderer();
+        scene.ShowToast("Waypoint #" + std::to_string(toDel) + " deleted.");
+    }
+    ImGui::PopStyleColor();
+}
+
+void EditorUI::RenderWaypointExportModal(EditorScene& scene) {
+    if (m_showWaypointExportModal) {
+        ImGui::OpenPopup("Export Bot Waypoints##Modal");
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(520, 310), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("Export Bot Waypoints##Modal", &m_showWaypointExportModal, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Export Navigation Mesh to Bot Waypoints");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        const char* botNames[] = {
+            "CS-EBOT (.ewp) [v127 LZSS]",
+            "SyPB (.spt / .pwf) [v125]",
+            "YaPB (.pwf) [v7 LZSS]",
+            "POD-Bot mm (.wpt) [v6 Uncompressed]"
+        };
+        const char* modNames[] = {
+            "Standard CS (Bomb / Hostage / VIP)",
+            "Zombie Plague (Camp Meshes, Zombie Jump)",
+            "Deathmatch / Roam (Free Flow)"
+        };
+
+        ImGui::Text("Target Bot Engine:");
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::Combo("##ExportBotCombo", &m_waypointExportBot, botNames, 4)) {
+            std::string ext = (m_waypointExportBot == 0) ? ".ewp" : (m_waypointExportBot == 1) ? ".spt" : (m_waypointExportBot == 2) ? ".pwf" : ".wpt";
+            if (m_waypointExportPath[0] == '\0' && scene.HasBSP()) {
+                std::string base = scene.GetBSPPath();
+                size_t dot = base.find_last_of('.');
+                if (dot != std::string::npos) base = base.substr(0, dot);
+                std::string p = base + ext;
+                std::strncpy(m_waypointExportPath, p.c_str(), sizeof(m_waypointExportPath) - 1);
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Text("Game Mod Rules:");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::Combo("##ExportModCombo", &m_waypointExportMod, modNames, 3);
+
+        ImGui::Spacing();
+        ImGui::Text("Output File Path:");
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 90.0f);
+        ImGui::InputText("##ExportPathInput", m_waypointExportPath, sizeof(m_waypointExportPath));
+        ImGui::SameLine();
+        if (ImGui::Button("Browse...", ImVec2(80, 24))) {
+            const char* filter = (m_waypointExportBot == 0) ? "EBot Waypoints (*.ewp)\0*.ewp\0All Files (*.*)\0*.*\0" :
+                                 (m_waypointExportBot == 1) ? "SyPB Waypoints (*.spt;*.pwf)\0*.spt;*.pwf\0All Files (*.*)\0*.*\0" :
+                                 (m_waypointExportBot == 2) ? "YaPB Waypoints (*.pwf)\0*.pwf\0All Files (*.*)\0*.*\0" :
+                                                              "POD-Bot Waypoints (*.wpt)\0*.wpt\0All Files (*.*)\0*.*\0";
+            const char* defExt = (m_waypointExportBot == 0) ? "ewp" : (m_waypointExportBot == 1) ? "spt" : (m_waypointExportBot == 2) ? "pwf" : "wpt";
+            std::string selected = FileDialog::SaveFile(filter, defExt, "Export Bot Waypoints");
+            if (!selected.empty()) {
+                std::strncpy(m_waypointExportPath, selected.c_str(), sizeof(m_waypointExportPath) - 1);
+                m_waypointExportPath[sizeof(m_waypointExportPath) - 1] = '\0';
+            }
+        }
+
+        ImGui::Spacing();
+        size_t wptCount = scene.GetWaypoints().GetNodeCount();
+        if (wptCount == 0 && scene.HasNAV()) {
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "Note: No waypoints in graph. NAV mesh will be automatically converted during export!");
+        } else {
+            ImGui::Text("Graph currently contains %zu waypoints ready for export.", wptCount);
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Export Waypoints", ImVec2(150, 28))) {
+            if (m_waypointExportPath[0] == '\0') {
+                scene.ShowToast("Please specify an export file path!");
+            } else {
+                BotType bot = static_cast<BotType>(m_waypointExportBot);
+                GameMod mod = static_cast<GameMod>(m_waypointExportMod);
+                if (scene.GetWaypoints().GetNodeCount() == 0 && scene.HasNAV()) {
+                    scene.ConvertNavToWaypoints(bot, mod);
+                }
+                if (scene.SaveWaypoints(m_waypointExportPath, bot, mod)) {
+                    scene.ShowToast("Exported " + std::to_string(scene.GetWaypoints().GetNodeCount()) + " waypoints successfully!");
+                    m_showWaypointExportModal = false;
+                    ImGui::CloseCurrentPopup();
+                } else {
+                    scene.ShowToast("Failed to write waypoint file!");
+                }
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(90, 28))) {
+            m_showWaypointExportModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderNavToWaypointModal(EditorScene& scene) {
+    if (m_showNavToWaypointModal) {
+        ImGui::OpenPopup("Convert NavMesh to Bot Waypoints##Modal");
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(500, 260), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("Convert NavMesh to Bot Waypoints##Modal", &m_showNavToWaypointModal, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Convert Valve Navigation Mesh to Bot Waypoint Graph");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        const char* botNames[] = {
+            "CS-EBOT (.ewp)",
+            "SyPB (.spt / .pwf)",
+            "YaPB (.pwf)",
+            "POD-Bot mm (.wpt)"
+        };
+        const char* modNames[] = {
+            "Standard CS (Bomb / Hostage / VIP)",
+            "Zombie Plague (Camp Meshes, Zombie Boost)",
+            "Deathmatch / Roam (Free Roam)"
+        };
+
+        ImGui::Text("Target Bot Engine:");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::Combo("##ConvertBotCombo", &m_waypointExportBot, botNames, 4);
+
+        ImGui::Spacing();
+        ImGui::Text("Game Mod Rules:");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::Combo("##ConvertModCombo", &m_waypointExportMod, modNames, 3);
+
+        ImGui::Spacing();
+        ImGui::TextWrapped("Converts all NavAreas, connections, and hiding spots into universal bot waypoint nodes with jump arcs, camp angles, and mod-specific flags.");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Convert Now", ImVec2(130, 28))) {
+            BotType bot = static_cast<BotType>(m_waypointExportBot);
+            GameMod mod = static_cast<GameMod>(m_waypointExportMod);
+            if (scene.ConvertNavToWaypoints(bot, mod)) {
+                scene.ShowToast("Created " + std::to_string(scene.GetWaypoints().GetNodeCount()) + " waypoints from NAV!");
+                m_showNavToWaypointModal = false;
+                ImGui::CloseCurrentPopup();
+            } else {
+                scene.ShowToast("Conversion failed: No NAV mesh loaded.");
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(90, 28))) {
+            m_showNavToWaypointModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
 
 
