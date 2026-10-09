@@ -45,6 +45,13 @@ public:
     const std::vector<NavConnect>& GetAdjacentList(NavDirType dir) const { return m_connect[dir]; }
     std::vector<NavConnect>& GetAdjacentList(NavDirType dir) { return m_connect[dir]; }
     size_t GetAdjacentCount(NavDirType dir) const { return m_connect[dir].size(); }
+    size_t GetConnectionCount() const {
+        size_t count = 0;
+        for (int d = 0; d < NUM_NAV_DIRECTIONS; ++d) {
+            count += m_connect[d].size();
+        }
+        return count;
+    }
     NavArea* GetAdjacentArea(NavDirType dir, size_t index) const;
     bool IsConnected(const NavArea* area, int dir = -1) const;
     void ConnectTo(NavArea* area, NavDirType dir);

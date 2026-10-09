@@ -50,7 +50,15 @@ enum NavHidingSpotFlags {
     HIDING_IN_COVER     = 0x01,
     HIDING_GOOD_SNIPER  = 0x02,
     HIDING_IDEAL_SNIPER = 0x04,
-    HIDING_EXPOSED      = 0x08
+    HIDING_EXPOSED      = 0x08,
+
+    // Backward compatibility aliases
+    NAV_HIDING_IN_COVER         = HIDING_IN_COVER,
+    NAV_HIDING_COVER            = HIDING_IN_COVER,
+    NAV_HIDING_GOOD_SNIPER      = HIDING_GOOD_SNIPER,
+    NAV_HIDING_GOOD_SNIPER_SPOT = HIDING_GOOD_SNIPER,
+    NAV_HIDING_IDEAL_SNIPER     = HIDING_IDEAL_SNIPER,
+    NAV_HIDING_EXPOSED          = HIDING_EXPOSED
 };
 
 struct NavExtent {

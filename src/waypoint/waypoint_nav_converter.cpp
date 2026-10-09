@@ -53,7 +53,7 @@ WaypointNavConverter::ConvertStats WaypointNavConverter::NavToWaypoints(
         // Map tactical hiding spots inside area
         for (const auto& spot : area->GetHidingSpots()) {
             uint32_t spotFlags = WPT_FLAG_CAMP;
-            if (spot.flags & (NAV_HIDING_GOOD_SNIPER_SPOT | NAV_HIDING_IDEAL_SNIPER)) {
+            if (spot.flags & (HIDING_GOOD_SNIPER | HIDING_IDEAL_SNIPER)) {
                 spotFlags = WPT_FLAG_SNIPER;
                 ++stats.sniperPointsMapped;
             } else {
@@ -81,9 +81,10 @@ WaypointNavConverter::ConvertStats WaypointNavConverter::NavToWaypoints(
         if (itFrom == areaToWp.end()) continue;
         uint32_t fromWp = itFrom->second;
 
-        for (int dir = 0; dir < 4; ++dir) {
-            const auto& adjList = area->GetAdjacentAreas(static_cast<NavDirType>(dir));
-            for (const NavArea* adj : adjList) {
+        for (int dir = 0; dir < NUM_NAV_DIRECTIONS; ++dir) {
+            const auto& connectList = area->GetAdjacentList(static_cast<NavDirType>(dir));
+            for (const auto& conn : connectList) {
+                const NavArea* adj = conn.area;
                 if (!adj) continue;
                 auto itTo = areaToWp.find(adj->GetID());
                 if (itTo == areaToWp.end()) continue;
@@ -97,7 +98,7 @@ WaypointNavConverter::ConvertStats WaypointNavConverter::NavToWaypoints(
                 }
 
                 // Check if connection is bidirectional
-                bool isBi = adj->IsConnected(area, static_cast<NavDirType>((dir + 2) % 4));
+                bool isBi = adj->IsConnected(area, static_cast<NavDirType>((dir + 2) % NUM_NAV_DIRECTIONS));
                 if (outGraph.ConnectNodes(fromWp, toWp, isBi, connFlags)) {
                     ++stats.connectionsCreated;
                 }
@@ -180,13 +181,13 @@ size_t WaypointNavConverter::WaypointsToNav(
                 NavHidingSpot spot;
                 spot.id = area->GetID() * 100 + 1;
                 spot.pos = node.origin;
-                spot.flags = NAV_HIDING_GOOD_SNIPER_SPOT | NAV_HIDING_IDEAL_SNIPER;
+                spot.flags = HIDING_GOOD_SNIPER | HIDING_IDEAL_SNIPER;
                 area->GetHidingSpots().push_back(spot);
             } else if (node.flags & (WPT_FLAG_CAMP | WPT_FLAG_ZMHMCAMP | WPT_FLAG_HMCAMPMESH)) {
                 NavHidingSpot spot;
                 spot.id = area->GetID() * 100 + 1;
                 spot.pos = node.origin;
-                spot.flags = NAV_HIDING_COVER;
+                spot.flags = HIDING_IN_COVER;
                 area->GetHidingSpots().push_back(spot);
             }
         }
