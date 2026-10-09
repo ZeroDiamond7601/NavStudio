@@ -6,6 +6,7 @@ namespace FileDialog {
     const char* kBSPFilter = "GoldSrc BSP (*.bsp)\0*.bsp\0All Files (*.*)\0*.*\0";
     const char* kNAVFilter = "Navigation Mesh (*.nav)\0*.nav\0All Files (*.*)\0*.*\0";
     const char* kWADFilter = "WAD3 Texture Archive (*.wad)\0*.wad\0All Files (*.*)\0*.*\0";
+    const char* kOBJFilter = "Wavefront OBJ (*.obj)\0*.obj\0All Files (*.*)\0*.*\0";
     const char* kAllFilter = "All Files (*.*)\0*.*\0";
 }
 

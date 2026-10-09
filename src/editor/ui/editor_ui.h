@@ -42,6 +42,13 @@ public:
         m_commandPaletteSelectedIndex = 0;
     }
     void TogglePathPanel() { m_showPathPanel = !m_showPathPanel; }
+    void SetMarqueeBox(bool active, float startX, float startY, float curX, float curY) {
+        m_marqueeActive = active;
+        m_marqueeStartX = startX;
+        m_marqueeStartY = startY;
+        m_marqueeCurX = curX;
+        m_marqueeCurY = curY;
+    }
 
 private:
     void RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
@@ -77,6 +84,13 @@ private:
     void RenderCommandPalette(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
     void RenderLandmarksModal(EditorScene& scene, Camera& camera);
     void RenderAutosaveRecoveryModal(EditorScene& scene, CommandManager& cmdMgr);
+    void RenderMarqueeBox();
+
+    bool m_marqueeActive{false};
+    float m_marqueeStartX{0.0f};
+    float m_marqueeStartY{0.0f};
+    float m_marqueeCurX{0.0f};
+    float m_marqueeCurY{0.0f};
 
     bool m_mouseOverUI;
     bool m_requestQuit;

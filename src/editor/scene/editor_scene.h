@@ -65,6 +65,7 @@ public:
     bool LoadBSP(const std::string& bspPath);
     bool LoadNAV(const std::string& navPath);
     bool SaveNAV(const std::string& navPath = "");
+    bool ExportNAVToOBJ(const std::string& filepath) const;
     bool AutosaveNAV();
     void UpdateAutosave(float deltaTime);
     const std::string& GetLastAutosavePath() const { return m_lastAutosavePath; }
@@ -264,6 +265,12 @@ public:
     void ToggleFillAreaMode();
     void CancelFillAreaMode() { ExitFillAreaMode(); }
     size_t FloodFillAreaAt(const Ray& ray, class CommandManager& cmdMgr);
+
+    // Box Selection Tool (Marquee 2D rectangular multi-selection [Shift+B])
+    bool IsBoxSelectMode() const { return m_isBoxSelectMode; }
+    void ToggleBoxSelectMode() { m_isBoxSelectMode = !m_isBoxSelectMode; }
+    void SetBoxSelectMode(bool enabled) { m_isBoxSelectMode = enabled; }
+    void BoxSelectAreas(const std::vector<uint32_t>& areaIds, bool additive, bool subtractive);
 
     // Split Area Knife Tool (Interactive Cutter [K] with 0°, 45°, 90°, 135° angles)
     enum KnifeCutAngle {
@@ -514,6 +521,9 @@ private:
 
     // Fill Area Tool
     bool m_isFillAreaMode{false};
+
+    // Box Selection Tool
+    bool m_isBoxSelectMode{false};
 
     // Multi-Selection
     std::vector<uint32_t> m_selectedAreaIds;

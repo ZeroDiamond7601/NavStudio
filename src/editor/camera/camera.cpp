@@ -223,19 +223,34 @@ void Camera::Pan(float deltaX, float deltaY) {
 
 void Camera::SnapToPreset(int preset) {
     switch (preset) {
-        case 0: // Top view
+        case 0: // Top view (+Z)
             m_pitch = -89.9f;
             m_yaw = 90.0f;
             break;
-        case 1: // Front view
+        case 1: // Front view (+Y)
             m_pitch = 0.0f;
             m_yaw = 90.0f;
             break;
-        case 2: // Side / Right view
+        case 2: // Side / Right view (+X)
             m_pitch = 0.0f;
             m_yaw = 0.0f;
             break;
         case 3: // 3D Isometric view
+            m_pitch = -30.0f;
+            m_yaw = 45.0f;
+            break;
+        case 4: // Bottom view (-Z)
+            m_pitch = 89.9f;
+            m_yaw = 90.0f;
+            break;
+        case 5: // Back view (-Y)
+            m_pitch = 0.0f;
+            m_yaw = -90.0f;
+            break;
+        case 6: // Left view (-X)
+            m_pitch = 0.0f;
+            m_yaw = 180.0f;
+            break;
         default:
             m_pitch = -30.0f;
             m_yaw = 45.0f;

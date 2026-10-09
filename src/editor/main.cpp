@@ -32,6 +32,11 @@ static bool g_isAltPanning = false;
 static double g_lastMouseX = 0.0;
 static double g_lastMouseY = 0.0;
 static bool g_firstMouse = true;
+static bool g_isBoxSelecting = false;
+static double g_boxSelectStartX = 0.0;
+static double g_boxSelectStartY = 0.0;
+static double g_boxSelectCurrentX = 0.0;
+static double g_boxSelectCurrentY = 0.0;
 
 static void WindowCloseCallback(GLFWwindow* window) {
     if (g_activeScene && g_activeScene->HasNAV() &&
@@ -189,6 +194,16 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                 }
             }
 
+            // Box Selection Tool: Click & drag selects marquee rectangle
+            if (g_activeScene->IsBoxSelectMode()) {
+                g_isBoxSelecting = true;
+                g_boxSelectStartX = mouseX;
+                g_boxSelectStartY = mouseY;
+                g_boxSelectCurrentX = mouseX;
+                g_boxSelectCurrentY = mouseY;
+                return;
+            }
+
             auto mode = g_activeScene->GetTransformMode();
             if (mode == EditorScene::TRANSFORM_TRANSLATE || mode == EditorScene::TRANSFORM_SCALE) {
                 // Left-click confirms active modal transform
@@ -272,6 +287,12 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                         g_activeScene->ClearSelection();
                         g_activeScene->SelectEntity(-1);
                     }
+                    // Clicking in empty space begins marquee box selection
+                    g_isBoxSelecting = true;
+                    g_boxSelectStartX = mouseX;
+                    g_boxSelectStartY = mouseY;
+                    g_boxSelectCurrentX = mouseX;
+                    g_boxSelectCurrentY = mouseY;
                 }
             }
         } else if (action == GLFW_RELEASE) {
@@ -280,6 +301,26 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
             }
             if (g_activeScene->IsDraggingHandle()) {
                 g_activeScene->EndDragHandle(*g_cmdMgr);
+            }
+            if (g_isBoxSelecting) {
+                g_isBoxSelecting = false;
+                float dx = static_cast<float>(std::abs(g_boxSelectCurrentX - g_boxSelectStartX));
+                float dy = static_cast<float>(std::abs(g_boxSelectCurrentY - g_boxSelectStartY));
+                if (dx > 4.0f || dy > 4.0f) {
+                    int displayW = 0, displayH = 0;
+                    glfwGetFramebufferSize(window, &displayW, &displayH);
+                    float aspect = (displayH > 0) ? (static_cast<float>(displayW) / static_cast<float>(displayH)) : 1.0f;
+                    auto picked = ScenePicker::PickAreasInRect(
+                        *g_activeScene,
+                        static_cast<float>(g_boxSelectStartX), static_cast<float>(g_boxSelectStartY),
+                        static_cast<float>(g_boxSelectCurrentX), static_cast<float>(g_boxSelectCurrentY),
+                        static_cast<float>(displayW), static_cast<float>(displayH),
+                        g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
+                    );
+                    bool additive = (mods & GLFW_MOD_SHIFT) != 0;
+                    bool subtractive = (mods & GLFW_MOD_ALT) != 0;
+                    g_activeScene->BoxSelectAreas(picked, additive, subtractive);
+                }
             }
         }
     }
@@ -306,6 +347,10 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
     }
 
     if (action == GLFW_PRESS) {
+        bool ctrlDown = (mods & GLFW_MOD_CONTROL) != 0 ||
+                        glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                        glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+
         auto mode = g_activeScene->GetTransformMode();
 
         if (mode == EditorScene::TRANSFORM_TRANSLATE || mode == EditorScene::TRANSFORM_SCALE) {
@@ -347,6 +392,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 g_activeScene->SetGizmoMode(GIZMO_MODE_SCALE);
             } else if (key == GLFW_KEY_4 && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // 4: All / Combined Gizmo
                 g_activeScene->SetGizmoMode(GIZMO_MODE_COMBINED);
+            } else if (key == GLFW_KEY_B && (mods & GLFW_MOD_SHIFT) != 0) { // Shift+B: Toggle Marquee Box Select
+                g_activeScene->ToggleBoxSelectMode();
             } else if (key == GLFW_KEY_B && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // B: Bridge Tool
                 g_activeScene->ToggleBridgeMode();
             } else if (key == GLFW_KEY_N && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // N: Draw Area Tool
@@ -361,9 +408,9 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 g_activeScene->ToggleFillAreaMode();
             } else if (key == GLFW_KEY_C && (mods & GLFW_MOD_ALT) != 0) { // Alt+C: Toggle Connection Selection Mode
                 g_activeScene->ToggleConnectionSelectionMode();
-            } else if (key == GLFW_KEY_C && (mods & GLFW_MOD_CONTROL) != 0 && (mods & GLFW_MOD_SHIFT) == 0) { // Ctrl+C: Copy areas
+            } else if (key == GLFW_KEY_C && ctrlDown && (mods & GLFW_MOD_SHIFT) == 0) { // Ctrl+C: Copy areas
                 g_activeScene->CopySelectedAreas();
-            } else if (key == GLFW_KEY_V && (mods & GLFW_MOD_CONTROL) != 0 && (mods & GLFW_MOD_SHIFT) == 0) { // Ctrl+V: Paste areas
+            } else if (key == GLFW_KEY_V && ctrlDown && (mods & GLFW_MOD_SHIFT) == 0) { // Ctrl+V: Paste areas
                 double mouseX, mouseY;
                 glfwGetCursorPos(window, &mouseX, &mouseY);
                 int displayW = 0, displayH = 0;
@@ -380,11 +427,11 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                     hasHit = ScenePicker::PickBSPFloor(*g_activeScene, ray, &hit);
                 }
                 g_activeScene->PasteAreas(hasHit ? &hit : nullptr, *g_cmdMgr);
-            } else if (key == GLFW_KEY_V && (mods & GLFW_MOD_CONTROL) != 0 && (mods & GLFW_MOD_SHIFT) != 0) { // Ctrl+Shift+V: Toggle validity overlay
+            } else if (key == GLFW_KEY_V && ctrlDown && (mods & GLFW_MOD_SHIFT) != 0) { // Ctrl+Shift+V: Toggle validity overlay
                 auto& navR = g_activeScene->GetNavRenderer();
                 navR.SetShowConnectionValidity(!navR.GetShowConnectionValidity());
                 g_activeScene->RebuildNavRenderer();
-            } else if (key == GLFW_KEY_P && (mods & GLFW_MOD_CONTROL) != 0 && (mods & GLFW_MOD_ALT) == 0) { // Ctrl+P: Command Palette
+            } else if (key == GLFW_KEY_P && ctrlDown && (mods & GLFW_MOD_ALT) == 0) { // Ctrl+P: Command Palette
                 if (g_editorUI) g_editorUI->ToggleCommandPalette();
             } else if (key == GLFW_KEY_H && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // H: Clearance Hull Visualizer
                 g_activeScene->ToggleClearanceHull();
@@ -393,14 +440,16 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                        g_activeScene->GetSelectedEntityIndex() < 0) { // P: Path Simulation Tool
                 g_activeScene->TogglePathTool();
                 if (g_editorUI) g_editorUI->TogglePathPanel();
-            } else if (key == GLFW_KEY_COMMA && (mods & GLFW_MOD_CONTROL) != 0) { // Ctrl+,: Preferences
+            } else if (key == GLFW_KEY_COMMA && ctrlDown) { // Ctrl+,: Preferences
                 if (g_editorUI) g_editorUI->OpenPreferences();
-            } else if (key == GLFW_KEY_L && (mods & GLFW_MOD_CONTROL) != 0) { // Ctrl+L: Landmarks / Spawns
+            } else if (key == GLFW_KEY_L && ctrlDown) { // Ctrl+L: Landmarks / Spawns
                 if (g_editorUI) g_editorUI->OpenLandmarksModal();
-            } else if (key == GLFW_KEY_A && (mods & GLFW_MOD_CONTROL) != 0) { // Ctrl+A: Select All
+            } else if (key == GLFW_KEY_A && ctrlDown) { // Ctrl+A: Select All
                 g_activeScene->SelectAllAreas();
             } else if (key == GLFW_KEY_ESCAPE) {
-                if (g_activeScene->IsKnifeMode()) {
+                if (g_activeScene->IsBoxSelectMode()) {
+                    g_activeScene->SetBoxSelectMode(false);
+                } else if (g_activeScene->IsKnifeMode()) {
                     g_activeScene->ExitKnifeMode();
                 } else if (g_activeScene->IsDrawAreaMode()) {
                     g_activeScene->CancelDrawArea();
@@ -578,6 +627,11 @@ static void CursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
             g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
         );
 
+        if (g_isBoxSelecting) {
+            g_boxSelectCurrentX = xpos;
+            g_boxSelectCurrentY = ypos;
+        }
+
         if (g_activeScene->IsDraggingHandle()) {
             g_activeScene->UpdateDragHandle(
                 static_cast<float>(xpos), static_cast<float>(ypos),
@@ -653,7 +707,7 @@ static void ProcessInput(GLFWwindow* window, float deltaTime) {
 
 static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
     static std::string lastTitle = "";
-    std::string title = "NavStudio v1.5.1";
+    std::string title = "NavStudio v1.5.2";
     if (scene.HasBSP() || scene.HasNAV()) {
         std::string map = "";
         if (scene.HasBSP()) {
@@ -677,7 +731,7 @@ static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
 
 int main(int argc, char* argv[]) {
     std::printf("====================================================\n");
-    std::printf("  NavStudio v1.5.1\n");
+    std::printf("  NavStudio v1.5.2\n");
     std::printf("====================================================\n");
 
     if (!glfwInit()) {
@@ -694,7 +748,7 @@ int main(int argc, char* argv[]) {
 
     int initialWidth = 1440;
     int initialHeight = 900;
-    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.5.1", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.5.2", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "[Error] Failed to create GLFW window\n");
         glfwTerminate();
@@ -801,6 +855,11 @@ int main(int argc, char* argv[]) {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
+        editorUI.SetMarqueeBox(
+            g_isBoxSelecting,
+            static_cast<float>(g_boxSelectStartX), static_cast<float>(g_boxSelectStartY),
+            static_cast<float>(g_boxSelectCurrentX), static_cast<float>(g_boxSelectCurrentY)
+        );
         editorUI.Render(scene, g_camera, cmdMgr, deltaTime);
 
         ImGui::Render();

@@ -8,6 +8,7 @@ namespace FileDialog {
     extern const char* kBSPFilter;
     extern const char* kNAVFilter;
     extern const char* kWADFilter;
+    extern const char* kOBJFilter;
     extern const char* kAllFilter;
 
     // Opens native OS file picker to select an existing file

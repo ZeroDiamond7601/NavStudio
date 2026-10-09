@@ -740,11 +740,45 @@ size_t NavGenerator::FloodFillFromSeed(
     float sx = std::round(seedPos.x / step) * step;
     float sy = std::round(seedPos.y / step) * step;
 
+    auto TraceGroundWithEntities = [&](const Vector3& start, const Vector3& end, BSPTraceResult& outTr) -> bool {
+        bool hit = false;
+        float bestFrac = 1.0f;
+        BSPTraceResult worldTr;
+        if (bsp.TraceWorld(start, end, HULL_POINT, &worldTr)) {
+            if (!worldTr.startsolid && !worldTr.allsolid && worldTr.fraction < 1.0f) {
+                bestFrac = worldTr.fraction;
+                outTr = worldTr;
+                hit = true;
+            }
+        }
+
+        for (const auto& ent : bsp.GetEntities()) {
+            std::string cls = ent.classname;
+            if (cls.rfind("trigger_", 0) == 0 || cls == "func_buyzone" || cls == "info_bomb_target" || cls == "info_hostage_goal") continue;
+
+            std::string modelStr = ent.GetString("model");
+            if (!modelStr.empty() && modelStr[0] == '*') {
+                int mIdx = std::atoi(modelStr.c_str() + 1);
+                if (mIdx > 0 && mIdx < bsp.GetModelCount()) {
+                    BSPTraceResult entTr;
+                    if (bsp.TraceModel(mIdx, start, end, HULL_POINT, &entTr)) {
+                        if (!entTr.startsolid && !entTr.allsolid && entTr.fraction < bestFrac) {
+                            bestFrac = entTr.fraction;
+                            outTr = entTr;
+                            hit = true;
+                        }
+                    }
+                }
+            }
+        }
+        return hit;
+    };
+
     Vector3 groundPos;
     BSPTraceResult groundTr;
     Vector3 gStart(sx, sy, seedPos.z + 24.0f);
     Vector3 gEnd(sx, sy, seedPos.z - 200.0f);
-    if (!bsp.TraceWorld(gStart, gEnd, HULL_POINT, &groundTr) || groundTr.fraction >= 1.0f || groundTr.startsolid || groundTr.allsolid) {
+    if (!TraceGroundWithEntities(gStart, gEnd, groundTr)) {
         if (!bsp.GetGround(Vector3(sx, sy, seedPos.z + 18.0f), &groundPos, 500.0f)) {
             return 0;
         }
@@ -782,7 +816,7 @@ size_t NavGenerator::FloodFillFromSeed(
             Vector3 cEnd(targetX, targetY, curr->pos.z - options.maxDrop);
 
             BSPTraceResult gTr;
-            if (!bsp.TraceWorld(cStart, cEnd, HULL_POINT, &gTr) || gTr.fraction >= 1.0f || gTr.startsolid || gTr.allsolid) {
+            if (!TraceGroundWithEntities(cStart, cEnd, gTr)) {
                 continue;
             }
 

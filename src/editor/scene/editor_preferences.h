@@ -3,6 +3,8 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <vector>
+#include <algorithm>
 
 struct EditorPreferences {
     // General
@@ -34,7 +36,21 @@ struct EditorPreferences {
     bool showConnectionValidity{true};
     bool show3DSkybox{true};
     bool showFps{true};
+    bool showCompass{true};
     int themeIndex{0}; // 0: Dark Modern, 1: Classic Dark, 2: Light
+
+    // Recent Files History
+    std::vector<std::string> recentFiles;
+
+    void AddRecentFile(const std::string& path) {
+        if (path.empty()) return;
+        recentFiles.erase(std::remove(recentFiles.begin(), recentFiles.end(), path), recentFiles.end());
+        recentFiles.insert(recentFiles.begin(), path);
+        if (recentFiles.size() > 10) {
+            recentFiles.resize(10);
+        }
+        Save();
+    }
 
     void ResetToDefaults() {
         defaultGridSize = 25.0f;
@@ -62,6 +78,7 @@ struct EditorPreferences {
         showConnectionValidity = true;
         show3DSkybox = true;
         showFps = true;
+        showCompass = true;
         themeIndex = 0;
     }
 
@@ -105,7 +122,16 @@ struct EditorPreferences {
                 else if (key == "showConnectionValidity") showConnectionValidity = (val == "1" || val == "true");
                 else if (key == "show3DSkybox") show3DSkybox = (val == "1" || val == "true");
                 else if (key == "showFps") showFps = (val == "1" || val == "true");
+                else if (key == "showCompass") showCompass = (val == "1" || val == "true");
                 else if (key == "themeIndex") themeIndex = std::stoi(val);
+                else if (key == "recentFiles") {
+                    recentFiles.clear();
+                    std::stringstream ss(val);
+                    std::string item;
+                    while (std::getline(ss, item, ';')) {
+                        if (!item.empty()) recentFiles.push_back(item);
+                    }
+                }
             } catch (...) {}
         }
     }
@@ -137,6 +163,14 @@ struct EditorPreferences {
         file << "showConnectionValidity=" << (showConnectionValidity ? "1" : "0") << "\n";
         file << "show3DSkybox=" << (show3DSkybox ? "1" : "0") << "\n";
         file << "showFps=" << (showFps ? "1" : "0") << "\n";
+        file << "showCompass=" << (showCompass ? "1" : "0") << "\n";
         file << "themeIndex=" << themeIndex << "\n";
+
+        std::string recStr;
+        for (size_t i = 0; i < recentFiles.size(); ++i) {
+            if (i > 0) recStr += ";";
+            recStr += recentFiles[i];
+        }
+        file << "recentFiles=" << recStr << "\n";
     }
 };

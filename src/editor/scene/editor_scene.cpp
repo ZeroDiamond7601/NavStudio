@@ -395,6 +395,82 @@ bool EditorScene::SaveNAV(const std::string& navPath) {
     return true;
 }
 
+bool EditorScene::ExportNAVToOBJ(const std::string& filepath) const {
+    if (!m_nav || !m_nav->IsLoaded() || m_nav->GetAreaCount() == 0) {
+        return false;
+    }
+
+    std::ofstream out(filepath);
+    if (!out.is_open()) return false;
+
+    const auto& areas = m_nav->GetAreas();
+    const auto& ladders = m_nav->GetLadders();
+
+    out << "# Wavefront OBJ exported by NavStudio v1.5.2\n";
+    out << "# Map: " << m_bspPath << "\n";
+    out << "# Navigation Areas: " << areas.size() << "\n";
+    out << "# Ladders: " << ladders.size() << "\n\n";
+
+    size_t vertexOffset = 1;
+
+    for (const NavArea* area : areas) {
+        if (!area) continue;
+
+        uint32_t id = area->GetID();
+        Vector3 nw = area->GetCorner(NAV_CORNER_NORTH_WEST);
+        Vector3 ne = area->GetCorner(NAV_CORNER_NORTH_EAST);
+        Vector3 se = area->GetCorner(NAV_CORNER_SOUTH_EAST);
+        Vector3 sw = area->GetCorner(NAV_CORNER_SOUTH_WEST);
+
+        std::string place = area->GetPlaceName();
+        if (place.empty()) place = "Unassigned";
+
+        out << "g Area_" << id << "_" << place << "\n";
+        out << "v " << nw.x << " " << nw.y << " " << nw.z << "\n";
+        out << "v " << ne.x << " " << ne.y << " " << ne.z << "\n";
+        out << "v " << se.x << " " << se.y << " " << se.z << "\n";
+        out << "v " << sw.x << " " << sw.y << " " << sw.z << "\n";
+
+        out << "f " << vertexOffset << " " << (vertexOffset + 1) << " " << (vertexOffset + 2) << "\n";
+        out << "f " << vertexOffset << " " << (vertexOffset + 2) << " " << (vertexOffset + 3) << "\n\n";
+
+        vertexOffset += 4;
+    }
+
+    for (const NavLadder* ladder : ladders) {
+        if (!ladder) continue;
+        uint32_t id = ladder->id;
+        Vector3 top = ladder->top;
+        Vector3 bottom = ladder->bottom;
+        float width = ladder->width * 0.5f;
+
+        Vector3 right(1.0f, 0.0f, 0.0f);
+        if (ladder->dir == NAV_DIR_NORTH || ladder->dir == NAV_DIR_SOUTH) {
+            right = Vector3(1.0f, 0.0f, 0.0f);
+        } else {
+            right = Vector3(0.0f, 1.0f, 0.0f);
+        }
+
+        Vector3 tl = top - right * width;
+        Vector3 tr = top + right * width;
+        Vector3 br = bottom + right * width;
+        Vector3 bl = bottom - right * width;
+
+        out << "g Ladder_" << id << "\n";
+        out << "v " << tl.x << " " << tl.y << " " << tl.z << "\n";
+        out << "v " << tr.x << " " << tr.y << " " << tr.z << "\n";
+        out << "v " << br.x << " " << br.y << " " << br.z << "\n";
+        out << "v " << bl.x << " " << bl.y << " " << bl.z << "\n";
+
+        out << "f " << vertexOffset << " " << (vertexOffset + 1) << " " << (vertexOffset + 2) << "\n";
+        out << "f " << vertexOffset << " " << (vertexOffset + 2) << " " << (vertexOffset + 3) << "\n\n";
+
+        vertexOffset += 4;
+    }
+
+    return true;
+}
+
 void EditorScene::UpdateAutosave(float deltaTime) {
     if (!m_prefs.enableAutosave || m_prefs.autosaveIntervalMinutes <= 0) return;
     if (!m_isModified || !m_nav || !m_nav->IsLoaded() || m_nav->GetAreaCount() == 0) {
@@ -849,6 +925,34 @@ void EditorScene::SelectArea(uint32_t id, bool additive, bool toggle) {
         m_selectedAreaId = id;
     }
 
+    m_selectedHandle = HANDLE_NONE;
+    m_hoveredHandle = HANDLE_NONE;
+    RebuildNavRenderer();
+}
+
+void EditorScene::BoxSelectAreas(const std::vector<uint32_t>& areaIds, bool additive, bool subtractive) {
+    if (subtractive) {
+        for (uint32_t id : areaIds) {
+            auto it = std::find(m_selectedAreaIds.begin(), m_selectedAreaIds.end(), id);
+            if (it != m_selectedAreaIds.end()) {
+                m_selectedAreaIds.erase(it);
+            }
+        }
+    } else if (additive) {
+        for (uint32_t id : areaIds) {
+            if (std::find(m_selectedAreaIds.begin(), m_selectedAreaIds.end(), id) == m_selectedAreaIds.end()) {
+                m_selectedAreaIds.push_back(id);
+            }
+        }
+    } else {
+        m_selectedAreaIds = areaIds;
+    }
+
+    if (m_selectedAreaIds.empty()) {
+        m_selectedAreaId = 0;
+    } else {
+        m_selectedAreaId = m_selectedAreaIds.back();
+    }
     m_selectedHandle = HANDLE_NONE;
     m_hoveredHandle = HANDLE_NONE;
     RebuildNavRenderer();
@@ -2619,9 +2723,43 @@ void EditorScene::UpdateDrawArea(const Ray& ray) {
 
         BSPTraceResult trCenter;
         bool hitCenter = false;
-        if (GetBSP().TraceWorld(Vector3(center.x, center.y, topZ), Vector3(center.x, center.y, botZ), HULL_POINT, &trCenter)) {
-            if (!trCenter.startsolid && !trCenter.allsolid && trCenter.fraction > 0.0f) {
+        float bestFracCenter = 1.0f;
+        Vector3 cStartCenter(center.x, center.y, topZ);
+        Vector3 cEndCenter(center.x, center.y, botZ);
+
+        if (GetBSP().TraceWorld(cStartCenter, cEndCenter, HULL_POINT, &trCenter)) {
+            if (!trCenter.startsolid && !trCenter.allsolid && trCenter.fraction > 0.0f && trCenter.fraction < 1.0f) {
                 hitCenter = true;
+                bestFracCenter = trCenter.fraction;
+            }
+        }
+
+        const auto& entities = GetEntityRenderer().GetEntities();
+        for (const auto& ent : entities) {
+            if (ent.category == ENT_CAT_TRIGGER) continue;
+            if (ent.classname.rfind("trigger_", 0) == 0) continue;
+            if (ent.classname == "func_buyzone") continue;
+
+            if (ent.isBrush && ent.brushModelIndex > 0) {
+                BSPTraceResult entTr;
+                if (GetBSP().TraceModel(ent.brushModelIndex, cStartCenter, cEndCenter, HULL_POINT, &entTr)) {
+                    if (!entTr.startsolid && !entTr.allsolid && entTr.fraction < bestFracCenter) {
+                        bestFracCenter = entTr.fraction;
+                        trCenter = entTr;
+                        hitCenter = true;
+                    }
+                }
+            } else if (center.x >= ent.worldMins.x && center.x <= ent.worldMaxs.x &&
+                       center.y >= ent.worldMins.y && center.y <= ent.worldMaxs.y) {
+                if (ent.worldMaxs.z <= topZ && ent.worldMaxs.z >= botZ) {
+                    float frac = (topZ - ent.worldMaxs.z) / (topZ - botZ);
+                    if (frac < bestFracCenter) {
+                        bestFracCenter = frac;
+                        trCenter.endpos = Vector3(center.x, center.y, ent.worldMaxs.z);
+                        trCenter.planeNormal = Vector3(0.0f, 0.0f, 1.0f);
+                        hitCenter = true;
+                    }
+                }
             }
         }
 
@@ -2642,12 +2780,41 @@ void EditorScene::UpdateDrawArea(const Ray& ray) {
             Vector3 cStart(x, y, expZ + 32.0f);
             Vector3 cEnd(x, y, expZ - 48.0f);
             BSPTraceResult tr;
+            float bestFrac = 1.0f;
+            float resZ = expZ;
+
             if (GetBSP().TraceWorld(cStart, cEnd, HULL_POINT, &tr)) {
-                if (!tr.startsolid && !tr.allsolid && tr.fraction > 0.0f) {
-                    return tr.endpos.z;
+                if (!tr.startsolid && !tr.allsolid && tr.fraction > 0.0f && tr.fraction < 1.0f) {
+                    bestFrac = tr.fraction;
+                    resZ = tr.endpos.z;
                 }
             }
-            return expZ;
+
+            for (const auto& ent : entities) {
+                if (ent.category == ENT_CAT_TRIGGER) continue;
+                if (ent.classname.rfind("trigger_", 0) == 0) continue;
+                if (ent.classname == "func_buyzone") continue;
+
+                if (ent.isBrush && ent.brushModelIndex > 0) {
+                    BSPTraceResult entTr;
+                    if (GetBSP().TraceModel(ent.brushModelIndex, cStart, cEnd, HULL_POINT, &entTr)) {
+                        if (!entTr.startsolid && !entTr.allsolid && entTr.fraction < bestFrac) {
+                            bestFrac = entTr.fraction;
+                            resZ = entTr.endpos.z;
+                        }
+                    }
+                } else if (x >= ent.worldMins.x && x <= ent.worldMaxs.x &&
+                           y >= ent.worldMins.y && y <= ent.worldMaxs.y) {
+                    if (ent.worldMaxs.z <= cStart.z && ent.worldMaxs.z >= cEnd.z) {
+                        float frac = (cStart.z - ent.worldMaxs.z) / (cStart.z - cEnd.z);
+                        if (frac < bestFrac) {
+                            bestFrac = frac;
+                            resZ = ent.worldMaxs.z;
+                        }
+                    }
+                }
+            }
+            return resZ;
         };
 
         m_drawAreaNwZ = SampleCornerZ(minX, minY);

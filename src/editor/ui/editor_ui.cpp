@@ -269,6 +269,12 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
             m_generateStatusText.clear();
         } else if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_K, false)) {
             scene.SetShowSkybox(!scene.GetShowSkybox());
+        } else if (io.KeyCtrl && !io.KeyShift && !io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_P, false)) {
+            ToggleCommandPalette();
+        } else if (io.KeyCtrl && !io.KeyShift && !io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_L, false)) {
+            OpenLandmarksModal();
+        } else if (io.KeyCtrl && !io.KeyShift && !io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Comma, false)) {
+            OpenPreferences();
         }
     }
 
@@ -307,6 +313,9 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
 
     // 3D Viewport Orientation Compass
     RenderViewportCompass(scene, camera, viewport->WorkSize.x, viewport->WorkSize.y);
+
+    // Marquee Selection Box
+    RenderMarqueeBox();
 
     // Interactive Path Simulation Panel
     if (m_showPathPanel || scene.IsPathToolActive()) {
@@ -477,6 +486,23 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                         scene.SetModified(false);
                         m_showSaveSuccessModal = true;
                         m_saveSuccessMessage = "Navigation mesh saved successfully:\n" + path;
+                    }
+                }
+            }
+            if (ImGui::MenuItem("Export NAV to Wavefront OBJ (.obj)...", nullptr, false, scene.HasNAV())) {
+                std::string defaultName = "mesh";
+                if (!scene.GetNAVPath().empty()) {
+                    std::string p = scene.GetNAVPath();
+                    size_t slash = p.find_last_of("/\\");
+                    std::string fname = (slash != std::string::npos) ? p.substr(slash + 1) : p;
+                    size_t dot = fname.find_last_of('.');
+                    defaultName = (dot != std::string::npos) ? fname.substr(0, dot) : fname;
+                }
+                std::string path = FileDialog::SaveFile(FileDialog::kOBJFilter, "obj", "Export Navigation Mesh as Wavefront OBJ");
+                if (!path.empty()) {
+                    if (scene.ExportNAVToOBJ(path)) {
+                        m_showSaveSuccessModal = true;
+                        m_saveSuccessMessage = "Wavefront OBJ mesh exported successfully:\n" + path;
                     }
                 }
             }
@@ -754,9 +780,13 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 
             ImGui::Separator();
             if (ImGui::BeginMenu("View Presets")) {
-                if (ImGui::MenuItem("Top View (2D Ortho)", "F2")) camera.SnapToPreset(0);
-                if (ImGui::MenuItem("Front View")) camera.SnapToPreset(1);
-                if (ImGui::MenuItem("Right / Side View")) camera.SnapToPreset(2);
+                if (ImGui::MenuItem("Top View (+Z)", "F2")) camera.SnapToPreset(0);
+                if (ImGui::MenuItem("Bottom View (-Z)")) camera.SnapToPreset(4);
+                if (ImGui::MenuItem("Front View (+Y)")) camera.SnapToPreset(1);
+                if (ImGui::MenuItem("Back View (-Y)")) camera.SnapToPreset(5);
+                if (ImGui::MenuItem("Right / Side View (+X)")) camera.SnapToPreset(2);
+                if (ImGui::MenuItem("Left View (-X)")) camera.SnapToPreset(6);
+                ImGui::Separator();
                 if (ImGui::MenuItem("Isometric 3D")) camera.SnapToPreset(3);
                 ImGui::EndMenu();
             }
@@ -774,6 +804,7 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 
             ImGui::Separator();
             ImGui::MenuItem("Performance & FPS Overlay", nullptr, &m_showStatsOverlay);
+            ImGui::MenuItem("Blender Viewport Compass", nullptr, &scene.GetPreferences().showCompass);
 
             ImGui::EndMenu();
         }
@@ -799,6 +830,9 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 
             if (ImGui::MenuItem("Focus on Selection", "F", false, sel != nullptr)) {
                 camera.FocusOn(sel->GetCenter());
+            }
+            if (ImGui::MenuItem("Marquee Box Selection", "Shift+B", scene.IsBoxSelectMode(), scene.HasNAV())) {
+                scene.ToggleBoxSelectMode();
             }
 
             ImGui::Separator();
@@ -2589,6 +2623,7 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
                 if (ImGui::Checkbox("Show FPS & Performance Stats Overlay", &prefs.showFps)) {
                     m_showStatsOverlay = prefs.showFps;
                 }
+                ImGui::Checkbox("Show Blender Navigation Compass", &prefs.showCompass);
 
                 ImGui::Spacing();
                 ImGui::Separator();
@@ -2642,7 +2677,9 @@ void EditorUI::RenderWelcomeOverlay(EditorScene& scene) {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImVec2 center = viewport->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(520, 360), ImGuiCond_Always);
+    const auto& recents = scene.GetRecentFiles();
+    float winH = recents.empty() ? 360.0f : (380.0f + static_cast<float>(std::min<size_t>(recents.size(), 4)) * 28.0f);
+    ImGui::SetNextWindowSize(ImVec2(520, winH), ImGuiCond_Always);
 
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
         ImGuiWindowFlags_NoSavedSettings;
@@ -2693,6 +2730,32 @@ void EditorUI::RenderWelcomeOverlay(EditorScene& scene) {
             m_showOpenPathModal = true;
             m_openPathBuffer[0] = '\0';
             m_openPathStatusMessage.clear();
+        }
+
+        const auto& recents = scene.GetRecentFiles();
+        if (!recents.empty()) {
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::Text("Recent Files:");
+            ImGui::Spacing();
+
+            size_t showCount = std::min<size_t>(recents.size(), 4);
+            for (size_t i = 0; i < showCount; ++i) {
+                const auto& rPath = recents[i];
+                std::string fname = rPath;
+                size_t lastSlash = fname.find_last_of("/\\");
+                if (lastSlash != std::string::npos) fname = fname.substr(lastSlash + 1);
+
+                ImGui::PushID(static_cast<int>(i));
+                if (ImGui::Button(fname.c_str(), ImVec2(-1, 24))) {
+                    scene.StartAsyncLoad(rPath);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", rPath.c_str());
+                }
+                ImGui::PopID();
+            }
         }
     }
     ImGui::End();
@@ -3286,69 +3349,147 @@ void EditorUI::RenderOptimizeModal() {
 }
 
 void EditorUI::RenderViewportCompass(EditorScene& scene, Camera& camera, float screenW, float screenH) {
+    if (!scene.GetPreferences().showCompass) return;
     if (camera.GetMode() == CAMERA_MODE_TOPDOWN_2D) return;
 
     ImDrawList* drawList = ImGui::GetForegroundDrawList();
     if (!drawList) return;
 
-    ImVec2 center(screenW - 65.0f, 65.0f);
-    float radius = 28.0f;
+    const float radius = 42.0f;
+    const ImVec2 center(screenW - 72.0f, 72.0f);
+    const float poleLen = radius * 0.76f;
+    const float nodeRadius = 8.5f;
 
-    drawList->AddCircleFilled(center, radius, IM_COL32(20, 24, 30, 160));
-    drawList->AddCircle(center, radius, IM_COL32(70, 80, 95, 180), 32, 1.5f);
+    ImVec2 mousePos = ImGui::GetMousePos();
+    float distToCenter = std::sqrt((mousePos.x - center.x) * (mousePos.x - center.x) + (mousePos.y - center.y) * (mousePos.y - center.y));
+    bool isMouseOverCompass = (distToCenter <= radius + 6.0f);
+
+    static bool s_isDragging = false;
+    static ImVec2 s_dragStartPos(0, 0);
+    static bool s_hasMoved = false;
+
+    if (ImGui::IsMouseClicked(0) && isMouseOverCompass && !m_mouseOverUI) {
+        s_isDragging = true;
+        s_dragStartPos = mousePos;
+        s_hasMoved = false;
+    }
+
+    if (s_isDragging) {
+        if (ImGui::IsMouseDown(0)) {
+            ImVec2 delta = ImGui::GetIO().MouseDelta;
+            if (std::abs(mousePos.x - s_dragStartPos.x) > 3.0f || std::abs(mousePos.y - s_dragStartPos.y) > 3.0f) {
+                s_hasMoved = true;
+            }
+            if (s_hasMoved && (delta.x != 0.0f || delta.y != 0.0f)) {
+                camera.Orbit(delta.x * 0.45f, delta.y * 0.45f);
+            }
+        } else {
+            s_isDragging = false;
+        }
+    }
+
+    // Outer sphere background and border
+    drawList->AddCircleFilled(center, radius, IM_COL32(20, 24, 32, 175));
+    drawList->AddCircle(center, radius, IM_COL32(65, 78, 98, 190), 40, 1.5f);
+    drawList->AddCircleFilled(center, radius * 0.45f, IM_COL32(32, 38, 48, 130));
 
     Vector3 right = camera.GetRight();
     Vector3 up = camera.GetUp();
+    Vector3 fwd = camera.GetForward();
 
-    struct AxisItem {
+    struct CompassPole {
         const char* label;
         Vector3 worldDir;
         ImU32 color;
+        ImU32 backColor;
         int preset;
-    };
-    AxisItem axes[3] = {
-        { "X", Vector3(1.0f, 0.0f, 0.0f), IM_COL32(245, 75, 75, 255), 2 },
-        { "Y", Vector3(0.0f, 1.0f, 0.0f), IM_COL32(75, 220, 75, 255), 1 },
-        { "Z", Vector3(0.0f, 0.0f, 1.0f), IM_COL32(75, 140, 255, 255), 0 }
+        bool isPositive;
+        float depth;
+        ImVec2 screenPos;
     };
 
-    ImVec2 mousePos = ImGui::GetMousePos();
-    bool clicked = ImGui::IsMouseClicked(0) && !m_mouseOverUI;
+    std::vector<CompassPole> poles = {
+        { "X",  Vector3( 1.0f,  0.0f,  0.0f), IM_COL32(235,  65,  65, 255), IM_COL32(140,  45,  45, 180), 2, true,  0.0f, ImVec2(0,0) },
+        { "-X", Vector3(-1.0f,  0.0f,  0.0f), IM_COL32(180,  55,  55, 200), IM_COL32(110,  35,  35, 150), 6, false, 0.0f, ImVec2(0,0) },
+        { "Y",  Vector3( 0.0f,  1.0f,  0.0f), IM_COL32( 65, 220,  65, 255), IM_COL32( 45, 130,  45, 180), 1, true,  0.0f, ImVec2(0,0) },
+        { "-Y", Vector3( 0.0f, -1.0f,  0.0f), IM_COL32( 55, 170,  55, 200), IM_COL32( 35, 100,  35, 150), 5, false, 0.0f, ImVec2(0,0) },
+        { "Z",  Vector3( 0.0f,  0.0f,  1.0f), IM_COL32( 65, 130, 245, 255), IM_COL32( 45,  85, 160, 180), 0, true,  0.0f, ImVec2(0,0) },
+        { "-Z", Vector3( 0.0f,  0.0f, -1.0f), IM_COL32( 55, 105, 195, 200), IM_COL32( 35,  65, 125, 150), 4, false, 0.0f, ImVec2(0,0) }
+    };
 
-    for (int i = 0; i < 3; ++i) {
-        float sx = axes[i].worldDir.Dot(right);
-        float sy = -axes[i].worldDir.Dot(up);
+    for (auto& p : poles) {
+        float sx = p.worldDir.Dot(right);
+        float sy = -p.worldDir.Dot(up);
+        p.depth = p.worldDir.Dot(fwd);
+        p.screenPos = ImVec2(center.x + sx * poleLen, center.y + sy * poleLen);
+    }
 
-        float len = std::sqrt(sx * sx + sy * sy);
-        if (len > 0.001f) {
-            sx = (sx / len) * (radius * 0.72f);
-            sy = (sy / len) * (radius * 0.72f);
+    std::sort(poles.begin(), poles.end(), [](const CompassPole& a, const CompassPole& b) {
+        return a.depth < b.depth;
+    });
+
+    int clickedPreset = -1;
+    bool mouseReleased = ImGui::IsMouseReleased(0);
+
+    for (const auto& p : poles) {
+        float distToMouse = std::sqrt((mousePos.x - p.screenPos.x) * (mousePos.x - p.screenPos.x) +
+                                      (mousePos.y - p.screenPos.y) * (mousePos.y - p.screenPos.y));
+        bool isHovered = (distToMouse <= nodeRadius + 3.0f);
+
+        if (isHovered && mouseReleased && !s_hasMoved && !m_mouseOverUI) {
+            clickedPreset = p.preset;
         }
 
-        ImVec2 endPt(center.x + sx, center.y + sy);
-        drawList->AddLine(center, endPt, axes[i].color, 2.0f);
+        if (p.isPositive) {
+            drawList->AddLine(center, p.screenPos, p.color, isHovered ? 2.5f : 1.8f);
 
-        float nodeR = 7.0f;
-        drawList->AddCircleFilled(endPt, nodeR, axes[i].color);
-        drawList->AddCircle(endPt, nodeR, IM_COL32(255, 255, 255, 200), 16, 1.0f);
+            float curR = isHovered ? (nodeRadius + 2.0f) : nodeRadius;
+            drawList->AddCircleFilled(p.screenPos, curR, p.color);
+            drawList->AddCircle(p.screenPos, curR, isHovered ? IM_COL32(255, 255, 255, 255) : IM_COL32(230, 230, 230, 180), 16, 1.2f);
 
-        ImVec2 textSz = ImGui::CalcTextSize(axes[i].label);
-        drawList->AddText(ImVec2(endPt.x - textSz.x * 0.5f, endPt.y - textSz.y * 0.5f), IM_COL32(255, 255, 255, 255), axes[i].label);
-
-        float dx = mousePos.x - endPt.x;
-        float dy = mousePos.y - endPt.y;
-        if (std::sqrt(dx * dx + dy * dy) <= nodeR + 2.0f) {
-            if (clicked) {
-                camera.SnapToPreset(axes[i].preset);
-            }
+            ImVec2 textSz = ImGui::CalcTextSize(p.label);
+            drawList->AddText(ImVec2(p.screenPos.x - textSz.x * 0.5f, p.screenPos.y - textSz.y * 0.5f),
+                              IM_COL32(255, 255, 255, 255), p.label);
+        } else {
+            float curR = isHovered ? (nodeRadius * 0.75f + 1.5f) : (nodeRadius * 0.7f);
+            drawList->AddCircleFilled(p.screenPos, curR, isHovered ? p.color : p.backColor);
+            drawList->AddCircle(p.screenPos, curR, isHovered ? IM_COL32(255, 255, 255, 220) : IM_COL32(180, 180, 180, 120), 12, 1.0f);
         }
     }
 
-    float centerDist = std::sqrt((mousePos.x - center.x) * (mousePos.x - center.x) + (mousePos.y - center.y) * (mousePos.y - center.y));
-    drawList->AddCircleFilled(center, 4.0f, IM_COL32(220, 220, 220, 255));
-    if (centerDist <= 5.0f && clicked) {
-        camera.SnapToPreset(3);
+    bool isCenterHovered = (distToCenter <= 5.5f);
+    drawList->AddCircleFilled(center, isCenterHovered ? 5.5f : 4.0f, isCenterHovered ? IM_COL32(255, 255, 255, 255) : IM_COL32(200, 205, 215, 220));
+    if (isCenterHovered && mouseReleased && !s_hasMoved && !m_mouseOverUI) {
+        clickedPreset = 3; // Isometric 3D
     }
+
+    if (clickedPreset >= 0) {
+        camera.SnapToPreset(clickedPreset);
+    }
+}
+
+void EditorUI::RenderMarqueeBox() {
+    if (!m_marqueeActive) return;
+
+    ImDrawList* drawList = ImGui::GetForegroundDrawList();
+    if (!drawList) return;
+
+    float rMinX = std::min(m_marqueeStartX, m_marqueeCurX);
+    float rMaxX = std::max(m_marqueeStartX, m_marqueeCurX);
+    float rMinY = std::min(m_marqueeStartY, m_marqueeCurY);
+    float rMaxY = std::max(m_marqueeStartY, m_marqueeCurY);
+
+    if (rMaxX - rMinX < 2.0f && rMaxY - rMinY < 2.0f) return;
+
+    ImVec2 pMin(rMinX, rMinY);
+    ImVec2 pMax(rMaxX, rMaxY);
+
+    drawList->AddRectFilled(pMin, pMax, IM_COL32(40, 130, 240, 45));
+    drawList->AddRect(pMin, pMax, IM_COL32(85, 175, 255, 230), 0.0f, 0, 1.5f);
+
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "Select Box (%.0f x %.0f)", rMaxX - rMinX, rMaxY - rMinY);
+    drawList->AddText(ImVec2(rMinX + 4.0f, std::max(0.0f, rMinY - 18.0f)), IM_COL32(220, 235, 255, 255), buf);
 }
 
 void EditorUI::RenderPathSimulationPanel(EditorScene& scene, Camera& camera) {
@@ -3634,6 +3775,7 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
             { "File", "Save Navigation Mesh", "Ctrl+S", [&]() { if (scene.HasNAV()) { scene.SaveNAV(); cmdMgr.MarkSaved(); } } },
             { "File", "Open GoldSrc BSP Map", "Ctrl+O", [&]() { std::string p = FileDialog::OpenFile(FileDialog::kBSPFilter, "Open BSP"); if (!p.empty()) scene.StartAsyncLoad(p); } },
             { "File", "Open Navigation Mesh", "Ctrl+Shift+O", [&]() { std::string p = FileDialog::OpenFile(FileDialog::kNAVFilter, "Open NAV"); if (!p.empty()) scene.StartAsyncLoad(p); } },
+            { "File", "Export NavMesh to Wavefront OBJ", "", [&]() { if (scene.HasNAV()) { std::string p = FileDialog::SaveFile(FileDialog::kOBJFilter, "obj", "Export OBJ"); if (!p.empty()) { scene.ExportNAVToOBJ(p); m_showSaveSuccessModal = true; m_saveSuccessMessage = "Exported Wavefront OBJ:\n" + p; } } } },
             { "Edit", "Quick Merge Adjacent Areas", "M", [&]() { scene.MergeSelectedArea(cmdMgr); } },
             { "Edit", "Split Selected Area", "Shift+X", [&]() { scene.SplitSelectedArea(cmdMgr); } },
             { "Edit", "Select All Areas", "Ctrl+A", [&]() { scene.SelectAllAreas(); } },
@@ -3642,6 +3784,7 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
             { "Edit", "Duplicate Selected Areas", "Shift+D", [&]() { scene.BatchDuplicate(cmdMgr); } },
             { "Edit", "Undo", "Ctrl+Z", [&]() { cmdMgr.Undo(); } },
             { "Edit", "Redo", "Ctrl+Y", [&]() { cmdMgr.Redo(); } },
+            { "Tool", "Marquee Box Selection", "Shift+B", [&]() { scene.ToggleBoxSelectMode(); } },
             { "Tool", "Interactive Path Simulator", "P", [&]() { scene.TogglePathTool(); m_showPathPanel = true; } },
             { "Tool", "Disconnected Island Analyzer", "", [&]() { m_showIslandModal = true; } },
             { "Tool", "Toggle Player Clearance Hull", "H", [&]() { scene.ToggleClearanceHull(); } },
@@ -3653,10 +3796,14 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
             { "Generate", "Auto-Generate NavMesh", "Ctrl+G", [&]() { if (scene.HasBSP()) m_showGenerateModal = true; } },
             { "Generate", "Optimize Mesh (Coplanar Merge)", "", [&]() { if (scene.HasNAV()) { m_optimizeStats = scene.OptimizeMesh(cmdMgr, false); m_showOptimizeModal = true; } } },
             { "Generate", "Auto-Flag Obstacles (Crouch/Jump)", "", [&]() { if (scene.HasNAV()) { m_analyzerStats = scene.AutoAnalyzeFlags(cmdMgr, false); m_showAnalyzerModal = true; } } },
-            { "View", "Snap View: Top (2D Ortho)", "F2", [&]() { camera.SnapToPreset(0); } },
-            { "View", "Snap View: Front", "", [&]() { camera.SnapToPreset(1); } },
-            { "View", "Snap View: Side / Right", "", [&]() { camera.SnapToPreset(2); } },
+            { "View", "Snap View: Top (+Z)", "F2", [&]() { camera.SnapToPreset(0); } },
+            { "View", "Snap View: Bottom (-Z)", "", [&]() { camera.SnapToPreset(4); } },
+            { "View", "Snap View: Front (+Y)", "", [&]() { camera.SnapToPreset(1); } },
+            { "View", "Snap View: Back (-Y)", "", [&]() { camera.SnapToPreset(5); } },
+            { "View", "Snap View: Side / Right (+X)", "", [&]() { camera.SnapToPreset(2); } },
+            { "View", "Snap View: Left (-X)", "", [&]() { camera.SnapToPreset(6); } },
             { "View", "Snap View: 3D Isometric", "", [&]() { camera.SnapToPreset(3); } },
+            { "View", "Toggle Blender Viewport Compass", "", [&]() { auto& p = scene.GetPreferences(); p.showCompass = !p.showCompass; } },
             { "View", "Toggle 3D Skybox", "", [&]() { scene.SetShowSkybox(!scene.GetShowSkybox()); } },
             { "View", "Toggle Entities", "F3", [&]() { auto& r = scene.GetEntityRenderer(); r.SetShowEntities(!r.GetShowEntities()); } },
             { "View", "Cycle Shading Mode", "F4", [&]() { int n = (static_cast<int>(scene.GetBSPMode()) + 1) % 4; scene.SetBSPMode(static_cast<BSPRenderMode>(n)); } },
@@ -3755,9 +3902,7 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
 
 void EditorUI::RenderLandmarksModal(EditorScene& scene, Camera& camera) {
     ImGui::SetNextWindowSize(ImVec2(520, 440), ImGuiCond_Appearing);
-    if (!ImGui::IsPopupOpen("Map Landmarks & Spawns")) {
-        ImGui::OpenPopup("Map Landmarks & Spawns");
-    }
+    ImGui::OpenPopup("Map Landmarks & Spawns");
 
     if (ImGui::BeginPopupModal("Map Landmarks & Spawns", &m_showLandmarksModal, ImGuiWindowFlags_NoResize)) {
         ImGui::Text("Quick-Jump / Teleport Camera to Key Map Points");

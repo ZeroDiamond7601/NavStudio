@@ -172,14 +172,52 @@ bool ScenePicker::PickBSPFloor(const EditorScene& scene, const Ray& ray, Vector3
 
     Vector3 end = ray.origin + ray.direction * 16384.0f;
     BSPTraceResult tr;
+    bool foundHit = false;
+    float bestFraction = 1.0f;
+    Vector3 bestHit(0.0f, 0.0f, 0.0f);
+
     if (scene.GetBSP().TraceWorld(ray.origin, end, HULL_POINT, &tr)) {
-        if (outHitPoint) {
-            *outHitPoint = tr.endpos;
+        if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f) {
+            foundHit = true;
+            bestFraction = tr.fraction;
+            bestHit = tr.endpos;
         }
-        return true;
     }
 
-    return false;
+    // Check all entities in the scene (brush models, crates, tables, platforms)
+    const auto& entRenderer = scene.GetEntityRenderer();
+    const auto& entities = entRenderer.GetEntities();
+    for (const auto& ent : entities) {
+        if (ent.category == ENT_CAT_TRIGGER) continue;
+        if (ent.classname.rfind("trigger_", 0) == 0) continue;
+        if (ent.classname == "func_buyzone" || ent.classname == "info_bomb_target" || ent.classname == "info_hostage_goal") continue;
+
+        if (ent.isBrush && ent.brushModelIndex > 0) {
+            BSPTraceResult entTr;
+            if (scene.GetBSP().TraceModel(ent.brushModelIndex, ray.origin, end, HULL_POINT, &entTr)) {
+                if (!entTr.startsolid && !entTr.allsolid && entTr.fraction < bestFraction) {
+                    bestFraction = entTr.fraction;
+                    bestHit = entTr.endpos;
+                    foundHit = true;
+                }
+            }
+        } else if (ent.category == ENT_CAT_BRUSH || ent.category == ENT_CAT_OBJECTIVE_BOMB || ent.category == ENT_CAT_ITEM || ent.category == ENT_CAT_OTHER) {
+            float tEnt = 0.0f;
+            if (RayIntersectsAABB(ray, ent.worldMins, ent.worldMaxs, tEnt)) {
+                float frac = tEnt / 16384.0f;
+                if (frac > 0.0f && frac < bestFraction) {
+                    bestFraction = frac;
+                    bestHit = ray.origin + ray.direction * tEnt;
+                    foundHit = true;
+                }
+            }
+        }
+    }
+
+    if (foundHit && outHitPoint) {
+        *outHitPoint = bestHit;
+    }
+    return foundHit;
 }
 
 struct ScreenPoint2D {
@@ -631,4 +669,68 @@ bool ScenePicker::PickConnection(
     }
 
     return found;
+}
+
+std::vector<uint32_t> ScenePicker::PickAreasInRect(
+    const EditorScene& scene,
+    float rectMinX, float rectMinY,
+    float rectMaxX, float rectMaxY,
+    float viewportWidth, float viewportHeight,
+    const Matrix4& viewMatrix,
+    const Matrix4& projMatrix
+) {
+    std::vector<uint32_t> result;
+    if (!scene.HasNAV()) return result;
+
+    Matrix4 viewProj = projMatrix * viewMatrix;
+    float rMinX = std::min(rectMinX, rectMaxX);
+    float rMaxX = std::max(rectMinX, rectMaxX);
+    float rMinY = std::min(rectMinY, rectMaxY);
+    float rMaxY = std::max(rectMinY, rectMaxY);
+
+    for (const NavArea* area : scene.GetNAV().GetAreas()) {
+        if (!area) continue;
+
+        Vector3 pts[5] = {
+            area->GetCenter(),
+            area->GetCorner(NAV_CORNER_NORTH_WEST),
+            area->GetCorner(NAV_CORNER_NORTH_EAST),
+            area->GetCorner(NAV_CORNER_SOUTH_EAST),
+            area->GetCorner(NAV_CORNER_SOUTH_WEST)
+        };
+
+        bool anyInRect = false;
+        float areaScreenMinX = 1e9f, areaScreenMaxX = -1e9f;
+        float areaScreenMinY = 1e9f, areaScreenMaxY = -1e9f;
+        bool hasVisiblePoint = false;
+
+        for (int i = 0; i < 5; ++i) {
+            ScreenPoint2D sp = ProjectToScreen(pts[i], viewProj, viewportWidth, viewportHeight);
+            if (sp.valid) {
+                hasVisiblePoint = true;
+                if (sp.x >= rMinX && sp.x <= rMaxX && sp.y >= rMinY && sp.y <= rMaxY) {
+                    anyInRect = true;
+                    break;
+                }
+                areaScreenMinX = std::min(areaScreenMinX, sp.x);
+                areaScreenMaxX = std::max(areaScreenMaxX, sp.x);
+                areaScreenMinY = std::min(areaScreenMinY, sp.y);
+                areaScreenMaxY = std::max(areaScreenMaxY, sp.y);
+            }
+        }
+
+        if (!anyInRect && hasVisiblePoint) {
+            bool overlapX = !(areaScreenMaxX < rMinX || areaScreenMinX > rMaxX);
+            bool overlapY = !(areaScreenMaxY < rMinY || areaScreenMinY > rMaxY);
+            if (overlapX && overlapY) {
+                anyInRect = true;
+            }
+        }
+
+        if (anyInRect) {
+            result.push_back(area->GetID());
+        }
+    }
+
+    return result;
 }
