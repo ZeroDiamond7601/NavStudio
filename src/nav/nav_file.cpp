@@ -430,6 +430,7 @@ void NavMesh::BuildLadders(const BSPFile* bsp) {
                                  mod->mins.z);
         ladder->length = mod->maxs.z - mod->mins.z;
         ladder->width = std::max(mod->maxs.x - mod->mins.x, mod->maxs.y - mod->mins.y);
+        ladder->dir = (mod->maxs.x - mod->mins.x >= mod->maxs.y - mod->mins.y) ? NAV_DIR_NORTH : NAV_DIR_EAST;
 
         // Find closest areas near top and bottom
         ladder->topForwardArea = m_grid.GetNearestArea(ladder->top, 200.0f);

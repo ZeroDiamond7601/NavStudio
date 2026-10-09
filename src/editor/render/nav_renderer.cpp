@@ -280,7 +280,7 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
                 lineIndices.push_back(cIdx + 1);
 
                 // Add directional arrowhead along this lane
-                if (dist > 20.0f) {
+                if (dist > 18.0f) {
                     Vector3 tip = start + fwd * (dist * 0.75f);
                     Vector3 leftBar = tip - fwd * 8.0f + lateral * 4.5f;
                     Vector3 rightBar = tip - fwd * 8.0f - lateral * 4.5f;
@@ -295,6 +295,34 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
                     lineIndices.push_back(aIdx + 1);
                     lineIndices.push_back(aIdx + 2);
                     lineIndices.push_back(aIdx + 3);
+
+                    // For one-way connections, add a second chevron to make the arrow unmistakably directional
+                    if (!isTwoWay && dist > 32.0f) {
+                        Vector3 tip2 = tip - fwd * 7.0f;
+                        Vector3 leftBar2 = tip2 - fwd * 6.0f + lateral * 3.5f;
+                        Vector3 rightBar2 = tip2 - fwd * 6.0f - lateral * 3.5f;
+
+                        uint32_t aIdx2 = static_cast<uint32_t>(lineVertices.size());
+                        lineVertices.push_back({ tip2.x, tip2.y, tip2.z, 0,0,1, 0,0, cr, cg, cb, std::min(1.0f, ca + 0.15f) });
+                        lineVertices.push_back({ leftBar2.x, leftBar2.y, leftBar2.z, 0,0,1, 0,0, cr, cg, cb, std::min(1.0f, ca + 0.15f) });
+                        lineVertices.push_back({ tip2.x, tip2.y, tip2.z, 0,0,1, 0,0, cr, cg, cb, std::min(1.0f, ca + 0.15f) });
+                        lineVertices.push_back({ rightBar2.x, rightBar2.y, rightBar2.z, 0,0,1, 0,0, cr, cg, cb, std::min(1.0f, ca + 0.15f) });
+
+                        lineIndices.push_back(aIdx2 + 0);
+                        lineIndices.push_back(aIdx2 + 1);
+                        lineIndices.push_back(aIdx2 + 2);
+                        lineIndices.push_back(aIdx2 + 3);
+                    }
+
+                    // Drop-off ledge indicator for non-climbable drops
+                    if (!isTwoWay && deltaZ < -32.0f) {
+                        Vector3 dropPt = start + fwd * 6.0f;
+                        uint32_t dIdx = static_cast<uint32_t>(lineVertices.size());
+                        lineVertices.push_back({ dropPt.x, dropPt.y, dropPt.z, 0,0,1, 0,0, 1.0f, 0.45f, 0.1f, 1.0f });
+                        lineVertices.push_back({ dropPt.x, dropPt.y, dropPt.z - 12.0f, 0,0,1, 0,0, 1.0f, 0.45f, 0.1f, 1.0f });
+                        lineIndices.push_back(dIdx + 0);
+                        lineIndices.push_back(dIdx + 1);
+                    }
                 }
             }
         }

@@ -395,6 +395,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 if (g_editorUI) g_editorUI->TogglePathPanel();
             } else if (key == GLFW_KEY_COMMA && (mods & GLFW_MOD_CONTROL) != 0) { // Ctrl+,: Preferences
                 if (g_editorUI) g_editorUI->OpenPreferences();
+            } else if (key == GLFW_KEY_L && (mods & GLFW_MOD_CONTROL) != 0) { // Ctrl+L: Landmarks / Spawns
+                if (g_editorUI) g_editorUI->OpenLandmarksModal();
             } else if (key == GLFW_KEY_A && (mods & GLFW_MOD_CONTROL) != 0) { // Ctrl+A: Select All
                 g_activeScene->SelectAllAreas();
             } else if (key == GLFW_KEY_ESCAPE) {
@@ -651,7 +653,7 @@ static void ProcessInput(GLFWwindow* window, float deltaTime) {
 
 static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
     static std::string lastTitle = "";
-    std::string title = "NavStudio v1.5.0";
+    std::string title = "NavStudio v1.5.1";
     if (scene.HasBSP() || scene.HasNAV()) {
         std::string map = "";
         if (scene.HasBSP()) {
@@ -675,7 +677,7 @@ static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
 
 int main(int argc, char* argv[]) {
     std::printf("====================================================\n");
-    std::printf("  NavStudio v1.5.0\n");
+    std::printf("  NavStudio v1.5.1\n");
     std::printf("====================================================\n");
 
     if (!glfwInit()) {
@@ -692,7 +694,7 @@ int main(int argc, char* argv[]) {
 
     int initialWidth = 1440;
     int initialHeight = 900;
-    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.5.0", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.5.1", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "[Error] Failed to create GLFW window\n");
         glfwTerminate();

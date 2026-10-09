@@ -9,6 +9,8 @@
 #include <cmath>
 #include <queue>
 #include <unordered_map>
+#include <filesystem>
+#include <chrono>
 #include <imgui.h>
 
 EditorScene::EditorScene()
@@ -452,6 +454,7 @@ bool EditorScene::GenerateNavMesh(const NavGenerateOptions& options) {
     m_selectedAreaId = 0;
     m_hoveredAreaId = 0;
     m_isModified = true;
+    m_nav->BuildLadders(m_bsp.get());
     PostGenerateOptimize();
     RebuildNavRenderer();
     return true;
@@ -3597,3 +3600,178 @@ bool EditorScene::CheckClearance(const Vector3& pos, bool crouch, float* outCeil
 
     return true;
 }
+
+// --- Map Landmarks & Teleport (Spawn Points, Objectives) ---
+
+std::vector<EditorScene::MapLandmark> EditorScene::GetMapLandmarks() const {
+    std::vector<MapLandmark> landmarks;
+    if (!m_entityRenderer.IsLoaded()) return landmarks;
+
+    const auto& entities = m_entityRenderer.GetEntities();
+    int ctCount = 1, tCount = 1, vipCount = 1, bombCount = 1, hostageCount = 1, rescueCount = 1, armouryCount = 1, ladderCount = 1;
+
+    for (size_t i = 0; i < entities.size(); ++i) {
+        const auto& ent = entities[i];
+        if (ent.classname == "info_player_start") {
+            landmarks.push_back({ "CT Spawn #" + std::to_string(ctCount++), "Spawns", ent.origin, static_cast<int>(i) });
+        } else if (ent.classname == "info_player_deathmatch") {
+            landmarks.push_back({ "T Spawn #" + std::to_string(tCount++), "Spawns", ent.origin, static_cast<int>(i) });
+        } else if (ent.classname == "info_vip_start") {
+            landmarks.push_back({ "VIP Spawn #" + std::to_string(vipCount++), "Objectives", ent.origin, static_cast<int>(i) });
+        } else if (ent.classname == "func_bomb_target" || ent.classname == "info_bomb_target") {
+            landmarks.push_back({ "Bomb Site " + (ent.targetname.empty() ? ("#" + std::to_string(bombCount++)) : ent.targetname), "Objectives", ent.origin, static_cast<int>(i) });
+        } else if (ent.classname == "hostage_entity") {
+            landmarks.push_back({ "Hostage #" + std::to_string(hostageCount++), "Objectives", ent.origin, static_cast<int>(i) });
+        } else if (ent.classname == "info_hostage_goal" || ent.classname == "func_hostage_rescue") {
+            landmarks.push_back({ "Rescue Zone #" + std::to_string(rescueCount++), "Objectives", ent.origin, static_cast<int>(i) });
+        } else if (ent.classname == "func_vip_safetyzone" || ent.classname == "func_escapezone") {
+            landmarks.push_back({ "Escape Zone", "Objectives", ent.origin, static_cast<int>(i) });
+        } else if (ent.classname == "armoury_entity") {
+            landmarks.push_back({ "Armoury Item #" + std::to_string(armouryCount++), "Items", ent.origin, static_cast<int>(i) });
+        } else if (ent.classname == "func_ladder") {
+            landmarks.push_back({ "Ladder #" + std::to_string(ladderCount++), "Ladders", ent.origin, static_cast<int>(i) });
+        }
+    }
+    return landmarks;
+}
+
+// --- Autosave Crash & Recovery ---
+
+bool EditorScene::CheckAutosaveRecovery(std::string& outBakPath, std::string& outNavPath, int64_t* outBakAgeSec) const {
+    if (m_navPath.empty() && m_bspPath.empty()) return false;
+
+    std::string baseNav = m_navPath;
+    if (baseNav.empty() && !m_bspPath.empty()) {
+        size_t dotPos = m_bspPath.find_last_of('.');
+        baseNav = (dotPos != std::string::npos ? m_bspPath.substr(0, dotPos) : m_bspPath) + ".nav";
+    }
+
+    std::string bakPath = baseNav + ".bak";
+    if (!std::filesystem::exists(bakPath)) return false;
+
+    outBakPath = bakPath;
+    outNavPath = baseNav;
+
+    try {
+        auto bakTime = std::filesystem::last_write_time(bakPath);
+        if (std::filesystem::exists(baseNav)) {
+            auto navTime = std::filesystem::last_write_time(baseNav);
+            if (bakTime > navTime) {
+                if (outBakAgeSec) {
+                    auto diff = std::chrono::duration_cast<std::chrono::seconds>(bakTime - navTime).count();
+                    *outBakAgeSec = static_cast<int64_t>(diff);
+                }
+                return true;
+            }
+        } else {
+            if (outBakAgeSec) *outBakAgeSec = 0;
+            return true;
+        }
+    } catch (...) {}
+
+    return false;
+}
+
+// --- Multi-Area Alignment & Layout ---
+
+void EditorScene::AlignSelectedAreas(AlignMode mode, CommandManager& cmdMgr) {
+    if (!m_nav || !m_nav->IsLoaded() || m_selectedAreaIds.size() < 2) return;
+
+    uint32_t refId = (m_selectedAreaId != 0) ? m_selectedAreaId : m_selectedAreaIds[0];
+    NavArea* refArea = m_nav->GetAreaByID(refId);
+    if (!refArea) return;
+
+    const NavExtent& refExt = refArea->GetExtent();
+    float refCenterZ = refArea->GetCenter().z;
+
+    std::vector<std::unique_ptr<IEditCommand>> subCmds;
+
+    for (uint32_t aid : m_selectedAreaIds) {
+        if (aid == refId) continue;
+        NavArea* a = m_nav->GetAreaByID(aid);
+        if (!a) continue;
+
+        NavExtent oldExt = a->GetExtent();
+        NavExtent newExt = oldExt;
+        float oldNeZ = a->GetNEZ();
+        float oldSwZ = a->GetSWZ();
+        float newNeZ = oldNeZ;
+        float newSwZ = oldSwZ;
+
+        switch (mode) {
+            case ALIGN_MIN_X: {
+                float shift = refExt.lo.x - oldExt.lo.x;
+                newExt.lo.x += shift;
+                newExt.hi.x += shift;
+                break;
+            }
+            case ALIGN_MAX_X: {
+                float shift = refExt.hi.x - oldExt.hi.x;
+                newExt.lo.x += shift;
+                newExt.hi.x += shift;
+                break;
+            }
+            case ALIGN_MIN_Y: {
+                float shift = refExt.lo.y - oldExt.lo.y;
+                newExt.lo.y += shift;
+                newExt.hi.y += shift;
+                break;
+            }
+            case ALIGN_MAX_Y: {
+                float shift = refExt.hi.y - oldExt.hi.y;
+                newExt.lo.y += shift;
+                newExt.hi.y += shift;
+                break;
+            }
+            case ALIGN_CENTER_X: {
+                float refMid = (refExt.lo.x + refExt.hi.x) * 0.5f;
+                float curMid = (oldExt.lo.x + oldExt.hi.x) * 0.5f;
+                float shift = refMid - curMid;
+                newExt.lo.x += shift;
+                newExt.hi.x += shift;
+                break;
+            }
+            case ALIGN_CENTER_Y: {
+                float refMid = (refExt.lo.y + refExt.hi.y) * 0.5f;
+                float curMid = (oldExt.lo.y + oldExt.hi.y) * 0.5f;
+                float shift = refMid - curMid;
+                newExt.lo.y += shift;
+                newExt.hi.y += shift;
+                break;
+            }
+            case ALIGN_FLOOR_Z: {
+                float curMidZ = (oldExt.lo.z + oldExt.hi.z + oldNeZ + oldSwZ) * 0.25f;
+                float shift = refCenterZ - curMidZ;
+                newExt.lo.z += shift;
+                newExt.hi.z += shift;
+                newNeZ += shift;
+                newSwZ += shift;
+                break;
+            }
+        }
+
+        subCmds.push_back(std::make_unique<CmdTransformArea>(this, aid, oldExt, newExt, oldNeZ, oldSwZ, newNeZ, newSwZ));
+    }
+
+    if (!subCmds.empty()) {
+        cmdMgr.ExecuteCommand(std::make_unique<CmdCompound>(std::move(subCmds)));
+    }
+}
+
+// --- Ladder Management (func_ladder integration) ---
+
+size_t EditorScene::BuildLaddersFromBSP() {
+    if (!m_bsp || !m_bsp->IsLoaded() || !m_nav || !m_nav->IsLoaded()) return 0;
+    m_nav->BuildLadders(m_bsp.get());
+    m_isModified = true;
+    RebuildNavRenderer();
+    return m_nav->GetLadders().size();
+}
+
+void EditorScene::ClearLadders() {
+    if (!m_nav || !m_nav->IsLoaded()) return;
+    m_nav->ClearLadders();
+    m_isModified = true;
+    RebuildNavRenderer();
+}
+

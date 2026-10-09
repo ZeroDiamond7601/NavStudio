@@ -34,6 +34,7 @@ public:
     void ExecutePendingAction(EditorScene& scene, CommandManager& cmdMgr);
     void OpenPreferences() { m_showPreferencesModal = true; }
     void OpenIslandModal() { m_showIslandModal = true; }
+    void OpenLandmarksModal() { m_showLandmarksModal = true; }
     void ToggleCommandPalette() {
         m_showCommandPalette = !m_showCommandPalette;
         m_commandPaletteFilter[0] = '\0';
@@ -74,6 +75,8 @@ private:
     void RenderClearanceHUD(EditorScene& scene);
     void RenderViewportCompass(EditorScene& scene, Camera& camera, float screenW, float screenH);
     void RenderCommandPalette(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
+    void RenderLandmarksModal(EditorScene& scene, Camera& camera);
+    void RenderAutosaveRecoveryModal(EditorScene& scene, CommandManager& cmdMgr);
 
     bool m_mouseOverUI;
     bool m_requestQuit;
@@ -126,6 +129,13 @@ private:
     bool m_commandPaletteFocus{false};
     char m_commandPaletteFilter[128]{""};
     int m_commandPaletteSelectedIndex{0};
+    bool m_showLandmarksModal{false};
+    char m_landmarkFilter[64]{""};
+    bool m_showRecoveryModal{false};
+    std::string m_recoveryBakPath;
+    std::string m_recoveryNavPath;
+    int64_t m_recoveryBakAgeSec{0};
+    std::string m_lastCheckedRecoveryMap;
 };
 
 #endif // EDITOR_UI_H

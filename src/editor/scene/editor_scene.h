@@ -157,6 +157,7 @@ public:
         }
         return "";
     }
+    void SetNAVPath(const std::string& path) { m_navPath = path; }
 
     bool HasBSP() const { return m_bsp && m_bsp->IsLoaded(); }
     bool HasNAV() const { return m_nav && m_nav->IsLoaded(); }
@@ -339,6 +340,35 @@ public:
     bool GetClearanceCrouch() const { return m_clearanceCrouch; }
     void SetClearanceCrouch(bool crouch) { m_clearanceCrouch = crouch; }
     bool CheckClearance(const Vector3& pos, bool crouch, float* outCeilingDist = nullptr) const;
+
+    // Map Landmarks & Teleport (Spawn Points, Objectives, Zones)
+    struct MapLandmark {
+        std::string name;
+        std::string category;
+        Vector3 origin;
+        int entityIndex{-1};
+    };
+    std::vector<MapLandmark> GetMapLandmarks() const;
+
+    // Autosave Crash & Recovery
+    bool CheckAutosaveRecovery(std::string& outBakPath, std::string& outNavPath, int64_t* outBakAgeSec = nullptr) const;
+
+    // Multi-Area Alignment & Layout
+    enum AlignMode {
+        ALIGN_MIN_X = 0,
+        ALIGN_MAX_X,
+        ALIGN_MIN_Y,
+        ALIGN_MAX_Y,
+        ALIGN_CENTER_X,
+        ALIGN_CENTER_Y,
+        ALIGN_FLOOR_Z
+    };
+    void AlignSelectedAreas(AlignMode mode, class CommandManager& cmdMgr);
+
+    // Ladder Management (func_ladder integration)
+    size_t BuildLaddersFromBSP();
+    void ClearLadders();
+    size_t GetLadderCount() const { return (m_nav && m_nav->IsLoaded()) ? m_nav->GetLadders().size() : 0; }
 
     // User Preferences
     EditorPreferences& GetPreferences() { return m_prefs; }

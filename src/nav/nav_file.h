@@ -53,10 +53,10 @@ public:
     NavArea* DuplicateArea(uint32_t sourceId, const Vector3& offset = Vector3(32.0f, 32.0f, 0.0f));
     bool ConnectAreas(uint32_t fromId, uint32_t toId, bool bidirectional = true, int explicitDir = -1);
     bool DisconnectAreas(uint32_t fromId, uint32_t toId, bool bidirectional = false);
+    void ClearLadders();
 
 private:
     bool PostLoad();
-    void ClearLadders();
 
 private:
     bool m_loaded;

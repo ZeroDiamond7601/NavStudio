@@ -328,6 +328,28 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
         RenderCommandPalette(scene, camera, cmdMgr);
     }
 
+    // Map Landmarks & Teleport Modal
+    if (m_showLandmarksModal) {
+        RenderLandmarksModal(scene, camera);
+    }
+
+    // Autosave Crash & Recovery Modal
+    std::string curMap = scene.HasBSP() ? scene.GetBSP().GetMapName() : scene.GetNAVPath();
+    if (!curMap.empty() && curMap != m_lastCheckedRecoveryMap && !scene.IsLoading()) {
+        m_lastCheckedRecoveryMap = curMap;
+        std::string bak, nav;
+        int64_t age = 0;
+        if (scene.CheckAutosaveRecovery(bak, nav, &age)) {
+            m_showRecoveryModal = true;
+            m_recoveryBakPath = bak;
+            m_recoveryNavPath = nav;
+            m_recoveryBakAgeSec = age;
+        }
+    }
+    if (m_showRecoveryModal) {
+        RenderAutosaveRecoveryModal(scene, cmdMgr);
+    }
+
     if (scene.IsLoading()) {
         RenderLoadingModal(scene);
     } else if (scene.HasLoadingError()) {
@@ -803,6 +825,15 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                 m_optimizeStats = scene.OptimizeMesh(cmdMgr, false);
                 m_showOptimizeModal = true;
             }
+            if (ImGui::MenuItem("Build Ladders from BSP (func_ladder)", nullptr, false, scene.HasBSP() && scene.HasNAV())) {
+                scene.BuildLaddersFromBSP();
+            }
+            if (ImGui::MenuItem("Clear All Ladders", nullptr, false, scene.HasNAV() && scene.GetLadderCount() > 0)) {
+                scene.ClearLadders();
+            }
+            if (ImGui::MenuItem("Teleport to Landmark...", "Ctrl+L", false, scene.HasBSP())) {
+                m_showLandmarksModal = true;
+            }
 
             ImGui::Separator();
             if (ImGui::MenuItem("Auto-Generate NavMesh...", "Ctrl+G", false, scene.HasBSP())) {
@@ -913,6 +944,11 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         if (ImGui::Button("Command Palette [Ctrl+P]", ImVec2(-1, 24))) {
             ToggleCommandPalette();
         }
+
+        if (ImGui::Button("Landmarks / Spawns [Ctrl+L]", ImVec2(-1, 24))) {
+            m_showLandmarksModal = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Quick teleport camera to spawns, bomb sites, hostages, rescue zones [Ctrl+L]");
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -1582,6 +1618,48 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
                 scene.BatchDuplicate(cmdMgr);
             }
 
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Text("Area Alignment & Layout:");
+            float alignBtnW = (ImGui::GetContentRegionAvail().x - 8.0f) / 3.0f;
+            if (ImGui::Button("Min X##align", ImVec2(alignBtnW, 24))) {
+                scene.AlignSelectedAreas(EditorScene::ALIGN_MIN_X, cmdMgr);
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Align left edges to minimum X");
+            ImGui::SameLine();
+            if (ImGui::Button("Center X##align", ImVec2(alignBtnW, 24))) {
+                scene.AlignSelectedAreas(EditorScene::ALIGN_CENTER_X, cmdMgr);
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Align centers along X axis");
+            ImGui::SameLine();
+            if (ImGui::Button("Max X##align", ImVec2(alignBtnW, 24))) {
+                scene.AlignSelectedAreas(EditorScene::ALIGN_MAX_X, cmdMgr);
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Align right edges to maximum X");
+
+            if (ImGui::Button("Min Y##align", ImVec2(alignBtnW, 24))) {
+                scene.AlignSelectedAreas(EditorScene::ALIGN_MIN_Y, cmdMgr);
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Align bottom/back edges to minimum Y");
+            ImGui::SameLine();
+            if (ImGui::Button("Center Y##align", ImVec2(alignBtnW, 24))) {
+                scene.AlignSelectedAreas(EditorScene::ALIGN_CENTER_Y, cmdMgr);
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Align centers along Y axis");
+            ImGui::SameLine();
+            if (ImGui::Button("Max Y##align", ImVec2(alignBtnW, 24))) {
+                scene.AlignSelectedAreas(EditorScene::ALIGN_MAX_Y, cmdMgr);
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Align top/front edges to maximum Y");
+
+            if (ImGui::Button("Flatten Floor Z##align", ImVec2(-1, 24))) {
+                scene.AlignSelectedAreas(EditorScene::ALIGN_FLOOR_Z, cmdMgr);
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Flattens floor elevation of all selected areas to match average elevation");
+
+            ImGui::Spacing();
+            ImGui::Separator();
+
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.70f, 0.20f, 0.20f, 0.8f));
             if (ImGui::Button("Delete All [X]", ImVec2(-1, 26))) {
                 scene.BatchDelete(cmdMgr);
@@ -2115,6 +2193,18 @@ void EditorUI::RenderNavMeshGlobalInspector(EditorScene& scene, CommandManager& 
         scene.BatchSnapToFloor(cmdMgr);
     }
     if (!hasBSP) ImGui::EndDisabled();
+
+    if (!hasBSP) ImGui::BeginDisabled();
+    if (ImGui::Button("Build Ladders from BSP (func_ladder)", ImVec2(-1, 24))) {
+        scene.BuildLaddersFromBSP();
+    }
+    if (!hasBSP) ImGui::EndDisabled();
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Detects func_ladder brush entities in BSP and creates nav ladders");
+
+    if (ImGui::Button("Clear All Ladders", ImVec2(-1, 24))) {
+        scene.ClearLadders();
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Removes all nav ladders from current mesh");
 
     if (ImGui::Button("Save NAV Mesh [Ctrl+S]", ImVec2(-1, 26))) {
         bool saved = false;
@@ -3572,6 +3662,16 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
             { "View", "Cycle Shading Mode", "F4", [&]() { int n = (static_cast<int>(scene.GetBSPMode()) + 1) % 4; scene.SetBSPMode(static_cast<BSPRenderMode>(n)); } },
             { "View", "Toggle Connection Validity Overlay", "Ctrl+Shift+V", [&]() { auto& r = scene.GetNavRenderer(); r.SetShowConnectionValidity(!r.GetShowConnectionValidity()); scene.RebuildNavRenderer(); } },
             { "View", "Toggle Island Color Coding", "", [&]() { scene.ToggleIslandColors(); } },
+            { "View", "Teleport to Map Landmark...", "Ctrl+L", [&]() { if (scene.HasBSP()) m_showLandmarksModal = true; } },
+            { "Generate", "Build Ladders from BSP (func_ladder)", "", [&]() { if (scene.HasBSP() && scene.HasNAV()) scene.BuildLaddersFromBSP(); } },
+            { "Edit", "Clear All Ladders", "", [&]() { if (scene.HasNAV()) scene.ClearLadders(); } },
+            { "Edit", "Align Selected Areas: Min X (Left)", "", [&]() { scene.AlignSelectedAreas(EditorScene::ALIGN_MIN_X, cmdMgr); } },
+            { "Edit", "Align Selected Areas: Max X (Right)", "", [&]() { scene.AlignSelectedAreas(EditorScene::ALIGN_MAX_X, cmdMgr); } },
+            { "Edit", "Align Selected Areas: Min Y (Back)", "", [&]() { scene.AlignSelectedAreas(EditorScene::ALIGN_MIN_Y, cmdMgr); } },
+            { "Edit", "Align Selected Areas: Max Y (Front)", "", [&]() { scene.AlignSelectedAreas(EditorScene::ALIGN_MAX_Y, cmdMgr); } },
+            { "Edit", "Align Selected Areas: Center X", "", [&]() { scene.AlignSelectedAreas(EditorScene::ALIGN_CENTER_X, cmdMgr); } },
+            { "Edit", "Align Selected Areas: Center Y", "", [&]() { scene.AlignSelectedAreas(EditorScene::ALIGN_CENTER_Y, cmdMgr); } },
+            { "Edit", "Align Selected Areas: Flatten Floor Z", "", [&]() { scene.AlignSelectedAreas(EditorScene::ALIGN_FLOOR_Z, cmdMgr); } },
             { "Preferences", "Open Preferences", "Ctrl+,", [&]() { OpenPreferences(); } },
             { "Help", "Documentation & Shortcuts", "F1", [&]() { m_showHelpModal = true; } }
         };
@@ -3652,4 +3752,126 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor(2);
 }
+
+void EditorUI::RenderLandmarksModal(EditorScene& scene, Camera& camera) {
+    ImGui::SetNextWindowSize(ImVec2(520, 440), ImGuiCond_Appearing);
+    if (!ImGui::IsPopupOpen("Map Landmarks & Spawns")) {
+        ImGui::OpenPopup("Map Landmarks & Spawns");
+    }
+
+    if (ImGui::BeginPopupModal("Map Landmarks & Spawns", &m_showLandmarksModal, ImGuiWindowFlags_NoResize)) {
+        ImGui::Text("Quick-Jump / Teleport Camera to Key Map Points");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##landmarkFilter", "Filter landmarks (e.g. spawn, bomb, hostage)...", m_landmarkFilter, sizeof(m_landmarkFilter));
+        ImGui::Spacing();
+
+        auto landmarks = scene.GetMapLandmarks();
+        std::string filterLower = m_landmarkFilter;
+        std::transform(filterLower.begin(), filterLower.end(), filterLower.begin(), ::tolower);
+
+        if (landmarks.empty()) {
+            ImGui::TextDisabled("No landmarks found in current map or entities are empty.");
+        } else {
+            if (ImGui::BeginChild("##landmarkList", ImVec2(0, 310), true)) {
+                for (size_t i = 0; i < landmarks.size(); ++i) {
+                    const auto& lm = landmarks[i];
+                    std::string labelStr = lm.name + " (" + lm.category + ")";
+                    std::string searchStr = labelStr;
+                    std::transform(searchStr.begin(), searchStr.end(), searchStr.begin(), ::tolower);
+
+                    if (!filterLower.empty() && searchStr.find(filterLower) == std::string::npos) {
+                        continue;
+                    }
+
+                    ImGui::PushID(static_cast<int>(i));
+
+                    ImVec4 typeCol(0.7f, 0.7f, 0.7f, 1.0f);
+                    if (lm.category.find("Spawn") != std::string::npos) {
+                        typeCol = (lm.name.find("CT") != std::string::npos) ? ImVec4(0.3f, 0.7f, 1.0f, 1.0f) : ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
+                    } else if (lm.category.find("Bomb") != std::string::npos || lm.name.find("Bomb") != std::string::npos) {
+                        typeCol = ImVec4(1.0f, 0.8f, 0.2f, 1.0f);
+                    } else if (lm.name.find("Hostage") != std::string::npos) {
+                        typeCol = ImVec4(0.4f, 1.0f, 0.4f, 1.0f);
+                    } else if (lm.category.find("Ladders") != std::string::npos) {
+                        typeCol = ImVec4(1.0f, 0.6f, 0.2f, 1.0f);
+                    }
+
+                    ImGui::TextColored(typeCol, "[%s]", lm.category.c_str());
+                    ImGui::SameLine();
+                    if (ImGui::Selectable(lm.name.c_str(), false, ImGuiSelectableFlags_None, ImVec2(ImGui::GetContentRegionAvail().x - 70.0f, 0))) {
+                        camera.FocusOn(lm.origin, 300.0f);
+                        m_showLandmarksModal = false;
+                        ImGui::CloseCurrentPopup();
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Click to teleport camera to (%.0f, %.0f, %.0f)", lm.origin.x, lm.origin.y, lm.origin.z);
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Jump")) {
+                        camera.FocusOn(lm.origin, 300.0f);
+                        m_showLandmarksModal = false;
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::PopID();
+                }
+            }
+            ImGui::EndChild();
+        }
+
+        ImGui::Spacing();
+        if (ImGui::Button("Close", ImVec2(-1, 26))) {
+            m_showLandmarksModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderAutosaveRecoveryModal(EditorScene& scene, CommandManager& cmdMgr) {
+    ImGui::SetNextWindowSize(ImVec2(520, 260), ImGuiCond_Appearing);
+    if (!ImGui::IsPopupOpen("Autosave Recovery Detected")) {
+        ImGui::OpenPopup("Autosave Recovery Detected");
+    }
+
+    if (ImGui::BeginPopupModal("Autosave Recovery Detected", &m_showRecoveryModal, ImGuiWindowFlags_NoResize)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Newer Backup Found!");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextWrapped("NavStudio detected an autosave backup file (.nav.bak) that is newer than your saved navigation mesh.");
+        ImGui::Spacing();
+        ImGui::TextDisabled("Backup: %s", m_recoveryBakPath.c_str());
+        ImGui::TextDisabled("Active: %s", m_recoveryNavPath.c_str());
+        if (m_recoveryBakAgeSec > 0) {
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "The backup contains changes saved %lld seconds after the active file.", static_cast<long long>(m_recoveryBakAgeSec));
+        }
+
+        ImGui::Spacing();
+        ImGui::Text("Would you like to restore this autosave backup?");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        float btnW = (ImGui::GetContentRegionAvail().x - 12.0f) / 2.0f;
+        if (ImGui::Button("Restore Backup (.nav.bak)", ImVec2(btnW, 30))) {
+            if (scene.LoadNAV(m_recoveryBakPath)) {
+                scene.SetNAVPath(m_recoveryNavPath);
+                cmdMgr.Clear();
+                scene.RebuildNavRenderer();
+            }
+            m_showRecoveryModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Keep Active NAV (.nav)", ImVec2(btnW, 30))) {
+            m_showRecoveryModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
 
