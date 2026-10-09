@@ -491,6 +491,7 @@ public:
     bool ConvertNavToWaypoints(BotType bot, GameMod mod);
     size_t ConvertWaypointsToNav();
     void RebuildWaypointRenderer();
+    WaypointGraph::WaypointAnalysisStats AutoAnalyzeWaypoints();
 
     // User Preferences
     EditorPreferences& GetPreferences() { return m_prefs; }

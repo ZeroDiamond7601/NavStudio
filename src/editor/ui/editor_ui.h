@@ -77,7 +77,7 @@ private:
     void RenderBatchGenerateModal(EditorScene& scene);
     void RenderUnsavedModal(EditorScene& scene, CommandManager& cmdMgr);
     void RenderSaveSuccessModal();
-    void RenderAnalyzerModal();
+    void RenderAnalyzerModal(EditorScene& scene, CommandManager& cmdMgr);
     void RenderOptimizeModal();
     void RenderNavMeshGlobalInspector(EditorScene& scene, CommandManager& cmdMgr);
     void RenderBSPGlobalInspector(EditorScene& scene);
@@ -150,7 +150,9 @@ private:
     std::string m_saveSuccessMessage;
 
     bool m_showAnalyzerModal{false};
+    bool m_analyzerTargetWaypoints{false};
     EditorScene::AnalyzerStats m_analyzerStats;
+    WaypointGraph::WaypointAnalysisStats m_waypointAnalyzerStats;
     bool m_showOptimizeModal{false};
     EditorScene::OptimizeMeshStats m_optimizeStats;
     bool m_showStatsOverlay{true};

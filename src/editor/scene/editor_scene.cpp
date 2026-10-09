@@ -4784,3 +4784,14 @@ void EditorScene::RebuildWaypointRenderer() {
     }
 }
 
+WaypointGraph::WaypointAnalysisStats EditorScene::AutoAnalyzeWaypoints() {
+    auto stats = m_waypoints.AnalyzeGraph(m_bsp.get(), m_waypoints.GetActiveMod());
+    RebuildWaypointRenderer();
+    ShowToast("Waypoint Analysis: " + std::to_string(stats.totalModified) + " nodes updated (" +
+              std::to_string(stats.crouchAssigned) + " crouch, " +
+              std::to_string(stats.jumpAssigned) + " jump, " +
+              std::to_string(stats.campAnglesCalculated) + " camp sightlines, " +
+              std::to_string(stats.blockedLinksPruned) + " blocked links pruned)!");
+    return stats;
+}
+

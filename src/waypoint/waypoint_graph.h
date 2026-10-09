@@ -74,6 +74,20 @@ public:
     // Auto-Link Tool (creates links between nodes with clear line of sight and within reach)
     size_t AutoLinkNodes(float maxDist = 300.0f);
 
+    // Automated Waypoint Analyzer (integrating CS-EBOT NavMesh-like analysis & YaPB graph optimization)
+    struct WaypointAnalysisStats {
+        size_t totalScanned{0};
+        size_t crouchAssigned{0};
+        size_t jumpAssigned{0};
+        size_t fallRiskAssigned{0};
+        size_t campAnglesCalculated{0};
+        size_t zombieCampsAssigned{0};
+        size_t blockedLinksPruned{0};
+        size_t totalModified{0};
+    };
+
+    WaypointAnalysisStats AnalyzeGraph(const class BSPFile* bsp = nullptr, GameMod mod = GameMod::Standard);
+
 private:
     std::vector<WaypointNode> m_nodes;
     uint32_t m_nextId{1};

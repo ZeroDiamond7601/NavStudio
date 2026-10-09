@@ -1,5 +1,6 @@
 #include "waypoint/waypoint_graph.h"
 #include "waypoint/compressor.h"
+#include "bsp/bsp_file.h"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -116,6 +117,143 @@ size_t WaypointGraph::AutoLinkNodes(float maxDist) {
         }
     }
     return created;
+}
+
+WaypointGraph::WaypointAnalysisStats WaypointGraph::AnalyzeGraph(const BSPFile* bsp, GameMod mod) {
+    WaypointAnalysisStats stats;
+    stats.totalScanned = m_nodes.size();
+
+    bool hasBsp = (bsp && bsp->IsLoaded());
+
+    for (auto& node : m_nodes) {
+        bool nodeModified = false;
+
+        // 1. BSP Geometry Analysis: Headroom / Crouch (CS-EBOT & NavMesh style)
+        if (hasBsp) {
+            Vector3 start(node.origin.x, node.origin.y, node.origin.z + 4.0f);
+            Vector3 end(node.origin.x, node.origin.y, node.origin.z + 74.0f);
+            BSPTraceResult tr;
+            if (bsp->TraceWorld(start, end, HULL_POINT, &tr)) {
+                if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f) {
+                    float clearance = tr.endpos.z - node.origin.z;
+                    if (clearance < 72.0f && clearance >= 24.0f) {
+                        if (!(node.flags & WPT_FLAG_CROUCH)) {
+                            node.flags |= WPT_FLAG_CROUCH;
+                            stats.crouchAssigned++;
+                            nodeModified = true;
+                        }
+                    }
+                }
+            }
+
+            // Fall hazard / high ledge check (> 150u drop without floor)
+            Vector3 fallStart(node.origin.x, node.origin.y, node.origin.z + 8.0f);
+            Vector3 fallEnd(node.origin.x, node.origin.y, node.origin.z - 200.0f);
+            BSPTraceResult trFall;
+            if (bsp->TraceWorld(fallStart, fallEnd, HULL_POINT, &trFall)) {
+                if (trFall.fraction > 0.75f || (trFall.fraction == 1.0f && !trFall.startsolid)) {
+                    if (!(node.flags & WPT_FLAG_FALLRISK)) {
+                        node.flags |= WPT_FLAG_FALLRISK;
+                        stats.fallRiskAssigned++;
+                        nodeModified = true;
+                    }
+                }
+            }
+
+            // Line-of-sight & Camp / Sniper aim optimizer (YaPB style radial sightline analysis)
+            bool isCamp = (node.flags & (WPT_FLAG_CAMP | WPT_FLAG_SNIPER | WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZMHMCAMP)) != 0;
+            if (isCamp && (node.campYaw == 0.0f && node.campPitch == 0.0f)) {
+                float bestDist = 0.0f;
+                float bestYaw = 0.0f;
+                float eyeZ = node.origin.z + ((node.flags & WPT_FLAG_CROUCH) ? 18.0f : 24.0f);
+                Vector3 eyePos(node.origin.x, node.origin.y, eyeZ);
+
+                // Sample 16 horizontal directions (every 22.5 degrees)
+                for (int a = 0; a < 16; ++a) {
+                    float angDeg = a * 22.5f;
+                    float rad = angDeg * (3.14159265f / 180.0f);
+                    Vector3 rayDir(std::cos(rad), std::sin(rad), 0.0f);
+                    Vector3 rayEnd = eyePos + rayDir * 2048.0f;
+
+                    BSPTraceResult trSight;
+                    if (bsp->TraceWorld(eyePos, rayEnd, HULL_POINT, &trSight)) {
+                        float dist = (trSight.endpos - eyePos).Length();
+                        if (dist > bestDist) {
+                            bestDist = dist;
+                            bestYaw = angDeg;
+                        }
+                    }
+                }
+
+                if (bestDist > 200.0f) {
+                    node.campYaw = bestYaw;
+                    node.campPitch = 0.0f;
+                    stats.campAnglesCalculated++;
+                    nodeModified = true;
+                }
+            }
+        }
+
+        // 2. Link & Connection Analysis: Step jumps & wall blockage (YaPB clean_paths style)
+        for (int i = 0; i < WPT_MAX_CONNECTIONS; ++i) {
+            int16_t targetId = node.connections[i];
+            if (targetId < 0) continue;
+
+            WaypointNode* target = GetNodeByID(static_cast<uint32_t>(targetId));
+            if (!target) {
+                node.connections[i] = -1;
+                node.connectionFlags[i] = 0;
+                stats.blockedLinksPruned++;
+                nodeModified = true;
+                continue;
+            }
+
+            // Step elevation requiring jump
+            float dz = target->origin.z - node.origin.z;
+            if (dz > 18.0f && dz <= 45.0f) {
+                if (!(node.flags & WPT_FLAG_JUMP)) {
+                    node.flags |= WPT_FLAG_JUMP;
+                    stats.jumpAssigned++;
+                    nodeModified = true;
+                }
+                node.connectionFlags[i] |= WPT_CONN_JUMP;
+            }
+
+            // Path blockage check (YaPB clean_paths_on_finish)
+            if (hasBsp) {
+                Vector3 p1 = node.origin + Vector3(0.0f, 0.0f, 18.0f);
+                Vector3 p2 = target->origin + Vector3(0.0f, 0.0f, 18.0f);
+                BSPTraceResult trPath;
+                if (bsp->TraceWorld(p1, p2, HULL_POINT, &trPath)) {
+                    if (!trPath.startsolid && !trPath.allsolid && trPath.fraction < 0.92f) {
+                        node.connections[i] = -1;
+                        node.connectionFlags[i] = 0;
+                        stats.blockedLinksPruned++;
+                        nodeModified = true;
+                    }
+                }
+            }
+        }
+
+        // 3. Mod-Specific Analysis: Zombie Plague dead-end human camp mesh (CS-EBOT / SyPB style)
+        if (mod == GameMod::ZombiePlague) {
+            int activeConns = 0;
+            for (int i = 0; i < WPT_MAX_CONNECTIONS; ++i) {
+                if (node.connections[i] >= 0) activeConns++;
+            }
+            if (activeConns == 1 && !(node.flags & (WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZMHMCAMP))) {
+                node.flags |= WPT_FLAG_HMCAMPMESH;
+                stats.zombieCampsAssigned++;
+                nodeModified = true;
+            }
+        }
+
+        if (nodeModified) {
+            stats.totalModified++;
+        }
+    }
+
+    return stats;
 }
 
 // --- High-Level Dispatch Load / Save ---

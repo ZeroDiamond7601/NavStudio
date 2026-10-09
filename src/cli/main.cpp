@@ -21,6 +21,7 @@ static void PrintHelp() {
     std::cout << "  generate <map.bsp> [out.nav]  Auto-generate navigation mesh for a BSP map\n";
     std::cout << "  batch <maps_dir>              Mass-produce navigation meshes for all maps in directory\n";
     std::cout << "  convert <in> <out> [opts]     Convert bidirectionally between NAV and Bot Waypoints\n";
+    std::cout << "  analyze <file> [map.bsp]      Auto-analyze flags, crouch, jumps & sightlines (Nav & Waypoints)\n";
     std::cout << "  <map.bsp|map.nav>             Verify BSP data, NAV headers, places, and A* pathfinding\n\n";
     std::cout << "Options:\n";
     std::cout << "  --output, -o <dir|file>       Specify output directory or file path\n";
@@ -396,6 +397,138 @@ static int HandleConvert(int argc, char* argv[]) {
     }
 }
 
+static int HandleAnalyze(int argc, char* argv[]) {
+    if (argc < 3) {
+        std::cerr << "Error: 'analyze' requires at least a path to a .nav or waypoint file.\n";
+        std::cerr << "Usage: nav_cli analyze <file.nav|ewp|pwf|spt|wpt> [map.bsp] [--mod standard|zp|dm]\n";
+        return 1;
+    }
+
+    std::string filePath = argv[2];
+    std::string bspPath = "";
+    GameMod gameMod = GameMod::Standard;
+
+    for (int i = 3; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--mod" && i + 1 < argc) {
+            std::string m = argv[++i];
+            std::transform(m.begin(), m.end(), m.begin(), ::tolower);
+            if (m == "standard" || m == "cs") gameMod = GameMod::Standard;
+            else if (m == "zp" || m == "zombie" || m == "zombieplague") gameMod = GameMod::ZombiePlague;
+            else if (m == "dm" || m == "deathmatch") gameMod = GameMod::Deathmatch;
+        } else if (bspPath.empty() && arg.size() > 4 && arg.substr(arg.size() - 4) == ".bsp") {
+            bspPath = arg;
+        }
+    }
+
+    if (bspPath.empty()) {
+        size_t dot = filePath.find_last_of('.');
+        if (dot != std::string::npos) {
+            bspPath = filePath.substr(0, dot) + ".bsp";
+        }
+    }
+
+    std::unique_ptr<BSPFile> bsp;
+    if (!bspPath.empty()) {
+        bsp = std::make_unique<BSPFile>();
+        if (!bsp->Load(bspPath)) {
+            std::cout << "[INFO] Associated BSP map not found (" << bspPath << "). Proceeding with topological analysis only.\n";
+            bsp.reset();
+        } else {
+            std::cout << "[INFO] Loaded associated BSP map: " << bspPath << "\n";
+        }
+    }
+
+    size_t dot = filePath.find_last_of('.');
+    std::string ext = (dot != std::string::npos) ? filePath.substr(dot) : "";
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+    if (ext == ".nav") {
+        NavMesh nav;
+        if (!nav.Load(filePath)) {
+            std::cerr << "[ERROR] Failed to load NavMesh: " << filePath << "\n";
+            return 1;
+        }
+        std::cout << "[ANALYZE] Running NavMesh obstacle analyzer on: " << filePath << " (" << nav.GetAreaCount() << " areas)...\n";
+
+        size_t crouchCount = 0, preciseCount = 0, jumpCount = 0, modCount = 0;
+        for (NavArea* area : nav.GetAreas()) {
+            if (!area) continue;
+            uint8_t curr = area->GetAttributes();
+            uint8_t detected = curr;
+
+            if (bsp) {
+                Vector3 center = area->GetCenter();
+                Vector3 start(center.x, center.y, center.z + 4.0f);
+                Vector3 end(center.x, center.y, center.z + 74.0f);
+                BSPTraceResult tr;
+                if (bsp->TraceWorld(start, end, HULL_POINT, &tr) && !tr.startsolid && !tr.allsolid && tr.fraction < 1.0f) {
+                    float clearance = tr.endpos.z - center.z;
+                    if (clearance < 72.0f && clearance >= 24.0f) {
+                        detected |= NAV_ATTR_CROUCH;
+                        if (!(curr & NAV_ATTR_CROUCH)) crouchCount++;
+                    }
+                }
+            }
+
+            float w = area->GetExtent().hi.x - area->GetExtent().lo.x;
+            float l = area->GetExtent().hi.y - area->GetExtent().lo.y;
+            if (w < 48.0f || l < 48.0f) {
+                detected |= NAV_ATTR_PRECISE;
+                if (!(curr & NAV_ATTR_PRECISE)) preciseCount++;
+            }
+
+            for (int d = 0; d < 4; ++d) {
+                for (const auto& conn : area->GetAdjacentList(static_cast<NavDirType>(d))) {
+                    if (conn.area && conn.area->GetCenter().z - area->GetCenter().z > 18.0f) {
+                        detected |= NAV_ATTR_JUMP;
+                        if (!(curr & NAV_ATTR_JUMP)) jumpCount++;
+                        break;
+                    }
+                }
+            }
+
+            if (detected != curr) {
+                area->SetAttributes(detected);
+                modCount++;
+            }
+        }
+
+        std::cout << "[SUCCESS] NavMesh analysis complete:\n";
+        std::cout << "  -> Low Headroom (< 72u):     " << crouchCount << " Crouch flags assigned\n";
+        std::cout << "  -> Narrow Passages (< 48u):  " << preciseCount << " Precise flags assigned\n";
+        std::cout << "  -> Step Obstacles (> 18u):   " << jumpCount << " Jump flags assigned\n";
+        std::cout << "  -> Total Modified Areas:     " << modCount << "\n";
+        if (modCount > 0) {
+            nav.Save(filePath);
+            std::cout << "  -> Saved updated NavMesh to: " << filePath << "\n";
+        }
+        return 0;
+    } else {
+        WaypointGraph graph;
+        if (!graph.Load(filePath)) {
+            std::cerr << "[ERROR] Failed to load waypoint file: " << filePath << "\n";
+            return 1;
+        }
+        std::cout << "[ANALYZE] Running Bot Waypoint analyzer (CS-EBOT & YaPB rules) on: "
+                  << filePath << " (" << graph.GetNodeCount() << " nodes)...\n";
+        auto stats = graph.AnalyzeGraph(bsp.get(), gameMod);
+        std::cout << "[SUCCESS] Bot Waypoint analysis complete:\n";
+        std::cout << "  -> Low Ceiling (< 72u):        " << stats.crouchAssigned << " Crouch flags assigned\n";
+        std::cout << "  -> Step Obstacles (> 18u):     " << stats.jumpAssigned << " Jump flags/links assigned\n";
+        std::cout << "  -> High Ledges / Cliffs:       " << stats.fallRiskAssigned << " Fall Risk flags assigned\n";
+        std::cout << "  -> Ambush Sightlines:          " << stats.campAnglesCalculated << " Camp/Sniper angles calculated\n";
+        std::cout << "  -> Barricades / Dead-Ends:     " << stats.zombieCampsAssigned << " Camp mesh flags assigned\n";
+        std::cout << "  -> Obstructed Paths:           " << stats.blockedLinksPruned << " Blocked links pruned\n";
+        std::cout << "  -> Total Modified Nodes:       " << stats.totalModified << "\n";
+        if (stats.totalModified > 0) {
+            graph.Save(filePath, graph.GetActiveBot(), gameMod);
+            std::cout << "  -> Saved updated waypoints to: " << filePath << "\n";
+        }
+        return 0;
+    }
+}
+
 int main(int argc, char* argv[]) {
     std::cout << "=========================================================\n";
     std::cout << " NavStudio CLI v1.5.3 - CS 1.6 BSP & NAV Tool\n";
@@ -408,9 +541,10 @@ int main(int argc, char* argv[]) {
         std::cout << "  [2] Batch Generate Navigation Meshes for a directory\n";
         std::cout << "  [3] Inspect & Verify a BSP or NAV file\n";
         std::cout << "  [4] Convert between NavMesh and Bot Waypoints\n";
-        std::cout << "  [5] View Help & Command-Line Usage\n";
+        std::cout << "  [5] Auto-Analyze NavMesh or Bot Waypoints\n";
+        std::cout << "  [6] View Help & Command-Line Usage\n";
         std::cout << "  [0] Exit\n\n";
-        std::cout << "Enter choice [0-5]: ";
+        std::cout << "Enter choice [0-6]: ";
 
         std::string choice;
         if (!std::getline(std::cin, choice) || choice == "0" || choice == "q" || choice == "exit") {
@@ -464,6 +598,15 @@ int main(int argc, char* argv[]) {
                 char* customArgv[] = { argv[0], (char*)"convert", (char*)inPath.c_str(), (char*)outPath.c_str() };
                 HandleConvert(4, customArgv);
             }
+        } else if (choice == "5") {
+            std::cout << "\nEnter path to .nav or waypoint file to analyze: ";
+            std::string filePath;
+            std::getline(std::cin, filePath);
+            filePath = CleanPath(filePath);
+            if (!filePath.empty()) {
+                char* customArgv[] = { argv[0], (char*)"analyze", (char*)filePath.c_str() };
+                HandleAnalyze(3, customArgv);
+            }
         } else {
             PrintHelp();
         }
@@ -489,6 +632,9 @@ int main(int argc, char* argv[]) {
     }
     if (firstArg == "convert" || firstArg == "-c") {
         return HandleConvert(argc, argv);
+    }
+    if (firstArg == "analyze" || firstArg == "-a") {
+        return HandleAnalyze(argc, argv);
     }
 
     std::string bspPath = "";
