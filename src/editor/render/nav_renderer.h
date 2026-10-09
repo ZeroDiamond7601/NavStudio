@@ -47,6 +47,11 @@ public:
     uint32_t GetSelectedConnectionFrom() const { return m_selConnFrom; }
     uint32_t GetSelectedConnectionTo() const { return m_selConnTo; }
 
+    bool GetShowIslandColors() const { return m_showIslandColors; }
+    void SetShowIslandColors(bool show) { m_showIslandColors = show; }
+    void SetAreaClusterMap(const std::unordered_map<uint32_t, int>& map) { m_areaClusterMap = map; }
+    void ClearAreaClusterMap() { m_areaClusterMap.clear(); }
+
 private:
     void GenerateBuffers(const std::vector<NavVertex>& vertices, const std::vector<uint32_t>& indices);
     void GenerateLineBuffers(const std::vector<NavVertex>& vertices, const std::vector<uint32_t>& indices);
@@ -68,6 +73,8 @@ private:
     size_t m_invalidConnectionCount{0};
     uint32_t m_selConnFrom{0};
     uint32_t m_selConnTo{0};
+    bool m_showIslandColors{false};
+    std::unordered_map<uint32_t, int> m_areaClusterMap;
 };
 
 #endif // NAV_RENDERER_H

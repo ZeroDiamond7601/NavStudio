@@ -33,6 +33,14 @@ public:
     bool CheckUnsavedChanges(EditorScene& scene, CommandManager& cmdMgr, PendingAction action, const std::string& path = "");
     void ExecutePendingAction(EditorScene& scene, CommandManager& cmdMgr);
     void OpenPreferences() { m_showPreferencesModal = true; }
+    void OpenIslandModal() { m_showIslandModal = true; }
+    void ToggleCommandPalette() {
+        m_showCommandPalette = !m_showCommandPalette;
+        m_commandPaletteFilter[0] = '\0';
+        m_commandPaletteFocus = true;
+        m_commandPaletteSelectedIndex = 0;
+    }
+    void TogglePathPanel() { m_showPathPanel = !m_showPathPanel; }
 
 private:
     void RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
@@ -59,6 +67,13 @@ private:
     void RenderNavMeshGlobalInspector(EditorScene& scene, CommandManager& cmdMgr);
     void RenderBSPGlobalInspector(EditorScene& scene);
     void RenderStatsOverlay(const EditorScene& scene, const Camera& camera);
+
+    // Navigation Testing & Productivity Tools
+    void RenderPathSimulationPanel(EditorScene& scene, Camera& camera);
+    void RenderIslandModal(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
+    void RenderClearanceHUD(EditorScene& scene);
+    void RenderViewportCompass(EditorScene& scene, Camera& camera, float screenW, float screenH);
+    void RenderCommandPalette(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
 
     bool m_mouseOverUI;
     bool m_requestQuit;
@@ -103,6 +118,14 @@ private:
     EditorScene::OptimizeMeshStats m_optimizeStats;
     bool m_showStatsOverlay{true};
     bool m_showPreferencesModal{false};
+
+    // Diagnostics & Productivity States
+    bool m_showPathPanel{false};
+    bool m_showIslandModal{false};
+    bool m_showCommandPalette{false};
+    bool m_commandPaletteFocus{false};
+    char m_commandPaletteFilter[128]{""};
+    int m_commandPaletteSelectedIndex{0};
 };
 
 #endif // EDITOR_UI_H

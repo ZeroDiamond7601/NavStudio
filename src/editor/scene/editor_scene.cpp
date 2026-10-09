@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <queue>
+#include <unordered_map>
 #include <imgui.h>
 
 EditorScene::EditorScene()
@@ -584,6 +586,8 @@ void EditorScene::UnloadNAV() {
     m_selectedAreaId = 0;
     m_hoveredAreaId = 0;
     m_selectedAreaIds.clear();
+    ClearPath();
+    m_navRenderer.ClearAreaClusterMap();
     m_navRenderer.Clear();
     m_isModified = false;
 }
@@ -1154,6 +1158,40 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
                 m_gizmoRenderer.RenderLineSegment(lineShader, mvp, h0, h1, 1.0f, 0.6f, 0.2f, 0.5f, 2.0f);
                 m_gizmoRenderer.RenderLineSegment(lineShader, mvp, v0, v1, 1.0f, 0.6f, 0.2f, 0.5f, 2.0f);
             }
+        }
+    }
+
+    // Interactive Path Preview Ribbon
+    if (m_pathPreview.showPath && m_pathPreview.renderPoints.size() >= 2) {
+        m_gizmoRenderer.RenderPathRibbon(
+            lineShader, mvp,
+            m_pathPreview.renderPoints,
+            m_pathPreview.jumpFlags,
+            4.5f
+        );
+    }
+
+    // Player Clearance Hull Wireframe (32x32x72 standing or 32x32x36 crouch)
+    if (m_showClearanceHull && (m_selectedAreaId != 0 || !m_selectedAreaIds.empty())) {
+        const NavArea* a = GetSelectedArea();
+        if (a) {
+            Vector3 center = a->GetCenter();
+            float ceilDist = 9999.0f;
+            bool clear = CheckClearance(center, m_clearanceCrouch, &ceilDist);
+
+            float h = m_clearanceCrouch ? 36.0f : 72.0f;
+            Vector3 mins = center + Vector3(-16.0f, -16.0f, 0.0f);
+            Vector3 maxs = center + Vector3(16.0f, 16.0f, h);
+
+            float r = clear ? 0.15f : 1.0f;
+            float g = clear ? 0.95f : 0.2f;
+            float b = clear ? 0.40f : 0.2f;
+            if (clear && !m_clearanceCrouch && ceilDist < 72.0f && ceilDist >= 36.0f) {
+                // Crouch-only: Yellow
+                r = 1.0f; g = 0.85f; b = 0.1f;
+            }
+
+            m_gizmoRenderer.RenderBoxWireframe(lineShader, mvp, mins, maxs, r, g, b, 1.0f, 2.5f);
         }
     }
 }
@@ -3290,5 +3328,272 @@ bool EditorScene::PasteAreas(const Vector3* targetPos, CommandManager& cmdMgr) {
     }
 
     cmdMgr.ExecuteCommand(std::make_unique<CmdPasteAreas>(this, copiedList, offset));
+    return true;
+}
+
+// --- Interactive Path Preview ---
+
+void EditorScene::SetPathStart(uint32_t areaId, const Vector3& pos) {
+    m_pathPreview.startAreaId = areaId;
+    m_pathPreview.startPos = pos;
+    m_pathPreview.hasStart = (areaId != 0);
+    if (m_pathPreview.hasStart && m_pathPreview.hasGoal) {
+        RecomputePath();
+    }
+}
+
+void EditorScene::SetPathGoal(uint32_t areaId, const Vector3& pos) {
+    m_pathPreview.goalAreaId = areaId;
+    m_pathPreview.goalPos = pos;
+    m_pathPreview.hasGoal = (areaId != 0);
+    if (m_pathPreview.hasStart && m_pathPreview.hasGoal) {
+        RecomputePath();
+    }
+}
+
+void EditorScene::ClearPath() {
+    m_pathPreview.startAreaId = 0;
+    m_pathPreview.goalAreaId = 0;
+    m_pathPreview.hasStart = false;
+    m_pathPreview.hasGoal = false;
+    m_pathPreview.path.Clear();
+    m_pathPreview.renderPoints.clear();
+    m_pathPreview.jumpFlags.clear();
+}
+
+bool EditorScene::RecomputePath() {
+    if (!m_nav || !m_nav->IsLoaded()) return false;
+    if (!m_pathPreview.hasStart || !m_pathPreview.hasGoal) return false;
+
+    NavArea* startArea = m_nav->GetAreaByID(m_pathPreview.startAreaId);
+    NavArea* goalArea = m_nav->GetAreaByID(m_pathPreview.goalAreaId);
+    if (!startArea || !goalArea) return false;
+
+    m_pathPreview.path.Clear();
+    m_pathPreview.renderPoints.clear();
+    m_pathPreview.jumpFlags.clear();
+
+    bool success = NavPathFinder::BuildPathBetweenAreas(
+        startArea, goalArea,
+        m_pathPreview.startPos, m_pathPreview.goalPos,
+        m_pathPreview.path,
+        m_pathPreview.flags,
+        m_bsp.get()
+    );
+
+    if (success && m_pathPreview.path.IsValid()) {
+        const auto& segs = m_pathPreview.path.GetSegments();
+        m_pathPreview.renderPoints.reserve(segs.size());
+        m_pathPreview.jumpFlags.reserve(segs.size());
+        for (const auto& seg : segs) {
+            m_pathPreview.renderPoints.push_back(seg.pos);
+            bool isJump = (seg.type == NAV_PATH_SEGMENT_JUMP) || (seg.area && seg.area->HasAttributes(NAV_ATTR_JUMP));
+            m_pathPreview.jumpFlags.push_back(isJump);
+        }
+    }
+    return success;
+}
+
+void EditorScene::TogglePathTool() {
+    m_pathPreview.isToolActive = !m_pathPreview.isToolActive;
+    if (m_pathPreview.isToolActive) {
+        if (m_isKnifeMode) ExitKnifeMode();
+        if (m_isDrawAreaMode) CancelDrawArea();
+        if (m_isFillAreaMode) ExitFillAreaMode();
+        if (m_isBridgeMode) CancelBridgeMode();
+    }
+}
+
+void EditorScene::OnPathToolClick(const Ray& ray) {
+    if (!m_nav || !m_nav->IsLoaded()) return;
+
+    Vector3 hitPos(0.0f, 0.0f, 0.0f);
+    uint32_t areaId = ScenePicker::PickNavArea(*this, ray, &hitPos);
+    if (areaId == 0) return;
+
+    NavArea* area = m_nav->GetAreaByID(areaId);
+    if (!area) return;
+
+    if (!m_pathPreview.hasStart || (m_pathPreview.hasStart && m_pathPreview.hasGoal)) {
+        SetPathStart(areaId, hitPos);
+        m_pathPreview.hasGoal = false;
+        m_pathPreview.goalAreaId = 0;
+        m_pathPreview.path.Clear();
+        m_pathPreview.renderPoints.clear();
+        m_pathPreview.jumpFlags.clear();
+        std::printf("[NavStudio] Path Tool: Set start area #%u @ (%.1f, %.1f, %.1f)\n", areaId, hitPos.x, hitPos.y, hitPos.z);
+    } else {
+        SetPathGoal(areaId, hitPos);
+        std::printf("[NavStudio] Path Tool: Set goal area #%u @ (%.1f, %.1f, %.1f)\n", areaId, hitPos.x, hitPos.y, hitPos.z);
+    }
+}
+
+// --- Island / Connectivity Analyzer ---
+
+std::vector<EditorScene::IslandCluster> EditorScene::AnalyzeIslands() const {
+    std::vector<IslandCluster> clusters;
+    if (!m_nav || !m_nav->IsLoaded() || m_nav->GetAreaCount() == 0) return clusters;
+
+    const auto& areas = m_nav->GetAreas();
+    std::unordered_map<uint32_t, bool> visited;
+    visited.reserve(areas.size());
+    for (const auto* a : areas) {
+        if (a) visited[a->GetID()] = false;
+    }
+
+    std::unordered_map<uint32_t, std::vector<uint32_t>> adj;
+    adj.reserve(areas.size());
+    for (const auto* a : areas) {
+        if (!a) continue;
+        uint32_t aid = a->GetID();
+        for (int d = 0; d < 4; ++d) {
+            for (const auto& conn : a->GetAdjacentList(static_cast<NavDirType>(d))) {
+                if (conn.area) {
+                    uint32_t toId = conn.area->GetID();
+                    adj[aid].push_back(toId);
+                    adj[toId].push_back(aid);
+                }
+            }
+        }
+    }
+
+    std::vector<Vector3> spawnPoints;
+    if (m_entityRenderer.IsLoaded()) {
+        for (const auto& ent : m_entityRenderer.GetEntities()) {
+            if (ent.classname.rfind("info_player_", 0) == 0 ||
+                ent.classname == "info_vip_start" ||
+                ent.classname == "armoury_entity") {
+                spawnPoints.push_back(ent.origin);
+            }
+        }
+    }
+
+    int clusterId = 0;
+    for (const auto* a : areas) {
+        if (!a) continue;
+        uint32_t startId = a->GetID();
+        if (visited[startId]) continue;
+
+        IslandCluster cl;
+        cl.id = clusterId++;
+        std::queue<uint32_t> q;
+        q.push(startId);
+        visited[startId] = true;
+
+        Vector3 centerSum(0.0f, 0.0f, 0.0f);
+
+        while (!q.empty()) {
+            uint32_t curr = q.front();
+            q.pop();
+            cl.areaIds.push_back(curr);
+
+            NavArea* ca = m_nav->GetAreaByID(curr);
+            if (ca) {
+                centerSum += ca->GetCenter();
+                if (!cl.hasSpawn) {
+                    for (const auto& sp : spawnPoints) {
+                        if (ca->GetCenter().DistTo(sp) < 160.0f) {
+                            cl.hasSpawn = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            for (uint32_t neighborId : adj[curr]) {
+                if (!visited[neighborId]) {
+                    visited[neighborId] = true;
+                    q.push(neighborId);
+                }
+            }
+        }
+
+        cl.areaCount = cl.areaIds.size();
+        if (cl.areaCount > 0) {
+            cl.center = centerSum * (1.0f / static_cast<float>(cl.areaCount));
+        }
+        clusters.push_back(std::move(cl));
+    }
+
+    std::sort(clusters.begin(), clusters.end(), [](const IslandCluster& a, const IslandCluster& b) {
+        return a.areaCount > b.areaCount;
+    });
+
+    for (size_t i = 0; i < clusters.size(); ++i) {
+        clusters[i].id = static_cast<int>(i);
+    }
+
+    return clusters;
+}
+
+void EditorScene::SetShowIslandColors(bool show) {
+    m_showIslandColors = show;
+    m_navRenderer.SetShowIslandColors(show);
+    if (show) {
+        auto clusters = AnalyzeIslands();
+        std::unordered_map<uint32_t, int> cmap;
+        for (const auto& cl : clusters) {
+            for (uint32_t aid : cl.areaIds) {
+                cmap[aid] = cl.id;
+            }
+        }
+        m_navRenderer.SetAreaClusterMap(cmap);
+    } else {
+        m_navRenderer.ClearAreaClusterMap();
+    }
+    RebuildNavRenderer();
+}
+
+void EditorScene::ToggleIslandColors() {
+    SetShowIslandColors(!m_showIslandColors);
+}
+
+void EditorScene::SelectIsland(int clusterId) {
+    auto clusters = AnalyzeIslands();
+    for (const auto& cl : clusters) {
+        if (cl.id == clusterId) {
+            ClearSelection();
+            for (uint32_t aid : cl.areaIds) {
+                SelectArea(aid, true, false);
+            }
+            break;
+        }
+    }
+}
+
+void EditorScene::DeleteIsland(int clusterId, CommandManager& cmdMgr) {
+    SelectIsland(clusterId);
+    if (!m_selectedAreaIds.empty()) {
+        BatchDelete(cmdMgr);
+        if (m_showIslandColors) {
+            SetShowIslandColors(true);
+        }
+    }
+}
+
+// --- Player Clearance Hull ---
+
+bool EditorScene::CheckClearance(const Vector3& pos, bool crouch, float* outCeilingDist) const {
+    float reqHeight = crouch ? 36.0f : 72.0f;
+    if (outCeilingDist) *outCeilingDist = 9999.0f;
+
+    if (!m_bsp || !m_bsp->IsLoaded()) {
+        return true;
+    }
+
+    int hullType = crouch ? HULL_HEAD : HULL_HUMAN;
+    Vector3 start = pos + Vector3(0.0f, 0.0f, 1.0f);
+    Vector3 end = pos + Vector3(0.0f, 0.0f, 250.0f);
+
+    BSPTraceResult tr;
+    bool hit = m_bsp->TraceWorld(start, end, hullType, &tr);
+    if (hit) {
+        float clearDist = tr.endpos.z - pos.z;
+        if (outCeilingDist) *outCeilingDist = clearDist;
+        if (tr.allsolid || tr.startsolid || clearDist < reqHeight) {
+            return false;
+        }
+    }
+
     return true;
 }

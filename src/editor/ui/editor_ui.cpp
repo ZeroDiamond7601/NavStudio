@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <cmath>
+#include <functional>
 #include <filesystem>
 #include <thread>
 
@@ -303,6 +305,29 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
         RenderStatsOverlay(scene, camera);
     }
 
+    // 3D Viewport Orientation Compass
+    RenderViewportCompass(scene, camera, viewport->WorkSize.x, viewport->WorkSize.y);
+
+    // Interactive Path Simulation Panel
+    if (m_showPathPanel || scene.IsPathToolActive()) {
+        RenderPathSimulationPanel(scene, camera);
+    }
+
+    // Player Clearance HUD
+    if (scene.GetShowClearanceHull()) {
+        RenderClearanceHUD(scene);
+    }
+
+    // Disconnected Islands Modal
+    if (m_showIslandModal) {
+        RenderIslandModal(scene, camera, cmdMgr);
+    }
+
+    // Spotlight / Command Palette (Ctrl+P)
+    if (m_showCommandPalette) {
+        RenderCommandPalette(scene, camera, cmdMgr);
+    }
+
     if (scene.IsLoading()) {
         RenderLoadingModal(scene);
     } else if (scene.HasLoadingError()) {
@@ -504,16 +529,22 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             if (ImGui::MenuItem("Split Selected Area", "Shift+X", false, sel != nullptr)) {
                 scene.SplitSelectedArea(cmdMgr);
             }
-            if (ImGui::MenuItem("Merge with Adjacent Area", "Shift+M", false, sel != nullptr)) {
+            if (ImGui::MenuItem("Quick Merge Areas", "M", false, hasSelection)) {
                 scene.MergeSelectedArea(cmdMgr);
             }
 
             ImGui::Separator();
-            if (ImGui::MenuItem("Clear Selection", "Escape", false, scene.GetSelectedAreaID() != 0)) {
-                scene.SelectArea(0);
+            if (ImGui::MenuItem("Select All Areas", "Ctrl+A", false, scene.HasNAV())) {
+                scene.SelectAllAreas();
+            }
+            if (ImGui::MenuItem("Clear Selection", "Escape", false, hasSelection)) {
+                scene.ClearSelection();
             }
 
             ImGui::Separator();
+            if (ImGui::MenuItem("Command Palette...", "Ctrl+P")) {
+                ToggleCommandPalette();
+            }
             if (ImGui::MenuItem("Preferences...", "Ctrl+,")) {
                 m_showPreferencesModal = true;
             }
@@ -700,6 +731,20 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
 
             ImGui::Separator();
+            if (ImGui::BeginMenu("View Presets")) {
+                if (ImGui::MenuItem("Top View (2D Ortho)", "F2")) camera.SnapToPreset(0);
+                if (ImGui::MenuItem("Front View")) camera.SnapToPreset(1);
+                if (ImGui::MenuItem("Right / Side View")) camera.SnapToPreset(2);
+                if (ImGui::MenuItem("Isometric 3D")) camera.SnapToPreset(3);
+                ImGui::EndMenu();
+            }
+
+            bool islandColors = scene.GetShowIslandColors();
+            if (ImGui::MenuItem("Color-Code Islands", nullptr, &islandColors, scene.HasNAV())) {
+                scene.SetShowIslandColors(islandColors);
+            }
+
+            ImGui::Separator();
             if (ImGui::MenuItem("Reset Camera", "Home")) {
                 camera.SetPosition(Vector3(0.0f, -500.0f, 300.0f));
                 camera.SetTarget(Vector3(0.0f, 0.0f, 0.0f));
@@ -722,7 +767,7 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             if (ImGui::MenuItem("Split / Knife Tool", "K", scene.IsKnifeMode())) {
                 scene.ToggleKnifeMode();
             }
-            if (ImGui::MenuItem("Merge Adjacent Area", "Shift+M", false, sel != nullptr)) {
+            if (ImGui::MenuItem("Merge Adjacent Area", "M", false, sel != nullptr)) {
                 scene.MergeSelectedArea(cmdMgr);
             }
             ImGui::Separator();
@@ -732,6 +777,21 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 
             if (ImGui::MenuItem("Focus on Selection", "F", false, sel != nullptr)) {
                 camera.FocusOn(sel->GetCenter());
+            }
+
+            ImGui::Separator();
+            if (ImGui::MenuItem("Interactive Path Simulator", "P", m_showPathPanel || scene.IsPathToolActive(), scene.HasNAV())) {
+                scene.TogglePathTool();
+                m_showPathPanel = scene.IsPathToolActive();
+            }
+            if (ImGui::MenuItem("Disconnected Islands Finder...", nullptr, m_showIslandModal, scene.HasNAV())) {
+                m_showIslandModal = true;
+            }
+            if (ImGui::MenuItem("Player Clearance Hull Visualizer", "H", scene.GetShowClearanceHull(), scene.HasNAV())) {
+                scene.ToggleClearanceHull();
+            }
+            if (ImGui::MenuItem("Command Palette...", "Ctrl+P")) {
+                ToggleCommandPalette();
             }
 
             ImGui::Separator();
@@ -826,6 +886,33 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
             }
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Combines collinear coplanar rectangular areas sharing elevation, slope, and attributes to reduce area count");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::Text("Diagnostics & Testing:");
+        bool pathActive = (m_showPathPanel || scene.IsPathToolActive());
+        if (ImGui::Checkbox("Path Simulator [P]", &pathActive)) {
+            scene.TogglePathTool();
+            m_showPathPanel = scene.IsPathToolActive();
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Simulate bot A* path between start and goal points [P]");
+
+        bool clearanceActive = scene.GetShowClearanceHull();
+        if (ImGui::Checkbox("Clearance Hull [H]", &clearanceActive)) {
+            scene.SetShowClearanceHull(clearanceActive);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Visualize 32x32 player hull collision against ceiling [H]");
+
+        if (ImGui::Button("Island Finder...", ImVec2(-1, 24))) {
+            m_showIslandModal = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Find disconnected or unreachable mesh components");
+
+        if (ImGui::Button("Command Palette [Ctrl+P]", ImVec2(-1, 24))) {
+            ToggleCommandPalette();
+        }
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -2260,7 +2347,8 @@ void EditorUI::RenderHelpModal() {
         ImGui::BulletText("E / Q: Fly up / down");
         ImGui::BulletText("Right-Click + Drag: First-person camera look");
         ImGui::BulletText("Mouse Wheel (Hold Right-Click): Change camera speed");
-        ImGui::BulletText("Alt + Left-Click + Drag: Orbit selected area");
+        ImGui::BulletText("Alt + Left-Click + Drag: Orbit camera around selection or pivot");
+        ImGui::BulletText("Alt + Middle-Click / Middle-Click + Drag: Pan camera in 3D");
         ImGui::BulletText("F: Focus camera on selected area");
         ImGui::BulletText("Home: Reset camera to origin");
 
@@ -2298,6 +2386,9 @@ void EditorUI::RenderHelpModal() {
         ImGui::BulletText("Shift + Click / Ctrl + Click: Multi-select NavAreas");
         ImGui::BulletText("Ctrl + A: Select All NavAreas");
         ImGui::BulletText("M / Shift + M: Quick Merge selected areas or merge with adjacent neighbor");
+        ImGui::BulletText("Ctrl + P: Command Palette (search and trigger any tool or action)");
+        ImGui::BulletText("P: Interactive Path Simulator (click start and goal to test bot path)");
+        ImGui::BulletText("H: Player Clearance Hull Visualizer (standing 72u / crouch 36u collision test)");
         ImGui::BulletText("Ctrl + 0..9: Save camera bookmark to slot 0..9");
         ImGui::BulletText("Alt + 0..9 / Numpad 0..9: Teleport camera to saved bookmark");
         ImGui::BulletText("Escape: Clear selection / Cancel modal tool");
@@ -3102,5 +3193,463 @@ void EditorUI::RenderOptimizeModal() {
         }
         ImGui::EndPopup();
     }
+}
+
+void EditorUI::RenderViewportCompass(EditorScene& scene, Camera& camera, float screenW, float screenH) {
+    if (camera.GetMode() == CAMERA_MODE_TOPDOWN_2D) return;
+
+    ImDrawList* drawList = ImGui::GetForegroundDrawList();
+    if (!drawList) return;
+
+    ImVec2 center(screenW - 65.0f, 65.0f);
+    float radius = 28.0f;
+
+    drawList->AddCircleFilled(center, radius, IM_COL32(20, 24, 30, 160));
+    drawList->AddCircle(center, radius, IM_COL32(70, 80, 95, 180), 32, 1.5f);
+
+    Vector3 right = camera.GetRight();
+    Vector3 up = camera.GetUp();
+
+    struct AxisItem {
+        const char* label;
+        Vector3 worldDir;
+        ImU32 color;
+        int preset;
+    };
+    AxisItem axes[3] = {
+        { "X", Vector3(1.0f, 0.0f, 0.0f), IM_COL32(245, 75, 75, 255), 2 },
+        { "Y", Vector3(0.0f, 1.0f, 0.0f), IM_COL32(75, 220, 75, 255), 1 },
+        { "Z", Vector3(0.0f, 0.0f, 1.0f), IM_COL32(75, 140, 255, 255), 0 }
+    };
+
+    ImVec2 mousePos = ImGui::GetMousePos();
+    bool clicked = ImGui::IsMouseClicked(0) && !m_mouseOverUI;
+
+    for (int i = 0; i < 3; ++i) {
+        float sx = axes[i].worldDir.Dot(right);
+        float sy = -axes[i].worldDir.Dot(up);
+
+        float len = std::sqrt(sx * sx + sy * sy);
+        if (len > 0.001f) {
+            sx = (sx / len) * (radius * 0.72f);
+            sy = (sy / len) * (radius * 0.72f);
+        }
+
+        ImVec2 endPt(center.x + sx, center.y + sy);
+        drawList->AddLine(center, endPt, axes[i].color, 2.0f);
+
+        float nodeR = 7.0f;
+        drawList->AddCircleFilled(endPt, nodeR, axes[i].color);
+        drawList->AddCircle(endPt, nodeR, IM_COL32(255, 255, 255, 200), 16, 1.0f);
+
+        ImVec2 textSz = ImGui::CalcTextSize(axes[i].label);
+        drawList->AddText(ImVec2(endPt.x - textSz.x * 0.5f, endPt.y - textSz.y * 0.5f), IM_COL32(255, 255, 255, 255), axes[i].label);
+
+        float dx = mousePos.x - endPt.x;
+        float dy = mousePos.y - endPt.y;
+        if (std::sqrt(dx * dx + dy * dy) <= nodeR + 2.0f) {
+            if (clicked) {
+                camera.SnapToPreset(axes[i].preset);
+            }
+        }
+    }
+
+    float centerDist = std::sqrt((mousePos.x - center.x) * (mousePos.x - center.x) + (mousePos.y - center.y) * (mousePos.y - center.y));
+    drawList->AddCircleFilled(center, 4.0f, IM_COL32(220, 220, 220, 255));
+    if (centerDist <= 5.0f && clicked) {
+        camera.SnapToPreset(3);
+    }
+}
+
+void EditorUI::RenderPathSimulationPanel(EditorScene& scene, Camera& camera) {
+    ImGui::SetNextWindowSize(ImVec2(320, 310), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(220, 60), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Path Simulator", &m_showPathPanel, ImGuiWindowFlags_NoCollapse)) {
+        auto& state = scene.GetPathPreview();
+
+        bool toolActive = state.isToolActive;
+        if (ImGui::Checkbox("Interactive Path Tool", &toolActive)) {
+            scene.SetPathToolActive(toolActive);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("When active, 1st click in 3D view sets Start, 2nd click sets Goal");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (state.hasStart) {
+            ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.3f, 1.0f), "Start Area: #%u", state.startAreaId);
+        } else {
+            ImGui::TextDisabled("Start Area: [None set]");
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Set Start")) {
+            if (scene.GetSelectedArea()) {
+                scene.SetPathStart(scene.GetSelectedAreaID(), scene.GetSelectedArea()->GetCenter());
+            }
+        }
+
+        if (state.hasGoal) {
+            ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1.0f), "Goal Area:  #%u", state.goalAreaId);
+        } else {
+            ImGui::TextDisabled("Goal Area:  [None set]");
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Set Goal")) {
+            if (scene.GetSelectedArea()) {
+                scene.SetPathGoal(scene.GetSelectedAreaID(), scene.GetSelectedArea()->GetCenter());
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::Text("Path Constraints:");
+        bool avoidCrouch = (state.flags & NAV_PATH_AVOID_CROUCH) != 0;
+        if (ImGui::Checkbox("Avoid Crouch", &avoidCrouch)) {
+            state.flags = avoidCrouch ? (state.flags | NAV_PATH_AVOID_CROUCH) : (state.flags & ~NAV_PATH_AVOID_CROUCH);
+            scene.RecomputePath();
+        }
+        ImGui::SameLine();
+        bool avoidJump = (state.flags & NAV_PATH_AVOID_JUMP) != 0;
+        if (ImGui::Checkbox("Avoid Jump", &avoidJump)) {
+            state.flags = avoidJump ? (state.flags | NAV_PATH_AVOID_JUMP) : (state.flags & ~NAV_PATH_AVOID_JUMP);
+            scene.RecomputePath();
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (state.path.IsValid()) {
+            float len = state.path.GetLength();
+            float eta = (len > 0.0f) ? (len / 250.0f) : 0.0f;
+            size_t segCount = state.path.GetSegmentCount();
+
+            size_t jumpCount = 0;
+            for (bool j : state.jumpFlags) if (j) jumpCount++;
+
+            ImGui::TextColored(ImVec4(0.1f, 1.0f, 0.4f, 1.0f), "Status: Path Found (%zu waypoints)", segCount);
+            ImGui::Text("Length: %.1f units", len);
+            ImGui::Text("Est. Bot Run Time: %.2f sec (@ 250 u/s)", eta);
+            if (jumpCount > 0) {
+                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.1f, 1.0f), "Jump Segments: %zu", jumpCount);
+            }
+        } else if (state.hasStart && state.hasGoal) {
+            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Status: Unreachable (No valid path)");
+        } else {
+            ImGui::TextDisabled("Select Start and Goal areas to simulate traversal");
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Swap [Start <-> Goal]", ImVec2(145, 24))) {
+            if (state.hasStart && state.hasGoal) {
+                uint32_t sId = state.startAreaId; Vector3 sPos = state.startPos;
+                scene.SetPathStart(state.goalAreaId, state.goalPos);
+                scene.SetPathGoal(sId, sPos);
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Clear Path", ImVec2(145, 24))) {
+            scene.ClearPath();
+        }
+    }
+    ImGui::End();
+}
+
+void EditorUI::RenderClearanceHUD(EditorScene& scene) {
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                            ImGuiWindowFlags_NoNav;
+
+    ImGui::SetNextWindowPos(ImVec2(220, 10), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.75f);
+
+    if (ImGui::Begin("##ClearanceHUD", nullptr, flags)) {
+        ImGui::TextColored(ImVec4(0.2f, 0.9f, 1.0f, 1.0f), "Player Clearance Visualizer [H]");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("X")) {
+            scene.SetShowClearanceHull(false);
+        }
+
+        bool crouch = scene.GetClearanceCrouch();
+        if (ImGui::RadioButton("Standing (32x32x72)", !crouch)) {
+            scene.SetClearanceCrouch(false);
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Crouch (32x32x36)", crouch)) {
+            scene.SetClearanceCrouch(true);
+        }
+
+        const NavArea* a = scene.GetSelectedArea();
+        if (a) {
+            float ceilDist = 9999.0f;
+            bool ok = scene.CheckClearance(a->GetCenter(), crouch, &ceilDist);
+            if (ceilDist < 9000.0f) {
+                ImGui::Text("Ceiling Clearance: %.1f units", ceilDist);
+            }
+            if (ok) {
+                ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.3f, 1.0f), "Status: CLEAR (Walkable)");
+            } else {
+                ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "Status: OBSTRUCTED (Ceiling/Obstacle collision)");
+            }
+        } else {
+            ImGui::TextDisabled("Select a NavArea to inspect hull clearance");
+        }
+    }
+    ImGui::End();
+}
+
+void EditorUI::RenderIslandModal(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
+    ImGui::SetNextWindowSize(ImVec2(560, 420), ImGuiCond_FirstUseEver);
+    if (!ImGui::IsPopupOpen("Disconnected Islands & Connectivity")) {
+        ImGui::OpenPopup("Disconnected Islands & Connectivity");
+    }
+
+    if (ImGui::BeginPopupModal("Disconnected Islands & Connectivity", &m_showIslandModal)) {
+        auto clusters = scene.AnalyzeIslands();
+
+        size_t totalAreas = scene.GetNAV().GetAreaCount();
+        size_t islandCount = (clusters.size() > 1) ? (clusters.size() - 1) : 0;
+
+        ImGui::Text("Mesh Overview: %zu Total Areas across %zu Connected Clusters", totalAreas, clusters.size());
+        if (islandCount > 0) {
+            ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.1f, 1.0f), "Warning: Found %zu Disconnected Island(s) with no path to the main mesh!", islandCount);
+        } else {
+            ImGui::TextColored(ImVec4(0.2f, 0.95f, 0.3f, 1.0f), "Clean Topology: Entire navigation mesh is 100% interconnected!");
+        }
+
+        ImGui::Spacing();
+        bool showColors = scene.GetShowIslandColors();
+        if (ImGui::Checkbox("Color-Code Islands in 3D Viewport", &showColors)) {
+            scene.SetShowIslandColors(showColors);
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(Highlights each cluster with distinct hues)");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::BeginTable("ClusterTable", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, ImVec2(0, 220))) {
+            ImGui::TableSetupColumn("Cluster", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+            ImGui::TableSetupColumn("Areas", ImGuiTableColumnFlags_WidthFixed, 60.0f);
+            ImGui::TableSetupColumn("Share", ImGuiTableColumnFlags_WidthFixed, 60.0f);
+            ImGui::TableSetupColumn("Spawns", ImGuiTableColumnFlags_WidthFixed, 75.0f);
+            ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableHeadersRow();
+
+            for (const auto& cl : clusters) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                if (cl.id == 0) {
+                    ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "#%d (Main)", cl.id);
+                } else {
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.1f, 1.0f), "#%d (Island)", cl.id);
+                }
+
+                ImGui::TableNextColumn();
+                ImGui::Text("%zu", cl.areaCount);
+
+                ImGui::TableNextColumn();
+                float pct = (totalAreas > 0) ? (static_cast<float>(cl.areaCount) * 100.0f / static_cast<float>(totalAreas)) : 0.0f;
+                ImGui::Text("%.1f%%", pct);
+
+                ImGui::TableNextColumn();
+                if (cl.hasSpawn) {
+                    ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.3f, 1.0f), "Yes");
+                } else {
+                    ImGui::TextDisabled("No");
+                }
+
+                ImGui::TableNextColumn();
+                ImGui::PushID(cl.id);
+                if (ImGui::SmallButton("Select")) {
+                    scene.SelectIsland(cl.id);
+                }
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Focus")) {
+                    scene.SelectIsland(cl.id);
+                    camera.FocusOn(cl.center, 500.0f);
+                }
+                if (cl.id != 0) {
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Delete")) {
+                        scene.DeleteIsland(cl.id, cmdMgr);
+                    }
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (islandCount > 0) {
+            if (ImGui::Button("Select All Disconnected Areas", ImVec2(220, 26))) {
+                scene.ClearSelection();
+                for (size_t i = 1; i < clusters.size(); ++i) {
+                    for (uint32_t aid : clusters[i].areaIds) {
+                        scene.SelectArea(aid, true, false);
+                    }
+                }
+            }
+            ImGui::SameLine();
+        }
+
+        if (ImGui::Button("Close", ImVec2(100, 26))) {
+            m_showIslandModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    float width = 560.0f;
+    float posX = vp->WorkPos.x + (vp->WorkSize.x - width) * 0.5f;
+    float posY = vp->WorkPos.y + 70.0f;
+
+    ImGui::SetNextWindowPos(ImVec2(posX, posY));
+    ImGui::SetNextWindowSize(ImVec2(width, 380.0f));
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                            ImGuiWindowFlags_AlwaysAutoResize;
+
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.12f, 0.13f, 0.16f, 0.96f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.28f, 0.55f, 0.90f, 0.80f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 12.0f));
+
+    if (ImGui::Begin("##CommandPaletteWindow", &m_showCommandPalette, flags)) {
+        struct PaletteCmd {
+            std::string category;
+            std::string name;
+            std::string shortcut;
+            std::function<void()> action;
+        };
+
+        std::vector<PaletteCmd> allCmds = {
+            { "File", "Save Navigation Mesh", "Ctrl+S", [&]() { if (scene.HasNAV()) { scene.SaveNAV(); cmdMgr.MarkSaved(); } } },
+            { "File", "Open GoldSrc BSP Map", "Ctrl+O", [&]() { std::string p = FileDialog::OpenFile(FileDialog::kBSPFilter, "Open BSP"); if (!p.empty()) scene.StartAsyncLoad(p); } },
+            { "File", "Open Navigation Mesh", "Ctrl+Shift+O", [&]() { std::string p = FileDialog::OpenFile(FileDialog::kNAVFilter, "Open NAV"); if (!p.empty()) scene.StartAsyncLoad(p); } },
+            { "Edit", "Quick Merge Adjacent Areas", "M", [&]() { scene.MergeSelectedArea(cmdMgr); } },
+            { "Edit", "Split Selected Area", "Shift+X", [&]() { scene.SplitSelectedArea(cmdMgr); } },
+            { "Edit", "Select All Areas", "Ctrl+A", [&]() { scene.SelectAllAreas(); } },
+            { "Edit", "Clear Selection", "Esc", [&]() { scene.ClearSelection(); } },
+            { "Edit", "Delete Selected Areas", "Delete", [&]() { scene.BatchDelete(cmdMgr); } },
+            { "Edit", "Duplicate Selected Areas", "Shift+D", [&]() { scene.BatchDuplicate(cmdMgr); } },
+            { "Edit", "Undo", "Ctrl+Z", [&]() { cmdMgr.Undo(); } },
+            { "Edit", "Redo", "Ctrl+Y", [&]() { cmdMgr.Redo(); } },
+            { "Tool", "Interactive Path Simulator", "P", [&]() { scene.TogglePathTool(); m_showPathPanel = true; } },
+            { "Tool", "Disconnected Island Analyzer", "", [&]() { m_showIslandModal = true; } },
+            { "Tool", "Toggle Player Clearance Hull", "H", [&]() { scene.ToggleClearanceHull(); } },
+            { "Tool", "Draw Area Marquee", "N", [&]() { scene.ToggleDrawAreaMode(); } },
+            { "Tool", "Flood Fill Area", "F", [&]() { scene.ToggleFillAreaMode(); } },
+            { "Tool", "Knife / Split Tool", "K", [&]() { scene.ToggleKnifeMode(); } },
+            { "Tool", "Bridge Between Edges", "B", [&]() { scene.ToggleBridgeMode(); } },
+            { "Tool", "Connection Selection Mode", "Alt+C", [&]() { scene.ToggleConnectionSelectionMode(); } },
+            { "Generate", "Auto-Generate NavMesh", "Ctrl+G", [&]() { if (scene.HasBSP()) m_showGenerateModal = true; } },
+            { "Generate", "Optimize Mesh (Coplanar Merge)", "", [&]() { if (scene.HasNAV()) { m_optimizeStats = scene.OptimizeMesh(cmdMgr, false); m_showOptimizeModal = true; } } },
+            { "Generate", "Auto-Flag Obstacles (Crouch/Jump)", "", [&]() { if (scene.HasNAV()) { m_analyzerStats = scene.AutoAnalyzeFlags(cmdMgr, false); m_showAnalyzerModal = true; } } },
+            { "View", "Snap View: Top (2D Ortho)", "F2", [&]() { camera.SnapToPreset(0); } },
+            { "View", "Snap View: Front", "", [&]() { camera.SnapToPreset(1); } },
+            { "View", "Snap View: Side / Right", "", [&]() { camera.SnapToPreset(2); } },
+            { "View", "Snap View: 3D Isometric", "", [&]() { camera.SnapToPreset(3); } },
+            { "View", "Toggle 3D Skybox", "", [&]() { scene.SetShowSkybox(!scene.GetShowSkybox()); } },
+            { "View", "Toggle Entities", "F3", [&]() { scene.GetEntityRenderer().SetEnabled(!scene.GetEntityRenderer().IsEnabled()); } },
+            { "View", "Cycle Shading Mode", "F4", [&]() { int n = (static_cast<int>(scene.GetBSPMode()) + 1) % 4; scene.SetBSPMode(static_cast<BSPRenderMode>(n)); } },
+            { "View", "Toggle Connection Validity Overlay", "Ctrl+Shift+V", [&]() { auto& r = scene.GetNavRenderer(); r.SetShowConnectionValidity(!r.GetShowConnectionValidity()); scene.RebuildNavRenderer(); } },
+            { "View", "Toggle Island Color Coding", "", [&]() { scene.ToggleIslandColors(); } },
+            { "Preferences", "Open Preferences", "Ctrl+,", [&]() { OpenPreferences(); } },
+            { "Help", "Documentation & Shortcuts", "F1", [&]() { m_showHelpModal = true; } }
+        };
+
+        if (m_commandPaletteFocus) {
+            ImGui::SetKeyboardFocusHere();
+            m_commandPaletteFocus = false;
+        }
+
+        ImGui::SetNextItemWidth(-1);
+        bool enterPressed = ImGui::InputTextWithHint("##cmdFilter", "Type a command or shortcut to search...", m_commandPaletteFilter, sizeof(m_commandPaletteFilter), ImGuiInputTextFlags_EnterReturnsTrue);
+
+        std::string filterLower = m_commandPaletteFilter;
+        std::transform(filterLower.begin(), filterLower.end(), filterLower.begin(), ::tolower);
+
+        std::vector<PaletteCmd> filtered;
+        for (const auto& cmd : allCmds) {
+            if (filterLower.empty()) {
+                filtered.push_back(cmd);
+                continue;
+            }
+            std::string text = cmd.category + " " + cmd.name + " " + cmd.shortcut;
+            std::transform(text.begin(), text.end(), text.begin(), ::tolower);
+            if (text.find(filterLower) != std::string::npos) {
+                filtered.push_back(cmd);
+            }
+        }
+
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+            m_commandPaletteSelectedIndex++;
+            if (m_commandPaletteSelectedIndex >= static_cast<int>(filtered.size())) {
+                m_commandPaletteSelectedIndex = 0;
+            }
+        } else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+            m_commandPaletteSelectedIndex--;
+            if (m_commandPaletteSelectedIndex < 0) {
+                m_commandPaletteSelectedIndex = static_cast<int>(filtered.size()) - 1;
+            }
+        } else if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            m_showCommandPalette = false;
+        }
+
+        if (enterPressed && !filtered.empty()) {
+            int idx = std::max(0, std::min(m_commandPaletteSelectedIndex, static_cast<int>(filtered.size()) - 1));
+            filtered[idx].action();
+            m_showCommandPalette = false;
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::BeginChild("##cmdList", ImVec2(0, 260), false)) {
+            for (size_t i = 0; i < filtered.size(); ++i) {
+                const auto& cmd = filtered[i];
+                bool isSelected = (static_cast<int>(i) == m_commandPaletteSelectedIndex);
+
+                ImGui::PushID(static_cast<int>(i));
+                char label[256];
+                std::snprintf(label, sizeof(label), "[%s]  %s", cmd.category.c_str(), cmd.name.c_str());
+
+                if (ImGui::Selectable(label, isSelected, ImGuiSelectableFlags_None, ImVec2(0, 24))) {
+                    cmd.action();
+                    m_showCommandPalette = false;
+                }
+
+                if (!cmd.shortcut.empty()) {
+                    ImGui::SameLine(width - 110.0f);
+                    ImGui::TextDisabled("%s", cmd.shortcut.c_str());
+                }
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndChild();
+    }
+    ImGui::End();
+
+    ImGui::PopStyleVar(3);
+    ImGui::PopStyleColor(2);
 }
 

@@ -57,6 +57,11 @@ public:
     float GetOrthoSize() const { return m_orthoSize; }
     void SetOrthoSize(float size) { m_orthoSize = size; }
 
+    // DCC Navigation & View Presets (Blender style Orbit & Pan)
+    void Orbit(float deltaYaw, float deltaPitch);
+    void Pan(float deltaX, float deltaY);
+    void SnapToPreset(int preset); // 0: Top, 1: Front, 2: Side, 3: Isometric 3D
+
     // Camera Bookmarks (Slots 0..9)
     struct Bookmark {
         Vector3 pos{0.0f, 0.0f, 0.0f};

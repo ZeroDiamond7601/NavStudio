@@ -25,7 +25,10 @@ static EditorScene* g_activeScene = nullptr;
 static CommandManager* g_cmdMgr = nullptr;
 static EditorUI* g_editorUI = nullptr;
 static bool g_isRightMouseDown = false;
+static bool g_isMiddleMouseDown = false;
 static bool g_isAltDown = false;
+static bool g_isAltOrbiting = false;
+static bool g_isAltPanning = false;
 static double g_lastMouseX = 0.0;
 static double g_lastMouseY = 0.0;
 static bool g_firstMouse = true;
@@ -105,10 +108,38 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
             g_isRightMouseDown = false;
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         }
+    } else if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
+        if (action == GLFW_PRESS) {
+            bool altPressed = (mods & GLFW_MOD_ALT) != 0 ||
+                              glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
+                              glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
+            g_isMiddleMouseDown = true;
+            g_isAltPanning = altPressed;
+            g_firstMouse = true;
+        } else if (action == GLFW_RELEASE) {
+            g_isMiddleMouseDown = false;
+            g_isAltPanning = false;
+        }
     } else if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (!g_activeScene || !g_cmdMgr) return;
 
+        bool altPressed = (mods & GLFW_MOD_ALT) != 0 ||
+                          glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
+                          glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
+
         if (action == GLFW_PRESS) {
+            if (altPressed && g_activeScene && !g_activeScene->IsConnectionSelectionMode()) {
+                g_isAltOrbiting = true;
+                g_firstMouse = true;
+                NavArea* sel = g_activeScene->GetSelectedArea();
+                if (sel) {
+                    g_camera.SetTarget(sel->GetCenter());
+                } else {
+                    g_camera.SetTarget(g_camera.GetPosition() + g_camera.GetForward() * 400.0f);
+                }
+                return;
+            }
+
             int displayW = 0, displayH = 0;
             glfwGetFramebufferSize(window, &displayW, &displayH);
             float aspect = (displayH > 0) ? (static_cast<float>(displayW) / static_cast<float>(displayH)) : 1.0f;
@@ -120,6 +151,12 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                 static_cast<float>(displayW), static_cast<float>(displayH),
                 g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
             );
+
+            // Path Tool Left Click: Click 1st area for Start, click 2nd area for Goal
+            if (g_activeScene->IsPathToolActive()) {
+                g_activeScene->OnPathToolClick(ray);
+                return;
+            }
 
             // Draw Area Mode Left Click: Click 1st corner, then 2nd corner
             if (g_activeScene->IsDrawAreaMode()) {
@@ -238,6 +275,9 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                 }
             }
         } else if (action == GLFW_RELEASE) {
+            if (g_isAltOrbiting) {
+                g_isAltOrbiting = false;
+            }
             if (g_activeScene->IsDraggingHandle()) {
                 g_activeScene->EndDragHandle(*g_cmdMgr);
             }
@@ -344,6 +384,15 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 auto& navR = g_activeScene->GetNavRenderer();
                 navR.SetShowConnectionValidity(!navR.GetShowConnectionValidity());
                 g_activeScene->RebuildNavRenderer();
+            } else if (key == GLFW_KEY_P && (mods & GLFW_MOD_CONTROL) != 0 && (mods & GLFW_MOD_ALT) == 0) { // Ctrl+P: Command Palette
+                if (g_editorUI) g_editorUI->ToggleCommandPalette();
+            } else if (key == GLFW_KEY_H && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // H: Clearance Hull Visualizer
+                g_activeScene->ToggleClearanceHull();
+            } else if (key == GLFW_KEY_P && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0 &&
+                       g_activeScene->GetSelectedAreaID() == 0 && g_activeScene->GetSelectedAreaIDs().empty() &&
+                       g_activeScene->GetSelectedEntityIndex() < 0) { // P: Path Simulation Tool
+                g_activeScene->TogglePathTool();
+                if (g_editorUI) g_editorUI->TogglePathPanel();
             } else if (key == GLFW_KEY_COMMA && (mods & GLFW_MOD_CONTROL) != 0) { // Ctrl+,: Preferences
                 if (g_editorUI) g_editorUI->OpenPreferences();
             } else if (key == GLFW_KEY_A && (mods & GLFW_MOD_CONTROL) != 0) { // Ctrl+A: Select All
@@ -357,6 +406,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                     g_activeScene->ExitFillAreaMode();
                 } else if (g_activeScene->IsBridgeMode()) {
                     g_activeScene->CancelBridgeMode();
+                } else if (g_activeScene->IsPathToolActive()) {
+                    g_activeScene->SetPathToolActive(false);
                 } else if (g_activeScene->HasSelectedConnection()) {
                     g_activeScene->ClearSelectedConnection();
                 } else if (!g_activeScene->GetSelectedAreaIDs().empty() || g_activeScene->GetSelectedAreaID() != 0) {
@@ -501,6 +552,18 @@ static void CursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
             g_firstMouse = false;
         } else {
             g_camera.ProcessMouseMovement(xoffset, yoffset);
+        }
+    } else if (g_isAltOrbiting) {
+        if (g_firstMouse) {
+            g_firstMouse = false;
+        } else {
+            g_camera.Orbit(xoffset, yoffset);
+        }
+    } else if (g_isMiddleMouseDown || g_isAltPanning) {
+        if (g_firstMouse) {
+            g_firstMouse = false;
+        } else {
+            g_camera.Pan(xoffset, yoffset);
         }
     } else if (g_activeScene) {
         int displayW = 0, displayH = 0;

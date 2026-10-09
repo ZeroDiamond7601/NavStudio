@@ -182,3 +182,67 @@ bool Camera::HasBookmark(int slot) const {
     return false;
 }
 
+void Camera::Orbit(float deltaYaw, float deltaPitch) {
+    if (m_invertY) deltaPitch = -deltaPitch;
+    deltaYaw *= m_sensitivity;
+    deltaPitch *= m_sensitivity;
+
+    m_yaw -= deltaYaw;
+    m_pitch += deltaPitch;
+    if (m_pitch > 89.0f) m_pitch = 89.0f;
+    if (m_pitch < -89.0f) m_pitch = -89.0f;
+
+    float dist = (m_position - m_target).Length();
+    if (dist < 10.0f) dist = 400.0f;
+    m_orbitDistance = dist;
+
+    float yawRad = m_yaw * DEG2RAD;
+    float pitchRad = m_pitch * DEG2RAD;
+    Vector3 f;
+    f.x = std::cos(pitchRad) * std::cos(yawRad);
+    f.y = std::cos(pitchRad) * std::sin(yawRad);
+    f.z = std::sin(pitchRad);
+    m_forward = f.Normalized();
+    m_right = m_forward.Cross(m_worldUp).Normalized();
+    m_up = m_right.Cross(m_forward).Normalized();
+
+    m_position = m_target - m_forward * m_orbitDistance;
+}
+
+void Camera::Pan(float deltaX, float deltaY) {
+    float panSpeed = 0.65f;
+    float dist = (m_position - m_target).Length();
+    if (dist > 50.0f) {
+        panSpeed = dist * 0.0018f;
+    }
+    Vector3 offset = (m_right * (-deltaX) + m_up * deltaY) * panSpeed;
+    m_position += offset;
+    m_target += offset;
+}
+
+void Camera::SnapToPreset(int preset) {
+    switch (preset) {
+        case 0: // Top view
+            m_pitch = -89.9f;
+            m_yaw = 90.0f;
+            break;
+        case 1: // Front view
+            m_pitch = 0.0f;
+            m_yaw = 90.0f;
+            break;
+        case 2: // Side / Right view
+            m_pitch = 0.0f;
+            m_yaw = 0.0f;
+            break;
+        case 3: // 3D Isometric view
+        default:
+            m_pitch = -30.0f;
+            m_yaw = 45.0f;
+            break;
+    }
+    UpdateVectors();
+    float dist = (m_position - m_target).Length();
+    if (dist < 10.0f) dist = 400.0f;
+    m_position = m_target - m_forward * dist;
+}
+

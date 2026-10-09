@@ -69,7 +69,7 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
         }
         bool isHovered = (id == hoveredId);
 
-        // Determine area color based on selection and attributes with high contrast
+        // Determine area color based on selection, attributes, and island clustering
         float r = 0.15f, g = 0.82f, b = 0.38f, a = 0.70f; // Normal: High-contrast green
         float lr = 0.30f, lg = 1.0f, lb = 0.50f, la = 1.0f;
 
@@ -79,6 +79,25 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
         } else if (isHovered) {
             r = 0.05f; g = 0.92f; b = 1.0f; a = 0.80f; // Hovered: Electric cyan
             lr = 0.50f; lg = 1.0f; lb = 1.0f; la = 1.0f;
+        } else if (m_showIslandColors && !m_areaClusterMap.empty()) {
+            auto it = m_areaClusterMap.find(id);
+            int clusterIdx = (it != m_areaClusterMap.end()) ? it->second : 0;
+            static const float palette[8][3] = {
+                { 0.15f, 0.82f, 0.38f }, // 0: Main (Green)
+                { 1.00f, 0.50f, 0.05f }, // 1: Orange
+                { 0.95f, 0.15f, 0.75f }, // 2: Magenta
+                { 0.10f, 0.75f, 1.00f }, // 3: Blue
+                { 0.95f, 0.85f, 0.10f }, // 4: Yellow
+                { 0.65f, 0.25f, 1.00f }, // 5: Purple
+                { 1.00f, 0.30f, 0.30f }, // 6: Red
+                { 0.10f, 0.95f, 0.80f }  // 7: Teal
+            };
+            int c = clusterIdx % 8;
+            r = palette[c][0]; g = palette[c][1]; b = palette[c][2]; a = 0.75f;
+            lr = std::min(1.0f, r + 0.25f);
+            lg = std::min(1.0f, g + 0.25f);
+            lb = std::min(1.0f, b + 0.25f);
+            la = 1.0f;
         } else if (area->HasAttributes(NAV_ATTR_CROUCH)) {
             r = 0.18f; g = 0.52f; b = 1.0f; a = 0.72f; // Crouch: Deep sky blue
             lr = 0.40f; lg = 0.75f; lb = 1.0f; la = 1.0f;

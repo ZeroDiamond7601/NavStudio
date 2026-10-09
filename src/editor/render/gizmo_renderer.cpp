@@ -540,3 +540,145 @@ void GizmoRenderer::RenderRectMarquee4(const Shader& lineShader, const Matrix4& 
     glDepthFunc(GL_LESS);
     glDisable(GL_BLEND);
 }
+
+void GizmoRenderer::RenderBoxWireframe(const Shader& lineShader, const Matrix4& mvp,
+                                       const Vector3& mins, const Vector3& maxs,
+                                       float r, float g, float b, float a,
+                                       float lineWidth) {
+    if (m_vao == 0) {
+        glGenVertexArrays(1, &m_vao);
+        glGenBuffers(1, &m_vbo);
+        glGenBuffers(1, &m_ebo);
+    }
+
+    GizmoVertex v[8] = {
+        { mins.x, mins.y, mins.z, r, g, b, a },
+        { maxs.x, mins.y, mins.z, r, g, b, a },
+        { maxs.x, maxs.y, mins.z, r, g, b, a },
+        { mins.x, maxs.y, mins.z, r, g, b, a },
+        { mins.x, mins.y, maxs.z, r, g, b, a },
+        { maxs.x, mins.y, maxs.z, r, g, b, a },
+        { maxs.x, maxs.y, maxs.z, r, g, b, a },
+        { mins.x, maxs.y, maxs.z, r, g, b, a }
+    };
+
+    uint32_t indices[24] = {
+        0, 1,  1, 2,  2, 3,  3, 0,
+        4, 5,  5, 6,  6, 7,  7, 4,
+        0, 4,  1, 5,  2, 6,  3, 7
+    };
+
+    glBindVertexArray(m_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_DYNAMIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(GizmoVertex), (void*)offsetof(GizmoVertex, x));
+    glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(GizmoVertex), (void*)offsetof(GizmoVertex, r));
+    glEnableVertexAttribArray(1);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+
+    lineShader.Bind();
+    lineShader.SetMat4("u_MVP", mvp);
+    lineShader.SetVec4("u_Color", 1.0f, 1.0f, 1.0f, 1.0f);
+
+    glLineWidth(lineWidth);
+    glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, nullptr);
+    glBindVertexArray(0);
+    lineShader.Unbind();
+
+    glLineWidth(1.0f);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
+    glDisable(GL_BLEND);
+}
+
+void GizmoRenderer::RenderPathRibbon(const Shader& lineShader, const Matrix4& mvp,
+                                     const std::vector<Vector3>& points,
+                                     const std::vector<bool>& jumpFlags,
+                                     float lineWidth) {
+    if (points.size() < 2) return;
+    if (m_vao == 0) {
+        glGenVertexArrays(1, &m_vao);
+        glGenBuffers(1, &m_vbo);
+        glGenBuffers(1, &m_ebo);
+    }
+
+    std::vector<GizmoVertex> verts;
+    std::vector<uint32_t> indices;
+    verts.reserve(points.size() * 5);
+    indices.reserve(points.size() * 6);
+
+    for (size_t i = 0; i < points.size(); ++i) {
+        bool isJump = (i < jumpFlags.size()) ? jumpFlags[i] : false;
+        float r = isJump ? 1.0f : 0.0f;
+        float g = isJump ? 0.72f : 0.95f;
+        float b = isJump ? 0.12f : 1.0f;
+        float a = 0.95f;
+
+        Vector3 pt = points[i];
+        pt.z += 4.0f;
+
+        uint32_t ptIdx = static_cast<uint32_t>(verts.size());
+        verts.push_back({ pt.x, pt.y, pt.z, r, g, b, a });
+
+        if (i > 0) {
+            // Connect to previous point (ptIdx of previous is ptIdx - 5 if each node has 5 verts)
+            indices.push_back(ptIdx - 5);
+            indices.push_back(ptIdx);
+        }
+
+        // Cross waypoint marker at node
+        float d = 4.0f;
+        uint32_t wIdx = static_cast<uint32_t>(verts.size());
+        verts.push_back({ pt.x - d, pt.y, pt.z, 1.0f, 1.0f, 1.0f, 0.9f });
+        verts.push_back({ pt.x + d, pt.y, pt.z, 1.0f, 1.0f, 1.0f, 0.9f });
+        verts.push_back({ pt.x, pt.y - d, pt.z, 1.0f, 1.0f, 1.0f, 0.9f });
+        verts.push_back({ pt.x, pt.y + d, pt.z, 1.0f, 1.0f, 1.0f, 0.9f });
+
+        indices.push_back(wIdx);     indices.push_back(wIdx + 1);
+        indices.push_back(wIdx + 2); indices.push_back(wIdx + 3);
+    }
+
+    glBindVertexArray(m_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+    glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(GizmoVertex), verts.data(), GL_DYNAMIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(uint32_t), indices.data(), GL_DYNAMIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(GizmoVertex), (void*)offsetof(GizmoVertex, x));
+    glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(GizmoVertex), (void*)offsetof(GizmoVertex, r));
+    glEnableVertexAttribArray(1);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+
+    lineShader.Bind();
+    lineShader.SetMat4("u_MVP", mvp);
+    lineShader.SetVec4("u_Color", 1.0f, 1.0f, 1.0f, 1.0f);
+
+    glLineWidth(lineWidth);
+    glDrawElements(GL_LINES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, nullptr);
+    glBindVertexArray(0);
+    lineShader.Unbind();
+
+    glLineWidth(1.0f);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
+    glDisable(GL_BLEND);
+}

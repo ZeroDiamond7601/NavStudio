@@ -50,6 +50,16 @@ public:
                             float nwZ, float neZ, float seZ, float swZ,
                             float r = 0.0f, float g = 0.9f, float b = 1.0f, float a = 1.0f);
 
+    void RenderBoxWireframe(const Shader& lineShader, const Matrix4& mvp,
+                           const Vector3& mins, const Vector3& maxs,
+                           float r, float g, float b, float a,
+                           float lineWidth = 2.5f);
+
+    void RenderPathRibbon(const Shader& lineShader, const Matrix4& mvp,
+                          const std::vector<Vector3>& points,
+                          const std::vector<bool>& jumpFlags,
+                          float lineWidth = 4.0f);
+
 private:
     void BuildBuffers(const Vector3& center, const Vector3& camPos,
                       GizmoMode mode,

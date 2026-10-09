@@ -8,6 +8,7 @@
 #include <thread>
 #include "bsp/bsp_file.h"
 #include "nav/nav_file.h"
+#include "nav/nav_path.h"
 #include "nav/nav_generator.h"
 #include "editor/render/bsp_renderer.h"
 #include "editor/render/nav_renderer.h"
@@ -288,6 +289,57 @@ public:
     bool GetKnifeAxisOverride() const { return m_knifeAngle == KNIFE_ANGLE_0; }
     bool IsKnifeAxisForced() const { return m_knifeForceAxis; }
 
+    // Interactive Path Preview / Simulator
+    struct PathPreviewState {
+        uint32_t startAreaId{0};
+        uint32_t goalAreaId{0};
+        Vector3 startPos{0.0f, 0.0f, 0.0f};
+        Vector3 goalPos{0.0f, 0.0f, 0.0f};
+        bool hasStart{false};
+        bool hasGoal{false};
+        bool isToolActive{false};
+        bool showPath{true};
+        int flags{NAV_PATH_DEFAULT};
+        NavPath path;
+        std::vector<Vector3> renderPoints;
+        std::vector<bool> jumpFlags;
+    };
+
+    PathPreviewState& GetPathPreview() { return m_pathPreview; }
+    const PathPreviewState& GetPathPreview() const { return m_pathPreview; }
+    void SetPathStart(uint32_t areaId, const Vector3& pos);
+    void SetPathGoal(uint32_t areaId, const Vector3& pos);
+    void ClearPath();
+    bool RecomputePath();
+    void TogglePathTool();
+    bool IsPathToolActive() const { return m_pathPreview.isToolActive; }
+    void SetPathToolActive(bool active) { m_pathPreview.isToolActive = active; }
+    void OnPathToolClick(const Ray& ray);
+
+    // Island / Disconnected Region Finder
+    struct IslandCluster {
+        int id{0};
+        size_t areaCount{0};
+        bool hasSpawn{false};
+        Vector3 center{0.0f, 0.0f, 0.0f};
+        std::vector<uint32_t> areaIds;
+    };
+
+    std::vector<IslandCluster> AnalyzeIslands() const;
+    bool GetShowIslandColors() const { return m_showIslandColors; }
+    void SetShowIslandColors(bool show);
+    void ToggleIslandColors();
+    void SelectIsland(int clusterId);
+    void DeleteIsland(int clusterId, class CommandManager& cmdMgr);
+
+    // Player Clearance Hull Visualizer
+    bool GetShowClearanceHull() const { return m_showClearanceHull; }
+    void SetShowClearanceHull(bool show) { m_showClearanceHull = show; }
+    void ToggleClearanceHull() { m_showClearanceHull = !m_showClearanceHull; }
+    bool GetClearanceCrouch() const { return m_clearanceCrouch; }
+    void SetClearanceCrouch(bool crouch) { m_clearanceCrouch = crouch; }
+    bool CheckClearance(const Vector3& pos, bool crouch, float* outCeilingDist = nullptr) const;
+
     // User Preferences
     EditorPreferences& GetPreferences() { return m_prefs; }
     const EditorPreferences& GetPreferences() const { return m_prefs; }
@@ -496,6 +548,11 @@ private:
 
     AsyncLoadContext m_loadCtx;
     std::thread m_loadThread;
+
+    PathPreviewState m_pathPreview;
+    bool m_showIslandColors{false};
+    bool m_showClearanceHull{false};
+    bool m_clearanceCrouch{false};
 
     void PostGenerateOptimize();
 };
