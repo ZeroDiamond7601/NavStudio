@@ -51,6 +51,12 @@ void Camera::FocusOn(const Vector3& center, float distance) {
     }
 }
 
+void Camera::SetAngles(float pitch, float yaw) {
+    m_pitch = std::max(-89.0f, std::min(89.0f, pitch));
+    m_yaw = yaw;
+    UpdateVectors();
+}
+
 void Camera::Update(float /*deltaTime*/) {
     // Dynamic smoothing can be added if needed
 }

@@ -32,6 +32,7 @@ public:
 
     void SetTarget(const Vector3& target);
     void FocusOn(const Vector3& center, float distance = 400.0f);
+    void SetAngles(float pitch, float yaw);
 
     CameraMode GetMode() const { return m_mode; }
     void SetMode(CameraMode mode);

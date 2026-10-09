@@ -19,6 +19,8 @@
 #include <iostream>
 #include <algorithm>
 #include <cctype>
+#include <ctime>
+#include <cstdlib>
 
 static Camera g_camera;
 static EditorScene* g_activeScene = nullptr;
@@ -37,6 +39,58 @@ static double g_boxSelectStartX = 0.0;
 static double g_boxSelectStartY = 0.0;
 static double g_boxSelectCurrentX = 0.0;
 static double g_boxSelectCurrentY = 0.0;
+
+static bool SaveScreenToBMP(const std::string& filename, int width, int height) {
+#pragma pack(push, 1)
+    struct BMPHeader {
+        uint16_t bfType = 0x4D42;
+        uint32_t bfSize = 0;
+        uint16_t bfReserved1 = 0;
+        uint16_t bfReserved2 = 0;
+        uint32_t bfOffBits = 54;
+        uint32_t biSize = 40;
+        int32_t  biWidth = 0;
+        int32_t  biHeight = 0;
+        uint16_t biPlanes = 1;
+        uint16_t biBitCount = 24;
+        uint32_t biCompression = 0;
+        uint32_t biSizeImage = 0;
+        int32_t  biXPelsPerMeter = 2835;
+        int32_t  biYPelsPerMeter = 2835;
+        uint32_t biClrUsed = 0;
+        uint32_t biClrImportant = 0;
+    } header;
+#pragma pack(pop)
+
+    int rowStride = ((width * 3 + 3) / 4) * 4;
+    header.biWidth = width;
+    header.biHeight = height;
+    header.biSizeImage = rowStride * height;
+    header.bfSize = 54 + header.biSizeImage;
+
+    std::vector<uint8_t> rgb(width * height * 3);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, rgb.data());
+
+    std::vector<uint8_t> bmpData(header.biSizeImage, 0);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            int srcIdx = (y * width + x) * 3;
+            int dstIdx = y * rowStride + x * 3;
+            bmpData[dstIdx + 0] = rgb[srcIdx + 2]; // B
+            bmpData[dstIdx + 1] = rgb[srcIdx + 1]; // G
+            bmpData[dstIdx + 2] = rgb[srcIdx + 0]; // R
+        }
+    }
+
+    FILE* f = std::fopen(filename.c_str(), "wb");
+    if (!f) return false;
+    std::fwrite(&header, 1, sizeof(header), f);
+    std::fwrite(bmpData.data(), 1, bmpData.size(), f);
+    std::fclose(f);
+    std::printf("[Screenshot] Saved %dx%d screenshot to: %s\n", width, height, filename.c_str());
+    return true;
+}
 
 static void WindowCloseCallback(GLFWwindow* window) {
     if (g_activeScene && g_activeScene->HasNAV() &&
@@ -460,6 +514,13 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 if (g_editorUI) g_editorUI->OpenLandmarksModal();
             } else if (key == GLFW_KEY_A && ctrlDown) { // Ctrl+A: Select All
                 g_activeScene->SelectAllAreas();
+            } else if (key == GLFW_KEY_F12 && action == GLFW_PRESS) { // F12: Screenshot
+                int displayW = 0, displayH = 0;
+                glfwGetFramebufferSize(window, &displayW, &displayH);
+                std::time_t now = std::time(nullptr);
+                char buf[64];
+                std::strftime(buf, sizeof(buf), "navstudio_%Y%m%d_%H%M%S.bmp", std::localtime(&now));
+                SaveScreenToBMP(buf, displayW, displayH);
             } else if (key == GLFW_KEY_ESCAPE) {
                 if (g_activeScene->IsBoxSelectMode()) {
                     g_activeScene->SetBoxSelectMode(false);
@@ -762,6 +823,53 @@ int main(int argc, char* argv[]) {
 
     int initialWidth = 1440;
     int initialHeight = 900;
+    std::string argPath = "";
+    std::string screenshotPath = "";
+    int screenshotWaitFrames = 45;
+    int customShading = -1;
+    int customEntities = -1;
+    uint32_t customSelectArea = 0;
+    bool hasCustomCamPos = false;
+    Vector3 customCamPos{0.0f, 0.0f, 0.0f};
+    bool hasCustomCamAngles = false;
+    float customPitch = -20.0f;
+    float customYaw = 90.0f;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--screenshot" && i + 1 < argc) {
+            screenshotPath = argv[++i];
+        } else if (arg == "--frames" && i + 1 < argc) {
+            screenshotWaitFrames = std::atoi(argv[++i]);
+        } else if (arg == "--shading" && i + 1 < argc) {
+            customShading = std::atoi(argv[++i]);
+        } else if (arg == "--entities" && i + 1 < argc) {
+            customEntities = std::atoi(argv[++i]);
+        } else if (arg == "--select-area" && i + 1 < argc) {
+            customSelectArea = static_cast<uint32_t>(std::atoi(argv[++i]));
+        } else if (arg == "--cam-pos" && i + 3 < argc) {
+            customCamPos.x = static_cast<float>(std::atof(argv[++i]));
+            customCamPos.y = static_cast<float>(std::atof(argv[++i]));
+            customCamPos.z = static_cast<float>(std::atof(argv[++i]));
+            hasCustomCamPos = true;
+        } else if (arg == "--cam-angles" && i + 2 < argc) {
+            customPitch = static_cast<float>(std::atof(argv[++i]));
+            customYaw = static_cast<float>(std::atof(argv[++i]));
+            hasCustomCamAngles = true;
+        } else if (arg == "--width" && i + 1 < argc) {
+            initialWidth = std::atoi(argv[++i]);
+        } else if (arg == "--height" && i + 1 < argc) {
+            initialHeight = std::atoi(argv[++i]);
+        } else if (argPath.empty() && !arg.empty() && arg[0] != '-') {
+            argPath = arg;
+        }
+    }
+
+    if (!screenshotPath.empty() && initialWidth == 1440 && initialHeight == 900) {
+        initialWidth = 1920;
+        initialHeight = 1080;
+    }
+
     GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.5.3", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "[Error] Failed to create GLFW window\n");
@@ -827,8 +935,7 @@ int main(int argc, char* argv[]) {
     glfwSetWindowCloseCallback(window, WindowCloseCallback);
 
     // Load initial map if passed via arguments
-    if (argc > 1) {
-        std::string argPath = argv[1];
+    if (!argPath.empty()) {
         scene.StartAsyncLoad(argPath);
     }
 
@@ -851,6 +958,41 @@ int main(int argc, char* argv[]) {
         // Update background scene loading and stage progress
         scene.UpdateAsyncLoading(deltaTime);
         scene.UpdateAutosave(deltaTime);
+
+        if (!screenshotPath.empty() && !scene.IsAsyncLoading()) {
+            static bool s_configured = false;
+            if (!s_configured) {
+                s_configured = true;
+                if (customShading >= 0) {
+                    scene.SetBSPMode(static_cast<BSPRenderMode>(customShading));
+                }
+                if (customEntities >= 0) {
+                    scene.GetEntityRenderer().SetShowEntities(customEntities != 0);
+                }
+                if (customSelectArea > 0) {
+                    scene.SelectArea(customSelectArea);
+                    NavArea* a = scene.GetNAV().GetAreaByID(customSelectArea);
+                    if (a && !hasCustomCamPos) {
+                        g_camera.FocusOn(a->GetCenter(), 450.0f);
+                    }
+                } else if (!hasCustomCamPos) {
+                    if (scene.HasNAV() && scene.GetNAV().GetAreaCount() > 0) {
+                        size_t idx = scene.GetNAV().GetAreaCount() / 3;
+                        const NavArea* a = scene.GetNAV().GetArea(idx);
+                        if (a) {
+                            scene.SelectArea(a->GetID());
+                            g_camera.FocusOn(a->GetCenter(), 450.0f);
+                        }
+                    }
+                }
+                if (hasCustomCamPos) {
+                    g_camera.SetPosition(customCamPos);
+                }
+                if (hasCustomCamAngles) {
+                    g_camera.SetAngles(customPitch, customYaw);
+                }
+            }
+        }
 
         int displayW = 0, displayH = 0;
         glfwGetFramebufferSize(window, &displayW, &displayH);
@@ -879,6 +1021,15 @@ int main(int argc, char* argv[]) {
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        if (!screenshotPath.empty() && !scene.IsAsyncLoading()) {
+            static int s_renderFrames = 0;
+            s_renderFrames++;
+            if (s_renderFrames >= screenshotWaitFrames) {
+                SaveScreenToBMP(screenshotPath, displayW, displayH);
+                glfwSetWindowShouldClose(window, GLFW_TRUE);
+            }
+        }
 
         glfwSwapBuffers(window);
     }
