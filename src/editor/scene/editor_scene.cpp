@@ -2601,11 +2601,13 @@ void EditorScene::DisconnectSelectedFrom(uint32_t targetId, bool bidirectional, 
 void EditorScene::SelectConnection(uint32_t fromId, uint32_t toId, int dir) {
     m_selectedConnection = { fromId, toId, dir };
     m_navRenderer.SetSelectedConnection(fromId, toId);
+    RebuildNavRenderer();
 }
 
 void EditorScene::ClearSelectedConnection() {
     m_selectedConnection.clear();
     m_navRenderer.SetSelectedConnection(0, 0);
+    RebuildNavRenderer();
 }
 
 bool EditorScene::DeleteSelectedConnection(CommandManager& cmdMgr) {

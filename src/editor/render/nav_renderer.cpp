@@ -279,6 +279,35 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
                 lineIndices.push_back(cIdx);
                 lineIndices.push_back(cIdx + 1);
 
+                if (isConnSelected) {
+                    // Radiant parallel accent lines to make selected connection visually bold and unmistakable
+                    for (float latOff : { -1.8f, 1.8f, -3.6f, 3.6f }) {
+                        Vector3 s2 = start + lateral * latOff;
+                        Vector3 e2 = end + lateral * latOff;
+                        uint32_t offIdx = static_cast<uint32_t>(lineVertices.size());
+                        lineVertices.push_back({ s2.x, s2.y, s2.z, 0,0,1, 0,0, cr, cg, cb, 0.90f });
+                        lineVertices.push_back({ e2.x, e2.y, e2.z, 0,0,1, 0,0, cr, cg, cb, 0.90f });
+                        lineIndices.push_back(offIdx);
+                        lineIndices.push_back(offIdx + 1);
+                    }
+                    // Midpoint diamond indicator
+                    Vector3 midPt = (start + end) * 0.5f;
+                    float dRad = 6.0f;
+                    Vector3 dN = midPt + fwd * dRad;
+                    Vector3 dS = midPt - fwd * dRad;
+                    Vector3 dE = midPt + lateral * dRad;
+                    Vector3 dW = midPt - lateral * dRad;
+                    uint32_t mIdx = static_cast<uint32_t>(lineVertices.size());
+                    lineVertices.push_back({ dN.x, dN.y, dN.z, 0,0,1, 0,0, 1.0f, 1.0f, 0.4f, 1.0f });
+                    lineVertices.push_back({ dE.x, dE.y, dE.z, 0,0,1, 0,0, 1.0f, 1.0f, 0.4f, 1.0f });
+                    lineVertices.push_back({ dS.x, dS.y, dS.z, 0,0,1, 0,0, 1.0f, 1.0f, 0.4f, 1.0f });
+                    lineVertices.push_back({ dW.x, dW.y, dW.z, 0,0,1, 0,0, 1.0f, 1.0f, 0.4f, 1.0f });
+                    lineIndices.push_back(mIdx + 0); lineIndices.push_back(mIdx + 1);
+                    lineIndices.push_back(mIdx + 1); lineIndices.push_back(mIdx + 2);
+                    lineIndices.push_back(mIdx + 2); lineIndices.push_back(mIdx + 3);
+                    lineIndices.push_back(mIdx + 3); lineIndices.push_back(mIdx + 0);
+                }
+
                 // Add directional arrowhead along this lane
                 if (dist > 18.0f) {
                     Vector3 tip = start + fwd * (dist * 0.75f);

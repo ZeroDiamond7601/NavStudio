@@ -618,6 +618,7 @@ bool ScenePicker::PickConnection(
     outToId = 0;
     outDir = -1;
     if (!scene.HasNAV()) return false;
+    if (!scene.GetShowConnections()) return false;
     const NavMesh& nav = scene.GetNAV();
     Matrix4 viewProj = projMatrix * viewMatrix;
 

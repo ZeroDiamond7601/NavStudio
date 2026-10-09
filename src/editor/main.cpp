@@ -133,23 +133,39 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                           glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
 
         if (action == GLFW_PRESS) {
-            if (altPressed && g_activeScene && !g_activeScene->IsConnectionSelectionMode()) {
-                g_isAltOrbiting = true;
-                g_firstMouse = true;
-                NavArea* sel = g_activeScene->GetSelectedArea();
-                if (sel) {
-                    g_camera.SetTarget(sel->GetCenter());
-                } else {
-                    g_camera.SetTarget(g_camera.GetPosition() + g_camera.GetForward() * 400.0f);
-                }
-                return;
-            }
-
             int displayW = 0, displayH = 0;
             glfwGetFramebufferSize(window, &displayW, &displayH);
             float aspect = (displayH > 0) ? (static_cast<float>(displayW) / static_cast<float>(displayH)) : 1.0f;
             double mouseX, mouseY;
             glfwGetCursorPos(window, &mouseX, &mouseY);
+
+            // Alt+Click: test connection picking first before orbiting
+            if (altPressed && g_activeScene) {
+                uint32_t fromId = 0, toId = 0;
+                int dir = -1;
+                bool hitConn = ScenePicker::PickConnection(
+                    *g_activeScene,
+                    static_cast<float>(mouseX), static_cast<float>(mouseY),
+                    static_cast<float>(displayW), static_cast<float>(displayH),
+                    g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect),
+                    fromId, toId, dir, 18.0f
+                );
+                if (hitConn) {
+                    g_activeScene->SelectConnection(fromId, toId, dir);
+                    return;
+                }
+                if (!g_activeScene->IsConnectionSelectionMode()) {
+                    g_isAltOrbiting = true;
+                    g_firstMouse = true;
+                    NavArea* sel = g_activeScene->GetSelectedArea();
+                    if (sel) {
+                        g_camera.SetTarget(sel->GetCenter());
+                    } else {
+                        g_camera.SetTarget(g_camera.GetPosition() + g_camera.GetForward() * 400.0f);
+                    }
+                    return;
+                }
+            }
 
             Ray ray = ScenePicker::ScreenPointToRay(
                 static_cast<float>(mouseX), static_cast<float>(mouseY),
@@ -215,34 +231,6 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     g_activeScene->ConnectSelectedTo(hitArea, !shiftPressed, *g_cmdMgr);
                 }
             } else {
-                bool altPressed = (mods & GLFW_MOD_ALT) != 0 ||
-                                  glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
-                                  glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
-                bool connSelectMode = altPressed || (g_activeScene && g_activeScene->IsConnectionSelectionMode());
-
-                if (connSelectMode && g_activeScene) {
-                    uint32_t fromId = 0, toId = 0;
-                    int dir = -1;
-                    bool hitConn = ScenePicker::PickConnection(
-                        *g_activeScene,
-                        static_cast<float>(mouseX), static_cast<float>(mouseY),
-                        static_cast<float>(displayW), static_cast<float>(displayH),
-                        g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect),
-                        fromId, toId, dir
-                    );
-                    if (hitConn) {
-                        g_activeScene->SelectConnection(fromId, toId, dir);
-                        return;
-                    } else if (g_activeScene->IsConnectionSelectionMode()) {
-                        g_activeScene->ClearSelectedConnection();
-                        return;
-                    }
-                }
-
-                if (g_activeScene && g_activeScene->HasSelectedConnection() && !connSelectMode) {
-                    g_activeScene->ClearSelectedConnection();
-                }
-
                 // Test area gizmo handles, edges, and corners first
                 SelectedHandleType handle = ScenePicker::PickAreaHandles(
                     *g_activeScene,
@@ -264,6 +252,25 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     return;
                 }
 
+                // Test directional connections when visible or in connection selection mode
+                bool connSelectMode = g_activeScene && (g_activeScene->IsConnectionSelectionMode() || g_activeScene->GetShowConnections());
+                if (connSelectMode) {
+                    uint32_t fromId = 0, toId = 0;
+                    int dir = -1;
+                    float pickTol = g_activeScene->IsConnectionSelectionMode() ? 18.0f : 12.0f;
+                    bool hitConn = ScenePicker::PickConnection(
+                        *g_activeScene,
+                        static_cast<float>(mouseX), static_cast<float>(mouseY),
+                        static_cast<float>(displayW), static_cast<float>(displayH),
+                        g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect),
+                        fromId, toId, dir, pickTol
+                    );
+                    if (hitConn) {
+                        g_activeScene->SelectConnection(fromId, toId, dir);
+                        return;
+                    }
+                }
+
                 // Pick entity and NavArea with accurate distance comparison
                 float entDist = std::numeric_limits<float>::max();
                 int hitEntity = ScenePicker::PickEntity(*g_activeScene, ray, &entDist);
@@ -279,12 +286,19 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                 if (hitArea != 0 && (hitEntity < 0 || navDist <= entDist + 16.0f)) {
                     g_activeScene->SelectArea(hitArea, additive, toggle);
                     g_activeScene->SelectEntity(-1);
+                    if (g_activeScene->HasSelectedConnection() && !g_activeScene->IsConnectionSelectionMode()) {
+                        g_activeScene->ClearSelectedConnection();
+                    }
                 } else if (hitEntity >= 0) {
                     g_activeScene->SelectEntity(hitEntity);
                     g_activeScene->ClearSelection();
+                    if (g_activeScene->HasSelectedConnection()) {
+                        g_activeScene->ClearSelectedConnection();
+                    }
                 } else {
                     if (!additive && !toggle) {
                         g_activeScene->ClearSelection();
+                        g_activeScene->ClearSelectedConnection();
                         g_activeScene->SelectEntity(-1);
                     }
                     // Clicking in empty space begins marquee box selection

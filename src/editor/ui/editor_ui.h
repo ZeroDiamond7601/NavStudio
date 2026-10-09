@@ -55,6 +55,7 @@ private:
     void RenderToolPalette(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
     void RenderHierarchy(EditorScene& scene, Camera& camera);
     void RenderInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
+    void RenderAreaInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr, class NavArea* area);
     void RenderConnectionInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
     void RenderStatusBar(const EditorScene& scene, const Camera& camera);
     void RenderHelpModal();

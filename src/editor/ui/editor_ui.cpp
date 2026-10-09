@@ -1575,12 +1575,6 @@ void EditorUI::RenderEntityInspector(EditorScene& scene, Camera& camera) {
 void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
     ImGui::SetNextWindowSize(ImVec2(290, 460), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Property Inspector")) {
-        if (scene.HasSelectedConnection()) {
-            RenderConnectionInspector(scene, camera, cmdMgr);
-            ImGui::End();
-            return;
-        }
-
         if (scene.GetSelectedEntityIndex() >= 0) {
             RenderEntityInspector(scene, camera);
             ImGui::End();
@@ -1740,7 +1734,27 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
         }
 
         NavArea* area = scene.GetSelectedArea();
-        if (!area) {
+        bool hasConn = scene.HasSelectedConnection();
+
+        if (hasConn && area) {
+            if (ImGui::BeginTabBar("InspectorDualTabs")) {
+                if (ImGui::BeginTabItem("Connection Link")) {
+                    RenderConnectionInspector(scene, camera, cmdMgr);
+                    ImGui::EndTabItem();
+                }
+                char areaTabLabel[64];
+                snprintf(areaTabLabel, sizeof(areaTabLabel), "NavArea #%u", area->GetID());
+                if (ImGui::BeginTabItem(areaTabLabel)) {
+                    RenderAreaInspector(scene, camera, cmdMgr, area);
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            }
+        } else if (hasConn) {
+            RenderConnectionInspector(scene, camera, cmdMgr);
+        } else if (area) {
+            RenderAreaInspector(scene, camera, cmdMgr, area);
+        } else {
             if (scene.HasNAV()) {
                 RenderNavMeshGlobalInspector(scene, cmdMgr);
             } else if (scene.HasBSP()) {
@@ -1748,12 +1762,15 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
             } else {
                 ImGui::TextDisabled("No object or area selected.\nClick a NavArea or Entity in the 3D viewport or explorer.");
             }
-            ImGui::End();
-            return;
         }
+    }
+    ImGui::End();
+}
 
-        uint32_t id = area->GetID();
-        ImGui::Text("Area ID: #%u", id);
+void EditorUI::RenderAreaInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr, NavArea* area) {
+    if (!area) return;
+    uint32_t id = area->GetID();
+    ImGui::Text("Area ID: #%u", id);
         ImGui::Separator();
 
         // Place Name
@@ -2034,47 +2051,116 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
         ImGui::Text("Active Connections:");
 
         static const char* dirNames[] = { "North", "East", "South", "West" };
+        bool hasAnyConn = false;
         for (int d = 0; d < 4; ++d) {
             const auto& conns = area->GetAdjacentList(static_cast<NavDirType>(d));
             for (const auto& conn : conns) {
                 if (!conn.area) continue;
+                hasAnyConn = true;
                 uint32_t targetId = conn.area->GetID();
                 bool twoWay = conn.area->IsConnected(area);
 
+                bool isThisSelected = scene.HasSelectedConnection() &&
+                    ((scene.GetSelectedConnection().fromId == id && scene.GetSelectedConnection().toId == targetId) ||
+                     (twoWay && scene.GetSelectedConnection().fromId == targetId && scene.GetSelectedConnection().toId == id));
+
                 ImGui::PushID(static_cast<int>(targetId * 10 + d));
-                ImGui::BulletText("[%s] Area #%u", dirNames[d], targetId);
-                ImGui::SameLine();
 
-                if (twoWay) {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.6f, 0.7f, 0.8f));
-                    if (ImGui::SmallButton("2-Way")) {
-                        cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(&scene, targetId, id, false));
+                if (isThisSelected) {
+                    // Highlighted selected connection card in brilliant gold
+                    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.85f, 0.15f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.24f, 0.20f, 0.08f, 0.75f));
+                    ImGui::BeginChild("SelectedConnFrame", ImVec2(0, 68), true, ImGuiWindowFlags_NoScrollbar);
+
+                    ImGui::TextColored(ImVec4(1.0f, 0.90f, 0.15f, 1.0f), "[* SELECTED] [%s] -> Area #%u %s",
+                                       dirNames[d], targetId, twoWay ? "(2-Way)" : "(1-Way)");
+
+                    float deltaZ = conn.area->GetCenter().z - area->GetCenter().z;
+                    float dist = (conn.area->GetCenter() - area->GetCenter()).Length();
+                    bool isInvalid = (deltaZ > 18.0f && !(area->GetAttributes() & NAV_ATTR_JUMP)) || (deltaZ < -200.0f);
+                    if (isInvalid) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Dist: %.1fu | Step: %+.1fu [IMPASSABLE (>18u)]", dist, deltaZ);
+                    } else {
+                        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.5f, 1.0f), "Dist: %.1fu | Step: %+.1fu [Walkable]", dist, deltaZ);
+                    }
+
+                    if (ImGui::SmallButton("Deselect")) {
+                        scene.ClearSelectedConnection();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Focus [F]")) {
+                        Vector3 mid = (area->GetCenter() + conn.area->GetCenter()) * 0.5f;
+                        camera.FocusOn(mid);
+                    }
+                    ImGui::SameLine();
+                    if (twoWay) {
+                        if (ImGui::SmallButton("Make 1-Way")) {
+                            cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(&scene, targetId, id, false));
+                        }
+                    } else {
+                        if (ImGui::SmallButton("Make 2-Way")) {
+                            cmdMgr.ExecuteCommand(std::make_unique<CmdConnectAreas>(&scene, targetId, id, false));
+                        }
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Reverse")) {
+                        scene.ReverseSelectedConnection(cmdMgr);
+                    }
+                    ImGui::SameLine();
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.15f, 0.15f, 0.8f));
+                    if (ImGui::SmallButton("X")) {
+                        cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(&scene, id, targetId, twoWay));
+                        scene.ClearSelectedConnection();
                     }
                     ImGui::PopStyleColor();
+
+                    ImGui::EndChild();
+                    ImGui::PopStyleColor(2);
                 } else {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.4f, 0.0f, 0.8f));
-                    if (ImGui::SmallButton("1-Way")) {
-                        cmdMgr.ExecuteCommand(std::make_unique<CmdConnectAreas>(&scene, targetId, id, false));
+                    // Standard connection row with Select button
+                    if (ImGui::SmallButton("Select")) {
+                        scene.SelectConnection(id, targetId, d);
+                    }
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Select and highlight this connection in the 3D viewport");
+
+                    ImGui::SameLine();
+                    ImGui::Text("[%s] Area #%u", dirNames[d], targetId);
+                    ImGui::SameLine();
+
+                    if (twoWay) {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.6f, 0.7f, 0.8f));
+                        if (ImGui::SmallButton("2-Way")) {
+                            cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(&scene, targetId, id, false));
+                        }
+                        ImGui::PopStyleColor();
+                    } else {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.4f, 0.0f, 0.8f));
+                        if (ImGui::SmallButton("1-Way")) {
+                            cmdMgr.ExecuteCommand(std::make_unique<CmdConnectAreas>(&scene, targetId, id, false));
+                        }
+                        ImGui::PopStyleColor();
+                    }
+
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Jump")) {
+                        scene.SelectArea(targetId);
+                        camera.FocusOn(conn.area->GetCenter());
+                    }
+
+                    ImGui::SameLine();
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.15f, 0.15f, 0.8f));
+                    if (ImGui::SmallButton("X")) {
+                        cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(&scene, id, targetId, twoWay));
                     }
                     ImGui::PopStyleColor();
                 }
 
-                ImGui::SameLine();
-                if (ImGui::SmallButton("Jump")) {
-                    scene.SelectArea(targetId);
-                }
-
-                ImGui::SameLine();
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.15f, 0.15f, 0.8f));
-                if (ImGui::SmallButton("X")) {
-                    cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(&scene, id, targetId, twoWay));
-                }
-                ImGui::PopStyleColor();
                 ImGui::PopID();
             }
         }
-    }
-    ImGui::End();
+        if (!hasAnyConn) {
+            ImGui::TextDisabled("No active connections.");
+        }
 }
 
 void EditorUI::RenderConnectionInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
@@ -2097,7 +2183,19 @@ void EditorUI::RenderConnectionInspector(EditorScene& scene, Camera& camera, Com
     bool isInvalid = (deltaZ > 18.0f && !(fromArea->GetAttributes() & NAV_ATTR_JUMP)) || (deltaZ < -200.0f);
 
     ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.20f, 1.0f), "Connection Inspector");
-    ImGui::TextDisabled("Link: #%u -> #%u", conn.fromId, conn.toId);
+    ImGui::TextDisabled("Link: Area #%u -> Area #%u", conn.fromId, conn.toId);
+
+    // Top action bar
+    float halfW = (ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f;
+    if (ImGui::Button("Deselect [Esc]", ImVec2(halfW, 24))) {
+        scene.ClearSelectedConnection();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Focus View [F]", ImVec2(halfW, 24))) {
+        Vector3 mid = (fromArea->GetCenter() + toArea->GetCenter()) * 0.5f;
+        camera.FocusOn(mid);
+    }
+
     ImGui::Separator();
     ImGui::Spacing();
 
@@ -2128,8 +2226,10 @@ void EditorUI::RenderConnectionInspector(EditorScene& scene, Camera& camera, Com
     // Endpoints navigation
     float btnW = (ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f;
     ImGui::Text("Source Area #%u:", conn.fromId);
-    if (ImGui::Button("Select##connSrc", ImVec2(btnW, 22))) {
+    if (ImGui::Button("Select & Inspect##connSrc", ImVec2(btnW, 22))) {
+        scene.ClearSelectedConnection();
         scene.SelectArea(conn.fromId);
+        camera.FocusOn(fromArea->GetCenter());
     }
     ImGui::SameLine();
     if (ImGui::Button("Focus##connFocusSrc", ImVec2(btnW, 22))) {
@@ -2138,8 +2238,10 @@ void EditorUI::RenderConnectionInspector(EditorScene& scene, Camera& camera, Com
 
     ImGui::Spacing();
     ImGui::Text("Target Area #%u:", conn.toId);
-    if (ImGui::Button("Select##connDst", ImVec2(btnW, 22))) {
+    if (ImGui::Button("Select & Inspect##connDst", ImVec2(btnW, 22))) {
+        scene.ClearSelectedConnection();
         scene.SelectArea(conn.toId);
+        camera.FocusOn(toArea->GetCenter());
     }
     ImGui::SameLine();
     if (ImGui::Button("Focus##connFocusDst", ImVec2(btnW, 22))) {
