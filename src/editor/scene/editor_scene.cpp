@@ -2684,15 +2684,25 @@ void EditorScene::RotateSelectedArea90(CommandManager& cmdMgr) {
     NavArea* area = GetSelectedArea();
     if (!area) return;
     NavExtent oldExt = area->GetExtent();
+    float oldNeZ = area->GetNEZ();
+    float oldSwZ = area->GetSWZ();
     Vector3 center = (oldExt.lo + oldExt.hi) * 0.5f;
     float halfW = (oldExt.hi.x - oldExt.lo.x) * 0.5f;
     float halfL = (oldExt.hi.y - oldExt.lo.y) * 0.5f;
+
+    // In GoldSrc coordinates (+X East, +Y South):
+    // 90° clockwise rotation shifts corners: NW -> NE -> SE -> SW -> NW
+    float newNwZ = oldSwZ;
+    float newNeZ = oldExt.lo.z;
+    float newSeZ = oldNeZ;
+    float newSwZ = oldExt.hi.z;
+
     NavExtent newExt;
-    newExt.lo = Vector3(center.x - halfL, center.y - halfW, oldExt.lo.z);
-    newExt.hi = Vector3(center.x + halfL, center.y + halfW, oldExt.hi.z);
+    newExt.lo = Vector3(center.x - halfL, center.y - halfW, newNwZ);
+    newExt.hi = Vector3(center.x + halfL, center.y + halfW, newSeZ);
     cmdMgr.ExecuteCommand(std::make_unique<CmdTransformArea>(this, area->GetID(),
-        oldExt, area->GetNEZ(), area->GetSWZ(),
-        newExt, area->GetNEZ(), area->GetSWZ(), "Rotate Area 90°"));
+        oldExt, oldNeZ, oldSwZ,
+        newExt, newNeZ, newSwZ, "Rotate Area 90°"));
 }
 
 void EditorScene::ExtrudeSelectedEdge(CommandManager& cmdMgr, float length, bool useCameraFacing) {

@@ -586,6 +586,7 @@ public:
             created->SetPlaceName(src->GetPlaceName());
 
             m_scene->GetNAV().ConnectAreas(m_srcId, m_createdId, true, dirFromSrc);
+            m_scene->AutoConnectTouchingNeighbors(m_createdId);
             m_scene->SelectArea(m_createdId);
             m_scene->RebuildNavRenderer();
         }
@@ -1562,6 +1563,9 @@ public:
         }
 
         if (!m_createdIds.empty()) {
+            for (uint32_t cid : m_createdIds) {
+                m_scene->AutoConnectTouchingNeighbors(cid);
+            }
             m_scene->ClearSelection();
             for (uint32_t cid : m_createdIds) {
                 m_scene->SelectArea(cid, true, false);

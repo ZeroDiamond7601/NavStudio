@@ -482,96 +482,96 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 }
             }
 
-            // Normal Selection Mode Hotkeys
-            if (g_activeScene->GetSelectedAreaID() != 0 || !g_activeScene->GetSelectedAreaIDs().empty()) {
-                NavArea* sel = g_activeScene->GetSelectedArea();
+            // Normal Selection Mode Hotkeys (Connection selection takes priority over area selection)
+            if (key != GLFW_KEY_ESCAPE) {
+                if (g_activeScene->HasSelectedConnection()) {
+                    if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
+                        g_activeScene->DeleteSelectedConnection(*g_cmdMgr);
+                    } else if (key == GLFW_KEY_R && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) {
+                        g_activeScene->ReverseSelectedConnection(*g_cmdMgr);
+                    } else if ((key == GLFW_KEY_2 || key == GLFW_KEY_T) && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) {
+                        g_activeScene->ToggleSelectedConnectionBidirectional(*g_cmdMgr);
+                    } else if (key == GLFW_KEY_F) {
+                        const auto& sc = g_activeScene->GetSelectedConnection();
+                        const NavArea* a1 = g_activeScene->GetNAV().GetAreaByID(sc.fromId);
+                        const NavArea* a2 = g_activeScene->GetNAV().GetAreaByID(sc.toId);
+                        if (a1 && a2) {
+                            Vector3 mid = (a1->GetCenter() + a2->GetCenter()) * 0.5f;
+                            g_camera.FocusOn(mid);
+                        }
+                    }
+                } else if (g_activeScene->GetSelectedAreaID() != 0 || !g_activeScene->GetSelectedAreaIDs().empty()) {
+                    NavArea* sel = g_activeScene->GetSelectedArea();
 
-                int displayW = 0, displayH = 0;
-                glfwGetFramebufferSize(window, &displayW, &displayH);
-                float aspect = (displayH > 0) ? (static_cast<float>(displayW) / static_cast<float>(displayH)) : 1.0f;
-                double mouseX, mouseY;
-                glfwGetCursorPos(window, &mouseX, &mouseY);
+                    int displayW = 0, displayH = 0;
+                    glfwGetFramebufferSize(window, &displayW, &displayH);
+                    float aspect = (displayH > 0) ? (static_cast<float>(displayW) / static_cast<float>(displayH)) : 1.0f;
+                    double mouseX, mouseY;
+                    glfwGetCursorPos(window, &mouseX, &mouseY);
 
-                Ray ray = ScenePicker::ScreenPointToRay(
-                    static_cast<float>(mouseX), static_cast<float>(mouseY),
-                    static_cast<float>(displayW), static_cast<float>(displayH),
-                    g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
-                );
+                    Ray ray = ScenePicker::ScreenPointToRay(
+                        static_cast<float>(mouseX), static_cast<float>(mouseY),
+                        static_cast<float>(displayW), static_cast<float>(displayH),
+                        g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
+                    );
 
-                if (key == GLFW_KEY_G) {
-                    if (sel) g_activeScene->StartGrabWithRay(ray);
-                } else if (key == GLFW_KEY_S && (mods & GLFW_MOD_SHIFT) != 0) { // Shift+S: Snap to Neighbors
-                    if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
-                        g_activeScene->BatchSnapToNeighbors(*g_cmdMgr);
-                    } else if (sel) {
-                        g_activeScene->SnapSelectedAreaToNeighbors(*g_cmdMgr);
+                    if (key == GLFW_KEY_G) {
+                        if (sel) g_activeScene->StartGrabWithRay(ray);
+                    } else if (key == GLFW_KEY_S && (mods & GLFW_MOD_SHIFT) != 0) { // Shift+S: Snap to Neighbors
+                        if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
+                            g_activeScene->BatchSnapToNeighbors(*g_cmdMgr);
+                        } else if (sel) {
+                            g_activeScene->SnapSelectedAreaToNeighbors(*g_cmdMgr);
+                        }
+                    } else if (key == GLFW_KEY_S && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_SHIFT)) == 0) {
+                        if (sel) {
+                            Matrix4 viewProj = g_camera.GetProjectionMatrix(aspect) * g_camera.GetViewMatrix();
+                            g_activeScene->StartScaleWithScreen(
+                                static_cast<float>(mouseX), static_cast<float>(mouseY),
+                                static_cast<float>(displayW), static_cast<float>(displayH),
+                                viewProj
+                            );
+                        }
+                    } else if (key == GLFW_KEY_E && (mods & GLFW_MOD_CONTROL) == 0) { // Hammer Edge Extrude
+                        if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
+                            g_activeScene->BatchExtrude(*g_cmdMgr);
+                        } else if (sel) {
+                            g_activeScene->ExtrudeSelectedEdge(*g_cmdMgr);
+                        }
+                    } else if (key == GLFW_KEY_X && (mods & GLFW_MOD_SHIFT) != 0) { // Hammer Shift+X Split Area
+                        if (sel) g_activeScene->SplitSelectedArea(*g_cmdMgr);
+                    } else if (key == GLFW_KEY_M && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // Quick Merge [M]
+                        g_activeScene->MergeSelectedArea(*g_cmdMgr);
+                    } else if (key == GLFW_KEY_R) {
+                        if (sel) g_activeScene->RotateSelectedArea90(*g_cmdMgr);
+                    } else if (key == GLFW_KEY_C) {
+                        if (sel) g_activeScene->StartConnectMode();
+                    } else if (key == GLFW_KEY_D && (mods & GLFW_MOD_SHIFT) != 0) {
+                        if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
+                            g_activeScene->BatchDuplicate(*g_cmdMgr);
+                        } else if (sel) {
+                            g_activeScene->DuplicateSelectedArea(*g_cmdMgr);
+                        }
+                    } else if ((key == GLFW_KEY_X && (mods & GLFW_MOD_SHIFT) == 0) || key == GLFW_KEY_DELETE) {
+                        if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
+                            g_activeScene->BatchDelete(*g_cmdMgr);
+                        } else if (sel) {
+                            g_activeScene->DeleteSelectedArea(*g_cmdMgr);
+                        }
+                    } else if (key == GLFW_KEY_F) {
+                        if (sel) g_camera.FocusOn(sel->GetCenter());
+                    } else if (key == GLFW_KEY_SPACE) {
+                        if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
+                            g_activeScene->BatchSnapToFloor(*g_cmdMgr);
+                        } else if (g_activeScene->HasBSP() && sel) {
+                            g_cmdMgr->ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(g_activeScene, sel->GetID()));
+                        }
                     }
-                } else if (key == GLFW_KEY_S && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_SHIFT)) == 0) {
-                    if (sel) {
-                        Matrix4 viewProj = g_camera.GetProjectionMatrix(aspect) * g_camera.GetViewMatrix();
-                        g_activeScene->StartScaleWithScreen(
-                            static_cast<float>(mouseX), static_cast<float>(mouseY),
-                            static_cast<float>(displayW), static_cast<float>(displayH),
-                            viewProj
-                        );
+                } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {
+                    if (key == GLFW_KEY_F) {
+                        const EditorEntity* ent = g_activeScene->GetSelectedEntity();
+                        if (ent) g_camera.FocusOn(ent->origin);
                     }
-                } else if (key == GLFW_KEY_E && (mods & GLFW_MOD_CONTROL) == 0) { // Hammer Edge Extrude
-                    if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
-                        g_activeScene->BatchExtrude(*g_cmdMgr);
-                    } else if (sel) {
-                        g_activeScene->ExtrudeSelectedEdge(*g_cmdMgr);
-                    }
-                } else if (key == GLFW_KEY_X && (mods & GLFW_MOD_SHIFT) != 0) { // Hammer Shift+X Split Area
-                    if (sel) g_activeScene->SplitSelectedArea(*g_cmdMgr);
-                } else if (key == GLFW_KEY_M && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // Quick Merge [M]
-                    g_activeScene->MergeSelectedArea(*g_cmdMgr);
-                } else if (key == GLFW_KEY_R) {
-                    if (sel) g_activeScene->RotateSelectedArea90(*g_cmdMgr);
-                } else if (key == GLFW_KEY_C) {
-                    if (sel) g_activeScene->StartConnectMode();
-                } else if (key == GLFW_KEY_D && (mods & GLFW_MOD_SHIFT) != 0) {
-                    if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
-                        g_activeScene->BatchDuplicate(*g_cmdMgr);
-                    } else if (sel) {
-                        g_activeScene->DuplicateSelectedArea(*g_cmdMgr);
-                    }
-                } else if ((key == GLFW_KEY_X && (mods & GLFW_MOD_SHIFT) == 0) || key == GLFW_KEY_DELETE) {
-                    if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
-                        g_activeScene->BatchDelete(*g_cmdMgr);
-                    } else if (sel) {
-                        g_activeScene->DeleteSelectedArea(*g_cmdMgr);
-                    }
-                } else if (key == GLFW_KEY_F) {
-                    if (sel) g_camera.FocusOn(sel->GetCenter());
-                } else if (key == GLFW_KEY_SPACE) {
-                    if (g_activeScene->GetSelectedAreaIDs().size() > 1) {
-                        g_activeScene->BatchSnapToFloor(*g_cmdMgr);
-                    } else if (g_activeScene->HasBSP() && sel) {
-                        g_cmdMgr->ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(g_activeScene, sel->GetID()));
-                    }
-                } else if (key == GLFW_KEY_ESCAPE) {
-                    g_activeScene->ClearSelection();
-                }
-            } else if (g_activeScene->HasSelectedConnection()) {
-                if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
-                    g_activeScene->DeleteSelectedConnection(*g_cmdMgr);
-                } else if (key == GLFW_KEY_ESCAPE) {
-                    g_activeScene->ClearSelectedConnection();
-                } else if (key == GLFW_KEY_F) {
-                    const auto& sc = g_activeScene->GetSelectedConnection();
-                    const NavArea* a1 = g_activeScene->GetNAV().GetAreaByID(sc.fromId);
-                    const NavArea* a2 = g_activeScene->GetNAV().GetAreaByID(sc.toId);
-                    if (a1 && a2) {
-                        Vector3 mid = (a1->GetCenter() + a2->GetCenter()) * 0.5f;
-                        g_camera.FocusOn(mid);
-                    }
-                }
-            } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {
-                if (key == GLFW_KEY_F) {
-                    const EditorEntity* ent = g_activeScene->GetSelectedEntity();
-                    if (ent) g_camera.FocusOn(ent->origin);
-                } else if (key == GLFW_KEY_ESCAPE) {
-                    g_activeScene->SelectEntity(-1);
                 }
             }
 

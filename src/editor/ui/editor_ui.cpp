@@ -1589,10 +1589,25 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
             // Batch Place Name
             ImGui::Text("Batch Place Name:");
             static char batchPlaceBuffer[64] = "";
-            ImGui::InputText("##BatchPlaceInput", batchPlaceBuffer, sizeof(batchPlaceBuffer));
-            if (ImGui::Button("Apply Place to All", ImVec2(-1, 24))) {
+            bool bEnter = ImGui::InputText("##BatchPlaceInput", batchPlaceBuffer, sizeof(batchPlaceBuffer), ImGuiInputTextFlags_EnterReturnsTrue);
+            if (ImGui::Button("Apply Place to All", ImVec2(-1, 24)) || bEnter) {
                 if (batchPlaceBuffer[0] != '\0') {
                     scene.BatchSetPlace(batchPlaceBuffer, cmdMgr);
+                }
+            }
+            if (scene.HasNAV()) {
+                const auto& existingBatchPlaces = scene.GetNAV().GetPlaceNames();
+                if (!existingBatchPlaces.empty()) {
+                    if (ImGui::BeginCombo("##BatchExistingPlacesCombo", "Choose Existing Place...")) {
+                        for (const auto& pname : existingBatchPlaces) {
+                            if (ImGui::Selectable(pname.c_str(), false)) {
+                                std::strncpy(batchPlaceBuffer, pname.c_str(), sizeof(batchPlaceBuffer) - 1);
+                                batchPlaceBuffer[sizeof(batchPlaceBuffer) - 1] = '\0';
+                                scene.BatchSetPlace(pname, cmdMgr);
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
                 }
             }
 
@@ -1781,8 +1796,32 @@ void EditorUI::RenderAreaInspector(EditorScene& scene, Camera& camera, CommandMa
             m_placeEditBuffer[sizeof(m_placeEditBuffer) - 1] = '\0';
         }
 
-        if (ImGui::InputText("##PlaceInput", m_placeEditBuffer, sizeof(m_placeEditBuffer), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 62.0f);
+        bool enterPressed = ImGui::InputText("##PlaceInput", m_placeEditBuffer, sizeof(m_placeEditBuffer), ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SameLine();
+        bool applyClicked = ImGui::Button("Apply##Place", ImVec2(54, 0));
+        if (enterPressed || applyClicked) {
             cmdMgr.ExecuteCommand(std::make_unique<CmdSetAreaPlace>(&scene, id, m_placeEditBuffer));
+        }
+
+        if (scene.HasNAV()) {
+            const auto& existingPlaces = scene.GetNAV().GetPlaceNames();
+            if (!existingPlaces.empty()) {
+                if (ImGui::BeginCombo("##ExistingPlacesCombo", "Choose Existing Place...")) {
+                    for (const auto& pname : existingPlaces) {
+                        bool isSelected = (curPlace == pname);
+                        if (ImGui::Selectable(pname.c_str(), isSelected)) {
+                            std::strncpy(m_placeEditBuffer, pname.c_str(), sizeof(m_placeEditBuffer) - 1);
+                            m_placeEditBuffer[sizeof(m_placeEditBuffer) - 1] = '\0';
+                            cmdMgr.ExecuteCommand(std::make_unique<CmdSetAreaPlace>(&scene, id, pname));
+                        }
+                        if (isSelected) {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+            }
         }
 
         ImGui::Spacing();
@@ -2094,21 +2133,21 @@ void EditorUI::RenderAreaInspector(EditorScene& scene, Camera& camera, CommandMa
                     }
                     ImGui::SameLine();
                     if (twoWay) {
-                        if (ImGui::SmallButton("Make 1-Way")) {
+                        if (ImGui::SmallButton("Make 1-Way [2]")) {
                             cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(&scene, targetId, id, false));
                         }
                     } else {
-                        if (ImGui::SmallButton("Make 2-Way")) {
+                        if (ImGui::SmallButton("Make 2-Way [2]")) {
                             cmdMgr.ExecuteCommand(std::make_unique<CmdConnectAreas>(&scene, targetId, id, false));
                         }
                     }
                     ImGui::SameLine();
-                    if (ImGui::SmallButton("Reverse")) {
+                    if (ImGui::SmallButton("Reverse [R]")) {
                         scene.ReverseSelectedConnection(cmdMgr);
                     }
                     ImGui::SameLine();
                     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.15f, 0.15f, 0.8f));
-                    if (ImGui::SmallButton("X")) {
+                    if (ImGui::SmallButton("Del [X]")) {
                         cmdMgr.ExecuteCommand(std::make_unique<CmdDisconnectAreas>(&scene, id, targetId, twoWay));
                         scene.ClearSelectedConnection();
                     }
@@ -2253,17 +2292,17 @@ void EditorUI::RenderConnectionInspector(EditorScene& scene, Camera& camera, Com
     ImGui::Spacing();
 
     ImGui::Text("Connection Operations:");
-    if (ImGui::Button(isTwoWay ? "Convert to One-Way" : "Convert to Two-Way (Bidirectional)", ImVec2(-1, 26))) {
+    if (ImGui::Button(isTwoWay ? "Convert to One-Way [2]" : "Convert to Two-Way (Bidirectional) [2]", ImVec2(-1, 26))) {
         scene.ToggleSelectedConnectionBidirectional(cmdMgr);
     }
 
-    if (ImGui::Button("Reverse Direction (Swap Endpoints)", ImVec2(-1, 26))) {
+    if (ImGui::Button("Reverse Direction (Swap Endpoints) [R]", ImVec2(-1, 26))) {
         scene.ReverseSelectedConnection(cmdMgr);
     }
 
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.75f, 0.20f, 0.20f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.90f, 0.25f, 0.25f, 1.0f));
-    if (ImGui::Button("Delete Connection [Del]", ImVec2(-1, 26))) {
+    if (ImGui::Button("Delete Connection [Del / X]", ImVec2(-1, 26))) {
         scene.DeleteSelectedConnection(cmdMgr);
     }
     ImGui::PopStyleColor(2);
@@ -2486,8 +2525,9 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
             }
         } else if (scene.HasSelectedConnection()) {
             const auto& conn = scene.GetSelectedConnection();
-            ImGui::Text("Map: %s | Selected Connection: #%u -> #%u | Del: Delete | Esc: Deselect | Grid: %.0f [%s]",
-                bspName, conn.fromId, conn.toId, grid, snap ? "SNAP" : "FREE");
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f),
+                "Connection #%u %s #%u | Del/X: Delete | R: Reverse | 2: Toggle 2-Way | F: Focus Midpoint | Esc: Deselect | Grid: %.0f [%s]",
+                conn.fromId, conn.isBidirectional ? "<==>" : "-->", conn.toId, grid, snap ? "SNAP" : "FREE");
         } else if (scene.GetSelectedAreaIDs().size() > 1) {
             ImGui::Text("Map: %s | Multi-Selection: %zu NavAreas Selected | Grid: %.0f [%s] | Esc to clear",
                 bspName, scene.GetSelectedAreaIDs().size(), grid, snap ? "SNAP" : "FREE");
