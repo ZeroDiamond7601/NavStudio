@@ -52,7 +52,19 @@ jobs:
         run: cmake -B build -A Win32 -DBUILD_EDITOR=ON
 
       - name: Build Project
-        run: cmake --build build --config Release
+        shell: pwsh
+        run: |
+          $output = cmake --build build --config Release 2>&1
+          $output | Out-File -FilePath build.log -Encoding utf8
+          if ($LASTEXITCODE -ne 0) {
+            $errs = $output | Select-String "error C|fatal error|FAILED" -Context 1,1
+            foreach ($e in $errs) {
+              $clean = $e.ToString().Replace("`r", "").Replace("`n", " ")
+              Write-Host "::error title=MSVC Error::$clean"
+            }
+            Get-Content build.log -Tail 100 | Write-Host
+            exit 1
+          }
 
       - name: Test CLI
         run: .\build\Release\nav_cli.exe --help
