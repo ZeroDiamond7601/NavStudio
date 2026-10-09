@@ -745,6 +745,21 @@ public:
         m_mergedExt.hi.y = std::max(m_oldExt1.hi.y, m_oldExt2.hi.y);
         m_mergedExt.hi.z = std::max(m_oldExt1.hi.z, m_oldExt2.hi.z);
 
+        bool isXMerge = (m_oldExt1.hi.x <= m_oldExt2.lo.x + 2.0f || m_oldExt2.hi.x <= m_oldExt1.lo.x + 2.0f);
+        if (isXMerge) {
+            bool keepIsWest = (m_oldExt1.lo.x < m_oldExt2.lo.x);
+            m_mergedNeZ = keepIsWest ? m_oldNeZ2 : m_oldNeZ1;
+            m_mergedSwZ = keepIsWest ? m_oldSwZ1 : m_oldSwZ2;
+            m_mergedExt.lo.z = keepIsWest ? m_oldExt1.lo.z : m_oldExt2.lo.z;
+            m_mergedExt.hi.z = keepIsWest ? m_oldExt2.hi.z : m_oldExt1.hi.z;
+        } else {
+            bool keepIsNorth = (m_oldExt1.lo.y < m_oldExt2.lo.y);
+            m_mergedNeZ = keepIsNorth ? m_oldNeZ1 : m_oldNeZ2;
+            m_mergedSwZ = keepIsNorth ? m_oldSwZ2 : m_oldSwZ1;
+            m_mergedExt.lo.z = keepIsNorth ? m_oldExt1.lo.z : m_oldExt2.lo.z;
+            m_mergedExt.hi.z = keepIsNorth ? m_oldExt2.hi.z : m_oldExt1.hi.z;
+        }
+
         for (int d = 0; d < 4; ++d) {
             for (const auto& conn : a2->GetAdjacentList(static_cast<NavDirType>(d))) {
                 if (conn.area && conn.area->GetID() != keepId) {
@@ -771,6 +786,7 @@ public:
 
         m_scene->GetNAV().GetGrid().RemoveArea(a1);
         a1->SetExtent(m_mergedExt);
+        a1->SetCornerHeights(m_mergedNeZ, m_mergedSwZ);
         m_scene->GetNAV().GetGrid().AddArea(a1);
 
         m_scene->GetNAV().RemoveArea(m_removeId);
@@ -792,6 +808,7 @@ public:
         if (a1) {
             m_scene->GetNAV().GetGrid().RemoveArea(a1);
             a1->SetExtent(m_oldExt1);
+            a1->SetCornerHeights(m_oldNeZ1, m_oldSwZ1);
             m_scene->GetNAV().GetGrid().AddArea(a1);
         }
 
@@ -823,6 +840,7 @@ private:
     uint32_t m_keepId, m_removeId;
     NavExtent m_oldExt1, m_oldExt2, m_mergedExt;
     float m_oldNeZ1{0.0f}, m_oldSwZ1{0.0f}, m_oldNeZ2{0.0f}, m_oldSwZ2{0.0f};
+    float m_mergedNeZ{0.0f}, m_mergedSwZ{0.0f};
     uint8_t m_attr2{0};
     uint16_t m_place2{0};
     std::string m_placeName2;

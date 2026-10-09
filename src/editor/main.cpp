@@ -407,8 +407,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                     }
                 } else if (key == GLFW_KEY_X && (mods & GLFW_MOD_SHIFT) != 0) { // Hammer Shift+X Split Area
                     if (sel) g_activeScene->SplitSelectedArea(*g_cmdMgr);
-                } else if (key == GLFW_KEY_M && (mods & GLFW_MOD_SHIFT) != 0) { // Hammer Shift+M Merge
-                    if (sel) g_activeScene->MergeSelectedArea(*g_cmdMgr);
+                } else if (key == GLFW_KEY_M && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // Quick Merge [M]
+                    g_activeScene->MergeSelectedArea(*g_cmdMgr);
                 } else if (key == GLFW_KEY_R) {
                     if (sel) g_activeScene->RotateSelectedArea90(*g_cmdMgr);
                 } else if (key == GLFW_KEY_C) {
@@ -456,6 +456,23 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                     if (ent) g_camera.FocusOn(ent->origin);
                 } else if (key == GLFW_KEY_ESCAPE) {
                     g_activeScene->SelectEntity(-1);
+                }
+            }
+
+            // Camera Bookmarks: Ctrl+0..9 to Save, Alt+0..9 or Numpad 0..9 to Recall
+            for (int slot = 0; slot <= 9; ++slot) {
+                int keyNum = (slot == 0) ? GLFW_KEY_0 : (GLFW_KEY_0 + slot);
+                int keyKp = (slot == 0) ? GLFW_KEY_KP_0 : (GLFW_KEY_KP_0 + slot);
+                if (key == keyNum || key == keyKp) {
+                    if ((mods & GLFW_MOD_CONTROL) != 0 && (mods & (GLFW_MOD_ALT | GLFW_MOD_SHIFT)) == 0) {
+                        g_camera.SaveBookmark(slot);
+                        std::printf("[NavStudio] Saved camera bookmark slot %d @ (%.0f, %.0f, %.0f)\n",
+                            slot, g_camera.GetPosition().x, g_camera.GetPosition().y, g_camera.GetPosition().z);
+                    } else if (((mods & GLFW_MOD_ALT) != 0 || key == keyKp) && (mods & GLFW_MOD_CONTROL) == 0) {
+                        if (g_camera.RecallBookmark(slot)) {
+                            std::printf("[NavStudio] Recalled camera bookmark slot %d\n", slot);
+                        }
+                    }
                 }
             }
 
@@ -699,6 +716,7 @@ int main(int argc, char* argv[]) {
 
         // Update background scene loading and stage progress
         scene.UpdateAsyncLoading(deltaTime);
+        scene.UpdateAutosave(deltaTime);
 
         int displayW = 0, displayH = 0;
         glfwGetFramebufferSize(window, &displayW, &displayH);

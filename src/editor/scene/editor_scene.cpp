@@ -176,6 +176,44 @@ float EditorScene::SnapToNeighborEdge(uint32_t currentAreaId, float candidateVal
     if (found) {
         return bestSnap;
     }
+
+    // Secondary Pass: Magnetic Collinear Edge Alignment
+    if (m_prefs.enableCollinearSnap) {
+        float colTol = m_prefs.collinearSnapTolerance;
+        float bestColDist = colTol;
+        float bestColSnap = candidateVal;
+        bool colFound = false;
+
+        for (const auto* other : m_nav->GetAreas()) {
+            if (!other || other->GetID() == currentAreaId) continue;
+            const NavExtent& ext = other->GetExtent();
+
+            if (isXAxis) {
+                float otherCenterY = (ext.lo.y + ext.hi.y) * 0.5f;
+                float refCenterY = (refMinOtherAxis + refMaxOtherAxis) * 0.5f;
+                if (std::abs(otherCenterY - refCenterY) > 800.0f) continue;
+
+                float dLo = std::abs(candidateVal - ext.lo.x);
+                if (dLo < bestColDist) { bestColDist = dLo; bestColSnap = ext.lo.x; colFound = true; }
+                float dHi = std::abs(candidateVal - ext.hi.x);
+                if (dHi < bestColDist) { bestColDist = dHi; bestColSnap = ext.hi.x; colFound = true; }
+            } else {
+                float otherCenterX = (ext.lo.x + ext.hi.x) * 0.5f;
+                float refCenterX = (refMinOtherAxis + refMaxOtherAxis) * 0.5f;
+                if (std::abs(otherCenterX - refCenterX) > 800.0f) continue;
+
+                float dLo = std::abs(candidateVal - ext.lo.y);
+                if (dLo < bestColDist) { bestColDist = dLo; bestColSnap = ext.lo.y; colFound = true; }
+                float dHi = std::abs(candidateVal - ext.hi.y);
+                if (dHi < bestColDist) { bestColDist = dHi; bestColSnap = ext.hi.y; colFound = true; }
+            }
+        }
+
+        if (colFound) {
+            return bestColSnap;
+        }
+    }
+
     return SnapValue(candidateVal);
 }
 
@@ -351,6 +389,42 @@ bool EditorScene::SaveNAV(const std::string& navPath) {
     m_navPath = path;
     m_isModified = false;
     return true;
+}
+
+void EditorScene::UpdateAutosave(float deltaTime) {
+    if (!m_prefs.enableAutosave || m_prefs.autosaveIntervalMinutes <= 0) return;
+    if (!m_isModified || !m_nav || !m_nav->IsLoaded() || m_nav->GetAreaCount() == 0) {
+        m_autosaveTimer = 0.0f;
+        return;
+    }
+
+    m_autosaveTimer += deltaTime;
+    float intervalSec = static_cast<float>(m_prefs.autosaveIntervalMinutes) * 60.0f;
+    if (m_autosaveTimer >= intervalSec) {
+        m_autosaveTimer = 0.0f;
+        AutosaveNAV();
+    }
+}
+
+bool EditorScene::AutosaveNAV() {
+    if (!m_nav || !m_nav->IsLoaded() || m_nav->GetAreaCount() == 0) return false;
+
+    std::string backupPath = m_navPath;
+    if (!backupPath.empty()) {
+        backupPath += ".bak";
+    } else if (!m_bspPath.empty()) {
+        size_t dotPos = m_bspPath.find_last_of('.');
+        backupPath = (dotPos != std::string::npos ? m_bspPath.substr(0, dotPos) : m_bspPath) + ".nav.bak";
+    } else {
+        backupPath = "navstudio_autosave.nav.bak";
+    }
+
+    if (m_nav->Save(backupPath)) {
+        m_lastAutosavePath = backupPath;
+        std::printf("[NavStudio] Autosaved backup snapshot to: %s\n", backupPath.c_str());
+        return true;
+    }
+    return false;
 }
 
 bool EditorScene::GenerateNavMesh(const NavGenerateOptions& options) {
@@ -2269,23 +2343,95 @@ void EditorScene::SplitSelectedArea(CommandManager& cmdMgr) {
 }
 
 void EditorScene::MergeSelectedArea(CommandManager& cmdMgr) {
+    if (!m_nav || !m_nav->IsLoaded() || m_nav->GetAreaCount() < 2) return;
+
+    auto CanMerge = [](const NavArea* a, const NavArea* b) -> bool {
+        if (!a || !b) return false;
+        if (a->GetAttributes() != b->GetAttributes()) return false;
+        if (a->GetPlace() != b->GetPlace() || a->GetPlaceName() != b->GetPlaceName()) return false;
+
+        const NavArea* first = a;
+        const NavArea* second = b;
+
+        // Try X merge (horizontal)
+        if (first->GetExtent().lo.x > second->GetExtent().lo.x) std::swap(first, second);
+        const NavExtent& ext1 = first->GetExtent();
+        const NavExtent& ext2 = second->GetExtent();
+
+        if (std::fabs(ext1.hi.x - ext2.lo.x) <= 1.5f &&
+            std::fabs(ext1.lo.y - ext2.lo.y) <= 1.5f &&
+            std::fabs(ext1.hi.y - ext2.hi.y) <= 1.5f) {
+            if (std::fabs(first->GetNEZ() - ext2.lo.z) <= 3.0f &&
+                std::fabs(ext1.hi.z - second->GetSWZ()) <= 3.0f) {
+                return true;
+            }
+        }
+
+        // Try Y merge (vertical)
+        first = a;
+        second = b;
+        if (first->GetExtent().lo.y > second->GetExtent().lo.y) std::swap(first, second);
+        const NavExtent& yExt1 = first->GetExtent();
+        const NavExtent& yExt2 = second->GetExtent();
+
+        if (std::fabs(yExt1.hi.y - yExt2.lo.y) <= 1.5f &&
+            std::fabs(yExt1.lo.x - yExt2.lo.x) <= 1.5f &&
+            std::fabs(yExt1.hi.x - yExt2.hi.x) <= 1.5f) {
+            if (std::fabs(first->GetSWZ() - yExt2.lo.z) <= 3.0f &&
+                std::fabs(yExt1.hi.z - second->GetNEZ()) <= 3.0f) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    // Case 1: Exactly 2 areas in multi-selection
+    if (m_selectedAreaIds.size() == 2) {
+        NavArea* a1 = m_nav->GetAreaByID(m_selectedAreaIds[0]);
+        NavArea* a2 = m_nav->GetAreaByID(m_selectedAreaIds[1]);
+        if (CanMerge(a1, a2)) {
+            uint32_t keepId = a1->GetID();
+            uint32_t removeId = a2->GetID();
+            cmdMgr.ExecuteCommand(std::make_unique<CmdMergeAreas>(this, keepId, removeId));
+            ClearSelection();
+            SelectArea(keepId);
+            return;
+        }
+    }
+
+    // Case 2: Multi-selection with > 2 areas: merge any pair that matches
+    if (m_selectedAreaIds.size() > 2) {
+        for (size_t i = 0; i < m_selectedAreaIds.size(); ++i) {
+            NavArea* a1 = m_nav->GetAreaByID(m_selectedAreaIds[i]);
+            if (!a1) continue;
+            for (size_t j = i + 1; j < m_selectedAreaIds.size(); ++j) {
+                NavArea* a2 = m_nav->GetAreaByID(m_selectedAreaIds[j]);
+                if (!a2) continue;
+                if (CanMerge(a1, a2)) {
+                    uint32_t keepId = a1->GetID();
+                    uint32_t removeId = a2->GetID();
+                    cmdMgr.ExecuteCommand(std::make_unique<CmdMergeAreas>(this, keepId, removeId));
+                    m_selectedAreaIds.erase(m_selectedAreaIds.begin() + j);
+                    return;
+                }
+            }
+        }
+    }
+
+    // Case 3: Single selected area: find first adjacent neighbor that can merge
     NavArea* area = GetSelectedArea();
     if (!area) return;
 
-    uint32_t targetId = 0;
     for (int d = 0; d < 4; ++d) {
         const auto& conns = area->GetAdjacentList(static_cast<NavDirType>(d));
         for (const auto& c : conns) {
-            if (c.area && c.area->GetID() != area->GetID()) {
-                targetId = c.area->GetID();
-                break;
+            if (!c.area || c.area->GetID() == area->GetID()) continue;
+            if (CanMerge(area, c.area)) {
+                cmdMgr.ExecuteCommand(std::make_unique<CmdMergeAreas>(this, area->GetID(), c.area->GetID()));
+                return;
             }
         }
-        if (targetId != 0) break;
-    }
-
-    if (targetId != 0) {
-        cmdMgr.ExecuteCommand(std::make_unique<CmdMergeAreas>(this, area->GetID(), targetId));
     }
 }
 

@@ -1486,6 +1486,11 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
             }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Merges adjacent coplanar rectangular areas within the selection");
 
+            if (ImGui::Button(selIds.size() == 2 ? "Quick Merge [M]" : "Merge Adjacent Pair [M]", ImVec2(-1, 26))) {
+                scene.MergeSelectedArea(cmdMgr);
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Merges adjacent coplanar areas within the selection [M]");
+
             if (ImGui::Button("Duplicate All [Shift+D]", ImVec2(-1, 26))) {
                 scene.BatchDuplicate(cmdMgr);
             }
@@ -1755,7 +1760,7 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Split selected area along longest axis");
         ImGui::SameLine();
-        if (ImGui::Button("Merge [Shift+M]", ImVec2(w2, 24))) {
+        if (ImGui::Button("Merge [M]", ImVec2(w2, 24))) {
             scene.MergeSelectedArea(cmdMgr);
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Merge selected area with adjacent collinear area");
@@ -2289,10 +2294,12 @@ void EditorUI::RenderHelpModal() {
         ImGui::BulletText("Ctrl + ,: Open Preferences dialog");
         ImGui::BulletText("F3: Toggle Entity 3D visualization");
         ImGui::BulletText("F4: Cycle BSP Shading Mode (Textured / Solid / Wireframe / Ghost)");
-        ImGui::BulletText("Ctrl + Shift + K: Toggle 3D Skybox rendering");
         ImGui::BulletText("N: Draw Area Marquee Tool (with magnetic corner snapping)");
         ImGui::BulletText("Shift + Click / Ctrl + Click: Multi-select NavAreas");
         ImGui::BulletText("Ctrl + A: Select All NavAreas");
+        ImGui::BulletText("M / Shift + M: Quick Merge selected areas or merge with adjacent neighbor");
+        ImGui::BulletText("Ctrl + 0..9: Save camera bookmark to slot 0..9");
+        ImGui::BulletText("Alt + 0..9 / Numpad 0..9: Teleport camera to saved bookmark");
         ImGui::BulletText("Escape: Clear selection / Cancel modal tool");
 
         ImGui::Spacing();
@@ -2324,6 +2331,19 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
                 ImGui::Checkbox("Enable Mesh Neighbor Snap by Default", &prefs.defaultMeshSnap);
                 ImGui::SliderFloat("Mesh Snap Tolerance", &prefs.meshSnapTolerance, 1.0f, 16.0f, "%.1f u");
                 ImGui::SliderFloat("Corner Snap Radius", &prefs.cornerSnapTolerance, 2.0f, 20.0f, "%.1f u");
+                ImGui::Checkbox("Enable Magnetic Collinear Edge Snap", &prefs.enableCollinearSnap);
+                if (prefs.enableCollinearSnap) {
+                    ImGui::SliderFloat("Collinear Snap Tolerance", &prefs.collinearSnapTolerance, 1.0f, 16.0f, "%.1f u");
+                }
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::Text("Autosave & Backup:");
+                ImGui::Checkbox("Enable Periodic Autosave (.nav.bak)", &prefs.enableAutosave);
+                if (prefs.enableAutosave) {
+                    ImGui::SliderInt("Autosave Interval", &prefs.autosaveIntervalMinutes, 1, 30, "%d min");
+                }
 
                 ImGui::Spacing();
                 ImGui::Separator();
@@ -2424,6 +2444,13 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
         if (ImGui::Button("Close", ImVec2(80, 26))) {
             m_showPreferencesModal = false;
             ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        float resetW = 135.0f;
+        ImGui::SetCursorPosX(ImGui::GetWindowWidth() - resetW - ImGui::GetStyle().WindowPadding.x);
+        if (ImGui::Button("Reset to Defaults", ImVec2(resetW, 26))) {
+            prefs.ResetToDefaults();
+            ApplyPreferencesToRuntime(scene, camera, cmdMgr);
         }
 
         ImGui::EndPopup();

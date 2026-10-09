@@ -3,6 +3,7 @@
 
 #include "math/vector3.h"
 #include "editor/math/matrix4.h"
+#include <array>
 
 enum CameraMode {
     CAMERA_MODE_FPS,
@@ -56,6 +57,19 @@ public:
     float GetOrthoSize() const { return m_orthoSize; }
     void SetOrthoSize(float size) { m_orthoSize = size; }
 
+    // Camera Bookmarks (Slots 0..9)
+    struct Bookmark {
+        Vector3 pos{0.0f, 0.0f, 0.0f};
+        float pitch{0.0f};
+        float yaw{-90.0f};
+        bool valid{false};
+    };
+
+    void SaveBookmark(int slot);
+    bool RecallBookmark(int slot);
+    bool HasBookmark(int slot) const;
+    const Bookmark& GetBookmark(int slot) const { return m_bookmarks[slot]; }
+
 private:
     void UpdateVectors();
 
@@ -77,6 +91,8 @@ private:
     float m_farPlane;
     float m_orbitDistance;
     float m_orthoSize;
+
+    std::array<Bookmark, 10> m_bookmarks{};
 };
 
 #endif // CAMERA_H

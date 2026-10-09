@@ -64,6 +64,9 @@ public:
     bool LoadBSP(const std::string& bspPath);
     bool LoadNAV(const std::string& navPath);
     bool SaveNAV(const std::string& navPath = "");
+    bool AutosaveNAV();
+    void UpdateAutosave(float deltaTime);
+    const std::string& GetLastAutosavePath() const { return m_lastAutosavePath; }
     bool GenerateNavMesh(const NavGenerateOptions& options = NavGenerateOptions());
     void UnloadNAV();
     void UnloadBSP();
@@ -391,6 +394,8 @@ private:
     bool m_showNAV;
     bool m_showConnections;
     bool m_isModified{false};
+    float m_autosaveTimer{0.0f};
+    std::string m_lastAutosavePath;
     GizmoMode m_gizmoMode{GIZMO_MODE_COMBINED};
 
     // Recent files

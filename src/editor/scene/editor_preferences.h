@@ -11,7 +11,11 @@ struct EditorPreferences {
     bool defaultMeshSnap{true};
     float meshSnapTolerance{4.0f};
     float cornerSnapTolerance{8.0f};
+    bool enableCollinearSnap{true};
+    float collinearSnapTolerance{6.0f};
     int maxUndoSteps{100};
+    bool enableAutosave{true};
+    int autosaveIntervalMinutes{5};
 
     // Navigation & Generation
     float defaultGenStep{25.0f};
@@ -31,6 +35,35 @@ struct EditorPreferences {
     bool show3DSkybox{true};
     bool showFps{true};
     int themeIndex{0}; // 0: Dark Modern, 1: Classic Dark, 2: Light
+
+    void ResetToDefaults() {
+        defaultGridSize = 25.0f;
+        defaultGridSnap = true;
+        defaultMeshSnap = true;
+        meshSnapTolerance = 4.0f;
+        cornerSnapTolerance = 8.0f;
+        enableCollinearSnap = true;
+        collinearSnapTolerance = 6.0f;
+        maxUndoSteps = 100;
+        enableAutosave = true;
+        autosaveIntervalMinutes = 5;
+
+        defaultGenStep = 25.0f;
+        maxStepHeight = 18.0f;
+        autoOptimizeAfterGen = true;
+        floodFillSmoothSeams = true;
+
+        cameraMoveSpeed = 800.0f;
+        cameraFastMultiplier = 2.5f;
+        mouseSensitivity = 0.15f;
+        invertY = false;
+        fieldOfView = 70.0f;
+
+        showConnectionValidity = true;
+        show3DSkybox = true;
+        showFps = true;
+        themeIndex = 0;
+    }
 
     void Load(const std::string& path = "navstudio_prefs.ini") {
         std::ifstream file(path);
@@ -55,7 +88,11 @@ struct EditorPreferences {
                 else if (key == "defaultMeshSnap") defaultMeshSnap = (val == "1" || val == "true");
                 else if (key == "meshSnapTolerance") meshSnapTolerance = std::stof(val);
                 else if (key == "cornerSnapTolerance") cornerSnapTolerance = std::stof(val);
+                else if (key == "enableCollinearSnap") enableCollinearSnap = (val == "1" || val == "true");
+                else if (key == "collinearSnapTolerance") collinearSnapTolerance = std::stof(val);
                 else if (key == "maxUndoSteps") maxUndoSteps = std::stoi(val);
+                else if (key == "enableAutosave") enableAutosave = (val == "1" || val == "true");
+                else if (key == "autosaveIntervalMinutes") autosaveIntervalMinutes = std::stoi(val);
                 else if (key == "defaultGenStep") defaultGenStep = std::stof(val);
                 else if (key == "maxStepHeight") maxStepHeight = std::stof(val);
                 else if (key == "autoOptimizeAfterGen") autoOptimizeAfterGen = (val == "1" || val == "true");
@@ -83,7 +120,11 @@ struct EditorPreferences {
         file << "defaultMeshSnap=" << (defaultMeshSnap ? "1" : "0") << "\n";
         file << "meshSnapTolerance=" << meshSnapTolerance << "\n";
         file << "cornerSnapTolerance=" << cornerSnapTolerance << "\n";
+        file << "enableCollinearSnap=" << (enableCollinearSnap ? "1" : "0") << "\n";
+        file << "collinearSnapTolerance=" << collinearSnapTolerance << "\n";
         file << "maxUndoSteps=" << maxUndoSteps << "\n";
+        file << "enableAutosave=" << (enableAutosave ? "1" : "0") << "\n";
+        file << "autosaveIntervalMinutes=" << autosaveIntervalMinutes << "\n";
         file << "defaultGenStep=" << defaultGenStep << "\n";
         file << "maxStepHeight=" << maxStepHeight << "\n";
         file << "autoOptimizeAfterGen=" << (autoOptimizeAfterGen ? "1" : "0") << "\n";

@@ -157,3 +157,28 @@ Matrix4 Camera::GetProjectionMatrix(float aspect) const {
     }
     return Matrix4::Perspective(m_fov * DEG2RAD, aspect, m_nearPlane, m_farPlane);
 }
+
+void Camera::SaveBookmark(int slot) {
+    if (slot >= 0 && slot < 10) {
+        m_bookmarks[slot] = { m_position, m_pitch, m_yaw, true };
+    }
+}
+
+bool Camera::RecallBookmark(int slot) {
+    if (slot >= 0 && slot < 10 && m_bookmarks[slot].valid) {
+        m_position = m_bookmarks[slot].pos;
+        m_pitch = m_bookmarks[slot].pitch;
+        m_yaw = m_bookmarks[slot].yaw;
+        UpdateVectors();
+        return true;
+    }
+    return false;
+}
+
+bool Camera::HasBookmark(int slot) const {
+    if (slot >= 0 && slot < 10) {
+        return m_bookmarks[slot].valid;
+    }
+    return false;
+}
+
