@@ -47,13 +47,17 @@ public:
 
     void BuildLadders(const BSPFile* bsp);
     const std::vector<NavLadder*>& GetLadders() const { return m_ladders; }
+    std::vector<NavLadder*>& GetLadders() { return m_ladders; }
+    NavLadder* GetLadderByID(uint32_t id) const;
+    NavLadder* CreateLadder(const Vector3& top, const Vector3& bottom, float width, NavDirType dir);
+    bool RemoveLadder(uint32_t id);
+    void ClearLadders();
 
     NavArea* CreateArea(const NavExtent& extent, float neZ, float swZ);
     bool RemoveArea(uint32_t id);
     NavArea* DuplicateArea(uint32_t sourceId, const Vector3& offset = Vector3(32.0f, 32.0f, 0.0f));
     bool ConnectAreas(uint32_t fromId, uint32_t toId, bool bidirectional = true, int explicitDir = -1);
     bool DisconnectAreas(uint32_t fromId, uint32_t toId, bool bidirectional = false);
-    void ClearLadders();
 
 private:
     bool PostLoad();

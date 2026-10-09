@@ -399,6 +399,20 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     if (m_showOptimizeModal) {
         RenderOptimizeModal();
     }
+
+    if (m_showDiagnosticsModal) {
+        RenderDiagnosticsModal(scene, camera, cmdMgr);
+    }
+    if (m_showFindModal) {
+        RenderFindModal(scene, camera);
+    }
+    if (m_showPawnExportModal) {
+        RenderPawnExportModal(scene);
+    }
+    if (m_showLadderCreateModal) {
+        RenderLadderCreateModal(scene, camera);
+    }
+    RenderToastHUD(scene);
 }
 
 void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
@@ -506,6 +520,19 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                         m_saveSuccessMessage = "Wavefront OBJ mesh exported successfully:\n" + path;
                     }
                 }
+            }
+            if (ImGui::MenuItem("Export NAV to JSON (.json)...", nullptr, false, scene.HasNAV())) {
+                std::string path = FileDialog::SaveFile("JSON (*.json)\0*.json\0", "json", "Export Navigation Mesh as JSON");
+                if (!path.empty()) {
+                    if (scene.ExportNavToJSON(path)) {
+                        m_showSaveSuccessModal = true;
+                        m_saveSuccessMessage = "JSON navigation mesh exported successfully:\n" + path;
+                    }
+                }
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Reload Map & NAV", "Ctrl+R", false, scene.HasBSP() || scene.HasNAV())) {
+                scene.ReloadCurrentMap();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Unload NAV Mesh", "Ctrl+U", false, scene.HasNAV())) {
@@ -819,6 +846,26 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
 
             ImGui::Separator();
+            bool showHiding = scene.GetNavRenderer().GetShowHidingSpots();
+            if (ImGui::MenuItem("Show Tactical Hiding Spots", nullptr, &showHiding, scene.HasNAV())) {
+                scene.GetNavRenderer().SetShowHidingSpots(showHiding);
+                scene.RebuildNavRenderer();
+            }
+
+            if (ImGui::MenuItem("Take Screenshot", "F12")) {
+                std::filesystem::create_directories("screenshots");
+                auto now = std::chrono::system_clock::now();
+                auto in_time_t = std::chrono::system_clock::to_time_t(now);
+                std::stringstream ss;
+                ss << "screenshots/navstudio_" << (scene.GetBSPName().empty() ? "map" : scene.GetBSPName()) << "_" << in_time_t << ".bmp";
+                std::string sPath = ss.str();
+                extern bool SaveScreenToBMP(const char* filepath);
+                if (SaveScreenToBMP(sPath.c_str())) {
+                    scene.ShowToast("Saved screenshot: " + sPath);
+                }
+            }
+
+            ImGui::Separator();
             ImGui::MenuItem("Performance & FPS Overlay", nullptr, &m_showStatsOverlay);
             ImGui::MenuItem("Blender Viewport Compass", nullptr, &scene.GetPreferences().showCompass);
 
@@ -883,6 +930,21 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
             if (ImGui::MenuItem("Teleport to Landmark...", "Ctrl+L", false, scene.HasBSP())) {
                 m_showLandmarksModal = true;
+            }
+
+            ImGui::Separator();
+            if (ImGui::MenuItem("Mesh Diagnostics (\"Mesh Doctor\")...", nullptr, m_showDiagnosticsModal, scene.HasNAV())) {
+                scene.RunDiagnostics();
+                m_showDiagnosticsModal = true;
+            }
+            if (ImGui::MenuItem("Find NavArea or Place...", "Ctrl+F", m_showFindModal, scene.HasNAV())) {
+                m_showFindModal = true;
+            }
+            if (ImGui::MenuItem("Create Manual Ladder...", "L", m_showLadderCreateModal, scene.HasNAV())) {
+                m_showLadderCreateModal = true;
+            }
+            if (ImGui::MenuItem("Export Waypoints for AMXX Pawn...", nullptr, m_showPawnExportModal, scene.HasNAV())) {
+                m_showPawnExportModal = true;
             }
 
             ImGui::Separator();
@@ -1336,6 +1398,46 @@ void EditorUI::RenderHierarchy(EditorScene& scene, Camera& camera) {
                 ImGui::EndTabItem();
             }
 
+            char ladTabTitle[64];
+            size_t ladderCount = scene.HasNAV() ? scene.GetNAV().GetLadders().size() : 0;
+            std::snprintf(ladTabTitle, sizeof(ladTabTitle), "Ladders (%zu)", ladderCount);
+
+            if (ImGui::BeginTabItem(ladTabTitle)) {
+                if (ladderCount == 0) {
+                    ImGui::TextDisabled("No ladders in mesh.");
+                    if (ImGui::Button("+ Create Ladder [L]", ImVec2(-1, 24))) {
+                        m_showLadderCreateModal = true;
+                    }
+                } else {
+                    if (ImGui::Button("+ Create Ladder [L]", ImVec2(-1, 24))) {
+                        m_showLadderCreateModal = true;
+                    }
+                    ImGui::Separator();
+                    ImGui::BeginChild("LadderListChild", ImVec2(0, 0), false);
+                    for (const NavLadder* lad : scene.GetNAV().GetLadders()) {
+                        if (!lad) continue;
+                        char ladLabel[64];
+                        const char* dirName = (lad->dir == NAV_DIR_NORTH) ? "N" :
+                                              (lad->dir == NAV_DIR_EAST) ? "E" :
+                                              (lad->dir == NAV_DIR_SOUTH) ? "S" : "W";
+                        std::snprintf(ladLabel, sizeof(ladLabel), "Ladder #%u (%s, w=%.0f)", lad->id, dirName, lad->width);
+                        bool isSel = (scene.GetSelectedLadderID() == lad->id);
+                        if (ImGui::Selectable(ladLabel, isSel)) {
+                            scene.SelectLadder(lad->id);
+                            scene.ClearSelection();
+                            scene.SelectEntity(-1);
+                        }
+                        if (ImGui::IsItemHovered()) {
+                            if (ImGui::IsMouseDoubleClicked(0)) {
+                                camera.FocusOn((lad->top + lad->bottom) * 0.5f);
+                            }
+                        }
+                    }
+                    ImGui::EndChild();
+                }
+                ImGui::EndTabItem();
+            }
+
             ImGui::EndTabBar();
         }
     }
@@ -1577,6 +1679,12 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
     if (ImGui::Begin("Property Inspector")) {
         if (scene.GetSelectedEntityIndex() >= 0) {
             RenderEntityInspector(scene, camera);
+            ImGui::End();
+            return;
+        }
+
+        if (scene.GetSelectedLadderID() != 0) {
+            RenderLadderInspector(scene, cmdMgr);
             ImGui::End();
             return;
         }
@@ -2200,6 +2308,50 @@ void EditorUI::RenderAreaInspector(EditorScene& scene, Camera& camera, CommandMa
         if (!hasAnyConn) {
             ImGui::TextDisabled("No active connections.");
         }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        auto& hidingSpots = area->GetHidingSpots();
+        ImGui::Text("Tactical Hiding Spots (%zu):", hidingSpots.size());
+
+        if (ImGui::Button("+ Add Hiding Spot at Center", ImVec2(-1, 24))) {
+            scene.AddHidingSpot(id, area->GetCenter(), NAV_HIDING_IN_COVER);
+        }
+
+        for (size_t sIdx = 0; sIdx < hidingSpots.size(); ++sIdx) {
+            auto& spot = hidingSpots[sIdx];
+            ImGui::PushID(static_cast<int>(spot.id));
+            ImGui::Text("Spot #%u @ (%.0f, %.0f, %.0f)", spot.id, spot.pos.x, spot.pos.y, spot.pos.z);
+
+            bool isCover = (spot.flags & NAV_HIDING_IN_COVER) != 0;
+            bool isGoodSniper = (spot.flags & NAV_HIDING_GOOD_SNIPER_SPOT) != 0;
+            bool isIdealSniper = (spot.flags & NAV_HIDING_IDEAL_SNIPER) != 0;
+
+            if (ImGui::Checkbox("Cover##spot", &isCover)) {
+                if (isCover) spot.flags |= NAV_HIDING_IN_COVER; else spot.flags &= ~NAV_HIDING_IN_COVER;
+                scene.SetModified(true);
+                scene.RebuildNavRenderer();
+            }
+            ImGui::SameLine();
+            if (ImGui::Checkbox("Sniper##spot", &isGoodSniper)) {
+                if (isGoodSniper) spot.flags |= NAV_HIDING_GOOD_SNIPER_SPOT; else spot.flags &= ~NAV_HIDING_GOOD_SNIPER_SPOT;
+                scene.SetModified(true);
+                scene.RebuildNavRenderer();
+            }
+            ImGui::SameLine();
+            if (ImGui::Checkbox("Ideal##spot", &isIdealSniper)) {
+                if (isIdealSniper) spot.flags |= NAV_HIDING_IDEAL_SNIPER; else spot.flags &= ~NAV_HIDING_IDEAL_SNIPER;
+                scene.SetModified(true);
+                scene.RebuildNavRenderer();
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("X##delspot")) {
+                scene.RemoveHidingSpot(id, spot.id);
+                ImGui::PopID();
+                break;
+            }
+            ImGui::PopID();
+        }
 }
 
 void EditorUI::RenderConnectionInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
@@ -2618,7 +2770,15 @@ void EditorUI::RenderStatsOverlay(const EditorScene& scene, const Camera& camera
 
         if (scene.GetNavRenderer().GetShowConnectionValidity() && scene.GetNavRenderer().GetInvalidConnectionCount() > 0) {
             ImGui::Separator();
-            ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "[!] %zu Impassable Steps (> 18u)", scene.GetNavRenderer().GetInvalidConnectionCount());
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.25f, 0.25f, 1.0f));
+            char warnStr[64];
+            std::snprintf(warnStr, sizeof(warnStr), "[!] %zu Impassable Steps (> 18u)", scene.GetNavRenderer().GetInvalidConnectionCount());
+            if (ImGui::Selectable(warnStr)) {
+                const_cast<EditorScene&>(scene).RunDiagnostics();
+                const_cast<EditorUI*>(this)->m_showDiagnosticsModal = true;
+            }
+            ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click to open Mesh Diagnostics ('Mesh Doctor')");
         }
     }
     ImGui::End();
@@ -4204,6 +4364,328 @@ void EditorUI::RenderAutosaveRecoveryModal(EditorScene& scene, CommandManager& c
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderLadderInspector(EditorScene& scene, CommandManager& cmdMgr) {
+    NavLadder* ladder = scene.GetSelectedLadder();
+    if (!ladder) return;
+
+    ImGui::TextColored(ImVec4(0.2f, 0.95f, 1.0f, 1.0f), "Selected Ladder #%u", ladder->id);
+    ImGui::Separator();
+
+    ImGui::Text("Length:   %.1f units", ladder->length);
+    ImGui::Text("Top Z:    %.1f", ladder->top.z);
+    ImGui::Text("Bottom Z: %.1f", ladder->bottom.z);
+
+    float width = ladder->width;
+    if (ImGui::SliderFloat("Width", &width, 16.0f, 128.0f, "%.0f units")) {
+        ladder->width = width;
+        scene.SetModified(true);
+        scene.RebuildNavRenderer();
+    }
+
+    const char* dirNames[] = { "North (Facing South)", "East (Facing West)", "South (Facing North)", "West (Facing East)" };
+    int curDir = static_cast<int>(ladder->dir);
+    if (ImGui::Combo("Facing Direction", &curDir, dirNames, 4)) {
+        ladder->dir = static_cast<NavDirType>(curDir);
+        scene.SetModified(true);
+        scene.RebuildNavRenderer();
+    }
+
+    ImGui::Spacing();
+    ImGui::Text("Connections:");
+    if (ladder->topForwardArea) {
+        ImGui::BulletText("Top Exit: Area #%u", ladder->topForwardArea->GetID());
+    } else {
+        ImGui::BulletText("Top Exit: None (Disconnected)");
+    }
+    if (ladder->bottomArea) {
+        ImGui::BulletText("Bottom Mount: Area #%u", ladder->bottomArea->GetID());
+    } else {
+        ImGui::BulletText("Bottom Mount: None (Disconnected)");
+    }
+
+    ImGui::Spacing();
+    if (ImGui::Button("Reconnect to Nearest Areas", ImVec2(-1, 26))) {
+        scene.ConnectLadderToNearestAreas(ladder->id);
+    }
+
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.2f, 0.2f, 0.8f));
+    if (ImGui::Button("Delete Ladder", ImVec2(-1, 26))) {
+        scene.DeleteSelectedLadder();
+    }
+    ImGui::PopStyleColor();
+
+    if (ImGui::Button("Deselect Ladder", ImVec2(-1, 24))) {
+        scene.SelectLadder(0);
+    }
+}
+
+void EditorUI::RenderLadderCreateModal(EditorScene& scene, Camera& camera) {
+    ImGui::SetNextWindowSize(ImVec2(400, 290), ImGuiCond_Appearing);
+    if (!ImGui::IsPopupOpen("Create Manual Ladder")) {
+        ImGui::OpenPopup("Create Manual Ladder");
+    }
+
+    if (ImGui::BeginPopupModal("Create Manual Ladder", &m_showLadderCreateModal, ImGuiWindowFlags_NoResize)) {
+        ImGui::TextColored(ImVec4(0.2f, 0.95f, 1.0f, 1.0f), "Add New Navigation Ladder");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        Vector3 camPos = camera.GetPosition();
+        Vector3 forward = camera.GetForward();
+        Vector3 defaultPos = camPos + forward * 150.0f;
+
+        static float topZ = 128.0f;
+        static float botZ = 0.0f;
+        static float ladderX = 0.0f;
+        static float ladderY = 0.0f;
+        static bool initPos = false;
+
+        if (!initPos) {
+            initPos = true;
+            ladderX = defaultPos.x;
+            ladderY = defaultPos.y;
+            botZ = defaultPos.z - 64.0f;
+            topZ = defaultPos.z + 64.0f;
+        }
+
+        ImGui::DragFloat2("Position (X, Y)", &ladderX, 1.0f);
+        ImGui::DragFloat("Bottom Z", &botZ, 1.0f);
+        ImGui::DragFloat("Top Z", &topZ, 1.0f);
+        ImGui::SliderFloat("Width", &m_ladderCreateWidth, 16.0f, 64.0f, "%.0f units");
+
+        const char* dirNames[] = { "North (Facing South)", "East (Facing West)", "South (Facing North)", "West (Facing East)" };
+        ImGui::Combo("Direction", &m_ladderCreateDir, dirNames, 4);
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        float btnW = (ImGui::GetContentRegionAvail().x - 10.0f) * 0.5f;
+        if (ImGui::Button("Create Ladder", ImVec2(btnW, 28))) {
+            Vector3 bottom(ladderX, ladderY, botZ);
+            Vector3 top(ladderX, ladderY, topZ);
+            scene.AddManualLadder(top, bottom, m_ladderCreateWidth, static_cast<NavDirType>(m_ladderCreateDir));
+            initPos = false;
+            m_showLadderCreateModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(btnW, 28))) {
+            initPos = false;
+            m_showLadderCreateModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderDiagnosticsModal(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
+    ImGui::SetNextWindowSize(ImVec2(700, 480), ImGuiCond_Appearing);
+    if (ImGui::Begin("Mesh Diagnostics - Mesh Doctor", &m_showDiagnosticsModal)) {
+        const auto& issues = scene.GetDiagnostics();
+        size_t errCount = 0, warnCount = 0;
+        for (const auto& is : issues) {
+            if (is.severity == EditorScene::DiagnosticSeverity::DiagError) ++errCount;
+            else ++warnCount;
+        }
+
+        ImGui::Text("Total Issues: %zu", issues.size());
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "(%zu Errors)", errCount);
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "(%zu Warnings)", warnCount);
+
+        ImGui::SameLine(ImGui::GetWindowWidth() - 210);
+        if (ImGui::Button("Rescan Mesh", ImVec2(100, 24))) {
+            scene.RunDiagnostics();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Clear", ImVec2(90, 24))) {
+            scene.ClearDiagnostics();
+            scene.SetDiagnosticHighlightArea(0);
+        }
+
+        ImGui::Separator();
+
+        if (issues.empty()) {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.5f, 1.0f), "No issues detected! Navigation mesh appears clean and fully walkable.");
+        } else {
+            if (ImGui::BeginTable("DiagTable", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY)) {
+                ImGui::TableSetupColumn("Severity", ImGuiTableColumnFlags_WidthFixed, 70);
+                ImGui::TableSetupColumn("Area", ImGuiTableColumnFlags_WidthFixed, 65);
+                ImGui::TableSetupColumn("Issue", ImGuiTableColumnFlags_WidthFixed, 180);
+                ImGui::TableSetupColumn("Description", ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, 110);
+                ImGui::TableHeadersRow();
+
+                for (size_t i = 0; i < issues.size(); ++i) {
+                    const auto& is = issues[i];
+                    ImGui::TableNextRow();
+
+                    ImGui::TableSetColumnIndex(0);
+                    if (is.severity == EditorScene::DiagnosticSeverity::DiagError) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "[Error]");
+                    } else {
+                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "[Warn]");
+                    }
+
+                    ImGui::TableSetColumnIndex(1);
+                    if (is.areaId != 0) {
+                        if (ImGui::Selectable(("#" + std::to_string(is.areaId)).c_str())) {
+                            scene.SelectArea(is.areaId);
+                            scene.SetDiagnosticHighlightArea(is.areaId);
+                            camera.FocusOn(is.location, 300.0f);
+                        }
+                    } else {
+                        ImGui::TextDisabled("N/A");
+                    }
+
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::Text("%s", is.title.c_str());
+
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::TextWrapped("%s", is.description.c_str());
+
+                    ImGui::TableSetColumnIndex(4);
+                    if (!is.fixActionName.empty()) {
+                        ImGui::PushID(static_cast<int>(i));
+                        if (ImGui::SmallButton(is.fixActionName.c_str())) {
+                            scene.FixDiagnosticIssue(i, cmdMgr);
+                            ImGui::PopID();
+                            break;
+                        }
+                        ImGui::PopID();
+                    }
+                }
+                ImGui::EndTable();
+            }
+        }
+    }
+    ImGui::End();
+}
+
+void EditorUI::RenderFindModal(EditorScene& scene, Camera& camera) {
+    ImGui::SetNextWindowSize(ImVec2(450, 380), ImGuiCond_Appearing);
+    if (!ImGui::IsPopupOpen("Find NavArea or Place")) {
+        ImGui::OpenPopup("Find NavArea or Place");
+    }
+
+    if (ImGui::BeginPopupModal("Find NavArea or Place", &m_showFindModal)) {
+        ImGui::Text("Enter Area ID or Place Name:");
+        if (ImGui::IsWindowAppearing()) {
+            ImGui::SetKeyboardFocusHere();
+        }
+
+        ImGui::InputText("##FindFilterInput", m_findFilter, sizeof(m_findFilter));
+        ImGui::Separator();
+
+        std::string filterStr = m_findFilter;
+        std::transform(filterStr.begin(), filterStr.end(), filterStr.begin(), ::tolower);
+
+        if (scene.HasNAV()) {
+            const auto& areas = scene.GetNAV().GetAreas();
+            int matchCount = 0;
+
+            if (ImGui::BeginChild("FindResultsList", ImVec2(-1, 230), true)) {
+                for (const NavArea* a : areas) {
+                    if (!a) continue;
+                    std::string idStr = std::to_string(a->GetID());
+                    std::string placeStr = scene.GetNAV().GetPlaceName(a->GetPlace());
+                    std::string lowerPlace = placeStr;
+                    std::transform(lowerPlace.begin(), lowerPlace.end(), lowerPlace.begin(), ::tolower);
+
+                    if (filterStr.empty() || idStr.find(filterStr) != std::string::npos || lowerPlace.find(filterStr) != std::string::npos) {
+                        matchCount++;
+                        char label[128];
+                        std::snprintf(label, sizeof(label), "Area #%u  [W: %.0f, L: %.0f]  %s", a->GetID(), a->GetWidth(), a->GetLength(), placeStr.empty() ? "" : ("(" + placeStr + ")").c_str());
+                        if (ImGui::Selectable(label)) {
+                            scene.SelectArea(a->GetID());
+                            camera.FocusOn(a->GetCenter(), 350.0f);
+                            m_showFindModal = false;
+                            ImGui::CloseCurrentPopup();
+                            break;
+                        }
+                        if (matchCount >= 100) {
+                            ImGui::TextDisabled("... and more matches (refine search)");
+                            break;
+                        }
+                    }
+                }
+            }
+            ImGui::EndChild();
+        }
+
+        ImGui::Spacing();
+        if (ImGui::Button("Close", ImVec2(-1, 26))) {
+            m_showFindModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderPawnExportModal(EditorScene& scene) {
+    ImGui::SetNextWindowSize(ImVec2(560, 420), ImGuiCond_Appearing);
+    if (!ImGui::IsPopupOpen("Export Waypoint Code for Pawn")) {
+        ImGui::OpenPopup("Export Waypoint Code for Pawn");
+    }
+
+    if (ImGui::BeginPopupModal("Export Waypoint Code for Pawn", &m_showPawnExportModal)) {
+        ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.5f, 1.0f), "AMX Mod X Pawn Code Generator");
+        ImGui::TextDisabled("Generates ready-to-use Pawn coordinate array for plugins and pathfinding scripts.");
+        ImGui::Separator();
+
+        ImGui::Checkbox("Selected Areas Only", &m_pawnExportSelectedOnly);
+        ImGui::Spacing();
+
+        std::string code = scene.GeneratePawnWaypointsCode(m_pawnExportSelectedOnly);
+        static char codeBuffer[16384];
+        std::strncpy(codeBuffer, code.c_str(), sizeof(codeBuffer) - 1);
+        codeBuffer[sizeof(codeBuffer) - 1] = '\0';
+
+        ImGui::InputTextMultiline("##PawnCodeBox", codeBuffer, sizeof(codeBuffer), ImVec2(-1, 240), ImGuiInputTextFlags_ReadOnly);
+
+        ImGui::Spacing();
+        float btnW = (ImGui::GetContentRegionAvail().x - 10.0f) * 0.5f;
+        if (ImGui::Button("Copy to Clipboard", ImVec2(btnW, 28))) {
+            ImGui::SetClipboardText(code.c_str());
+            scene.ShowToast("Pawn code copied to clipboard!");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Close", ImVec2(btnW, 28))) {
+            m_showPawnExportModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderToastHUD(const EditorScene& scene) {
+    const auto& toasts = scene.GetToasts();
+    if (toasts.empty()) return;
+
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    float curY = viewport->Size.y - 70.0f;
+
+    for (size_t i = 0; i < toasts.size(); ++i) {
+        const auto& t = toasts[i];
+        ImGui::SetNextWindowPos(ImVec2(viewport->GetCenter().x, curY), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowBgAlpha(0.85f);
+        ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                                 ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                                 ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs;
+
+        std::string winName = "##Toast_" + std::to_string(i);
+        if (ImGui::Begin(winName.c_str(), nullptr, flags)) {
+            ImGui::TextColored(ImVec4(0.25f, 1.0f, 0.55f, 1.0f), " %s ", t.message.c_str());
+        }
+        ImGui::End();
+        curY -= 36.0f;
     }
 }
 

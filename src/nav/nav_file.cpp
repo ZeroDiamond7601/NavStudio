@@ -19,6 +19,48 @@ void NavMesh::ClearLadders() {
     m_ladders.clear();
 }
 
+NavLadder* NavMesh::GetLadderByID(uint32_t id) const {
+    for (NavLadder* ladder : m_ladders) {
+        if (ladder && ladder->id == id) return ladder;
+    }
+    return nullptr;
+}
+
+NavLadder* NavMesh::CreateLadder(const Vector3& top, const Vector3& bottom, float width, NavDirType dir) {
+    uint32_t nextId = 1;
+    for (const NavLadder* l : m_ladders) {
+        if (l && l->id >= nextId) nextId = l->id + 1;
+    }
+
+    NavLadder* ladder = new NavLadder();
+    ladder->id = nextId;
+    ladder->top = top;
+    ladder->bottom = bottom;
+    ladder->length = std::abs(top.z - bottom.z);
+    ladder->width = (width > 0.0f) ? width : 32.0f;
+    ladder->dir = dir;
+
+    // Connect to closest areas if available
+    if (m_areas.size() > 0) {
+        ladder->topForwardArea = m_grid.GetNearestArea(top, 200.0f);
+        ladder->bottomArea = m_grid.GetNearestArea(bottom, 200.0f);
+    }
+
+    m_ladders.push_back(ladder);
+    return ladder;
+}
+
+bool NavMesh::RemoveLadder(uint32_t id) {
+    auto it = std::find_if(m_ladders.begin(), m_ladders.end(), [id](const NavLadder* l) {
+        return l && l->id == id;
+    });
+    if (it == m_ladders.end()) return false;
+
+    delete *it;
+    m_ladders.erase(it);
+    return true;
+}
+
 void NavMesh::Unload() {
     m_loaded = false;
     m_version = 0;

@@ -42,6 +42,10 @@ public:
         m_commandPaletteSelectedIndex = 0;
     }
     void TogglePathPanel() { m_showPathPanel = !m_showPathPanel; }
+    void OpenFindModal() { m_showFindModal = true; }
+    void OpenDiagnosticsModal() { m_showDiagnosticsModal = true; }
+    void OpenLadderCreateModal() { m_showLadderCreateModal = true; }
+    void OpenPawnExportModal() { m_showPawnExportModal = true; }
     void SetMarqueeBox(bool active, float startX, float startY, float curX, float curY) {
         m_marqueeActive = active;
         m_marqueeStartX = startX;
@@ -86,6 +90,14 @@ private:
     void RenderLandmarksModal(EditorScene& scene, Camera& camera);
     void RenderAutosaveRecoveryModal(EditorScene& scene, CommandManager& cmdMgr);
     void RenderMarqueeBox();
+
+    // Ladders, Diagnostics & Workflow UI
+    void RenderLadderInspector(EditorScene& scene, CommandManager& cmdMgr);
+    void RenderDiagnosticsModal(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
+    void RenderFindModal(EditorScene& scene, Camera& camera);
+    void RenderPawnExportModal(EditorScene& scene);
+    void RenderLadderCreateModal(EditorScene& scene, Camera& camera);
+    void RenderToastHUD(const EditorScene& scene);
 
     bool m_marqueeActive{false};
     float m_marqueeStartX{0.0f};
@@ -151,6 +163,16 @@ private:
     std::string m_recoveryNavPath;
     int64_t m_recoveryBakAgeSec{0};
     std::string m_lastCheckedRecoveryMap;
+
+    // Diagnostics, Find, Pawn & Ladder Modals
+    bool m_showDiagnosticsModal{false};
+    bool m_showFindModal{false};
+    char m_findFilter[64]{""};
+    bool m_showPawnExportModal{false};
+    bool m_pawnExportSelectedOnly{false};
+    bool m_showLadderCreateModal{false};
+    float m_ladderCreateWidth{32.0f};
+    int m_ladderCreateDir{0};
 };
 
 #endif // EDITOR_UI_H

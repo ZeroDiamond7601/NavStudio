@@ -44,6 +44,9 @@ EditorScene::EditorScene()
 }
 
 EditorScene::~EditorScene() {
+    if (m_navGenThread.joinable()) {
+        m_navGenThread.join();
+    }
     if (m_loadThread.joinable()) {
         m_loadThread.join();
     }
@@ -648,6 +651,9 @@ bool EditorScene::ExportNAVToOBJ(const std::string& filepath) const {
 }
 
 void EditorScene::UpdateAutosave(float deltaTime) {
+    UpdateNavGeneration();
+    UpdateToasts(deltaTime);
+
     if (!m_prefs.enableAutosave || m_prefs.autosaveIntervalMinutes <= 0) return;
     if (!m_isModified || !m_nav || !m_nav->IsLoaded() || m_nav->GetAreaCount() == 0) {
         m_autosaveTimer = 0.0f;
@@ -1214,7 +1220,9 @@ void EditorScene::RebuildNavRenderer() {
             axis,
             m_hoveredHandle,
             (m_isDraggingHandle ? m_draggedHandle : m_selectedHandle),
-            &m_selectedAreaIds
+            &m_selectedAreaIds,
+            m_selectedLadderId,
+            m_diagnosticHighlightAreaId
         );
     }
 }
@@ -4193,7 +4201,500 @@ size_t EditorScene::BuildLaddersFromBSP() {
 void EditorScene::ClearLadders() {
     if (!m_nav || !m_nav->IsLoaded()) return;
     m_nav->ClearLadders();
+    m_selectedLadderId = 0;
     m_isModified = true;
     RebuildNavRenderer();
+    ShowToast("Cleared all navigation ladders");
+}
+
+void EditorScene::SelectLadder(uint32_t id) {
+    m_selectedLadderId = id;
+    if (id != 0) {
+        m_selectedAreaId = 0;
+        m_selectedAreaIds.clear();
+        m_selectedEntityIndex = -1;
+    }
+    RebuildNavRenderer();
+}
+
+NavLadder* EditorScene::GetSelectedLadder() const {
+    if (!m_nav || !m_nav->IsLoaded() || m_selectedLadderId == 0) return nullptr;
+    return m_nav->GetLadderByID(m_selectedLadderId);
+}
+
+NavLadder* EditorScene::AddManualLadder(const Vector3& top, const Vector3& bottom, float width, NavDirType dir) {
+    if (!m_nav || !m_nav->IsLoaded()) return nullptr;
+    NavLadder* ladder = m_nav->CreateLadder(top, bottom, width, dir);
+    if (ladder) {
+        m_selectedLadderId = ladder->id;
+        m_isModified = true;
+        RebuildNavRenderer();
+        ShowToast("Created new ladder #" + std::to_string(ladder->id));
+    }
+    return ladder;
+}
+
+bool EditorScene::DeleteSelectedLadder() {
+    if (m_selectedLadderId == 0) return false;
+    return DeleteLadder(m_selectedLadderId);
+}
+
+bool EditorScene::DeleteLadder(uint32_t id) {
+    if (!m_nav || !m_nav->IsLoaded()) return false;
+    bool res = m_nav->RemoveLadder(id);
+    if (res) {
+        if (m_selectedLadderId == id) m_selectedLadderId = 0;
+        m_isModified = true;
+        RebuildNavRenderer();
+        ShowToast("Deleted ladder #" + std::to_string(id));
+    }
+    return res;
+}
+
+void EditorScene::ConnectLadderToNearestAreas(uint32_t ladderId) {
+    if (!m_nav || !m_nav->IsLoaded()) return;
+    NavLadder* ladder = m_nav->GetLadderByID(ladderId);
+    if (!ladder) return;
+    ladder->topForwardArea = m_nav->GetGrid().GetNearestArea(ladder->top, 200.0f);
+    ladder->bottomArea = m_nav->GetGrid().GetNearestArea(ladder->bottom, 200.0f);
+    m_isModified = true;
+    RebuildNavRenderer();
+    ShowToast("Reconnected ladder #" + std::to_string(ladderId) + " to nearby areas");
+}
+
+// --- Tactical Hiding Spots ---
+
+void EditorScene::AddHidingSpot(uint32_t areaId, const Vector3& pos, uint8_t flags) {
+    if (!m_nav || !m_nav->IsLoaded()) return;
+    NavArea* area = m_nav->GetAreaByID(areaId);
+    if (!area) return;
+
+    uint32_t nextId = 1;
+    for (const NavArea* a : m_nav->GetAreas()) {
+        if (!a) continue;
+        for (const auto& sp : a->GetHidingSpots()) {
+            if (sp.id >= nextId) nextId = sp.id + 1;
+        }
+    }
+
+    area->GetHidingSpots().push_back(NavHidingSpot(nextId, pos, flags));
+    m_isModified = true;
+    RebuildNavRenderer();
+    ShowToast("Added tactical hiding spot #" + std::to_string(nextId));
+}
+
+void EditorScene::RemoveHidingSpot(uint32_t areaId, uint32_t spotId) {
+    if (!m_nav || !m_nav->IsLoaded()) return;
+    NavArea* area = m_nav->GetAreaByID(areaId);
+    if (!area) return;
+
+    auto& spots = area->GetHidingSpots();
+    auto it = std::find_if(spots.begin(), spots.end(), [spotId](const NavHidingSpot& s) {
+        return s.id == spotId;
+    });
+    if (it != spots.end()) {
+        spots.erase(it);
+        m_isModified = true;
+        RebuildNavRenderer();
+        ShowToast("Removed hiding spot #" + std::to_string(spotId));
+    }
+}
+
+void EditorScene::SetHidingSpotFlags(uint32_t areaId, uint32_t spotId, uint8_t flags) {
+    if (!m_nav || !m_nav->IsLoaded()) return;
+    NavArea* area = m_nav->GetAreaByID(areaId);
+    if (!area) return;
+
+    for (auto& s : area->GetHidingSpots()) {
+        if (s.id == spotId) {
+            s.flags = flags;
+            m_isModified = true;
+            RebuildNavRenderer();
+            return;
+        }
+    }
+}
+
+// --- Mesh Diagnostics ("Mesh Doctor") ---
+
+void EditorScene::SetDiagnosticHighlightArea(uint32_t id) {
+    m_diagnosticHighlightAreaId = id;
+    RebuildNavRenderer();
+}
+
+void EditorScene::RunDiagnostics() {
+    m_diagnostics.clear();
+    if (!m_nav || !m_nav->IsLoaded()) return;
+
+    const auto& areas = m_nav->GetAreas();
+
+    // 1. Check impassable step transitions
+    for (const NavArea* area : areas) {
+        if (!area) continue;
+        uint32_t fromId = area->GetID();
+        float fromZ = area->GetCenter().z;
+
+        for (int dir = 0; dir < 4; ++dir) {
+            for (size_t i = 0; i < area->GetAdjacentCount(static_cast<NavDirType>(dir)); ++i) {
+                const NavArea* neighbor = area->GetAdjacentArea(static_cast<NavDirType>(dir), i);
+                if (!neighbor) continue;
+
+                float toZ = neighbor->GetCenter().z;
+                float dz = toZ - fromZ;
+
+                if (dz > 18.0f && !area->HasAttributes(NAV_ATTR_JUMP)) {
+                    DiagnosticIssue issue;
+                    issue.areaId = fromId;
+                    issue.location = area->GetCenter();
+                    if (dz > 45.0f) {
+                        issue.severity = DiagnosticSeverity::DiagError;
+                        issue.type = DiagnosticType::ImpassableStep;
+                        issue.title = "Impassable Jump (" + std::to_string(static_cast<int>(dz)) + "u)";
+                        issue.description = "Step to Area #" + std::to_string(neighbor->GetID()) + " exceeds max player jump (45u). Requires ladder.";
+                        issue.fixActionName = "Add Ladder";
+                    } else {
+                        issue.severity = DiagnosticSeverity::DiagWarning;
+                        issue.type = DiagnosticType::ImpassableStep;
+                        issue.title = "Step Requires Jump (" + std::to_string(static_cast<int>(dz)) + "u)";
+                        issue.description = "Step to Area #" + std::to_string(neighbor->GetID()) + " is > 18u and missing JUMP flag.";
+                        issue.fixActionName = "Add Jump Flag";
+                    }
+                    m_diagnostics.push_back(issue);
+                }
+            }
+        }
+
+        // 2. Orphan areas (0 incoming and 0 outgoing)
+        size_t totalAdj = 0;
+        for (int d = 0; d < 4; ++d) {
+            totalAdj += area->GetAdjacentCount(static_cast<NavDirType>(d));
+        }
+
+        bool hasIncoming = false;
+        for (const NavArea* other : areas) {
+            if (other && other != area && other->IsConnected(area)) {
+                hasIncoming = true;
+                break;
+            }
+        }
+
+        if (totalAdj == 0 && !hasIncoming) {
+            DiagnosticIssue issue;
+            issue.severity = DiagnosticSeverity::DiagWarning;
+            issue.type = DiagnosticType::OrphanArea;
+            issue.areaId = fromId;
+            issue.location = area->GetCenter();
+            issue.title = "Orphan NavArea";
+            issue.description = "Area #" + std::to_string(fromId) + " has zero incoming or outgoing connections.";
+            issue.fixActionName = "Delete Area";
+            m_diagnostics.push_back(issue);
+        } else if (totalAdj == 0 && hasIncoming) {
+            // 3. Trap area (incoming > 0, outgoing == 0)
+            DiagnosticIssue issue;
+            issue.severity = DiagnosticSeverity::DiagWarning;
+            issue.type = DiagnosticType::TrapArea;
+            issue.areaId = fromId;
+            issue.location = area->GetCenter();
+            issue.title = "Dead-End Trap Area";
+            issue.description = "Area #" + std::to_string(fromId) + " has incoming links but bots cannot exit.";
+            issue.fixActionName = "Connect Neighbors";
+            m_diagnostics.push_back(issue);
+        }
+
+        // 4. Low Ceiling clearance check (if BSP loaded)
+        if (m_bsp && m_bsp->IsLoaded() && !area->HasAttributes(NAV_ATTR_CROUCH)) {
+            Vector3 center = area->GetCenter();
+            Ray upRay(center + Vector3(0, 0, 5), Vector3(0, 0, 1));
+            TraceResult tr;
+            if (m_bsp->TraceRay(upRay, &tr) && tr.hit && tr.fraction > 0.0f) {
+                float dist = tr.fraction * 2000.0f;
+                if (dist > 0.0f && dist < 72.0f) {
+                    DiagnosticIssue issue;
+                    issue.severity = DiagnosticSeverity::DiagWarning;
+                    issue.type = DiagnosticType::CrouchClearance;
+                    issue.areaId = fromId;
+                    issue.location = center;
+                    issue.title = "Low Ceiling (" + std::to_string(static_cast<int>(dist)) + "u)";
+                    issue.description = "Clearance is < 72u but area lacks CROUCH attribute.";
+                    issue.fixActionName = "Add Crouch Flag";
+                    m_diagnostics.push_back(issue);
+                }
+            }
+        }
+    }
+
+    // 5. Spawn disconnects
+    if (m_bsp && m_bsp->IsLoaded()) {
+        const auto& ents = m_bsp->GetEntities();
+        for (const BSPEntity* ent : ents) {
+            if (!ent) continue;
+            std::string cname = ent->GetClassName();
+            if (cname == "info_player_start" || cname == "info_player_deathmatch" || cname == "info_vip_start") {
+                Vector3 origin = ent->GetOrigin();
+                NavArea* nearArea = m_nav->GetGrid().GetNearestArea(origin, 150.0f);
+                if (!nearArea) {
+                    DiagnosticIssue issue;
+                    issue.severity = DiagnosticSeverity::DiagError;
+                    issue.type = DiagnosticType::SpawnDisconnected;
+                    issue.areaId = 0;
+                    issue.location = origin;
+                    issue.title = "Disconnected Spawn Point";
+                    issue.description = cname + " at (" + std::to_string(static_cast<int>(origin.x)) + ", " +
+                                        std::to_string(static_cast<int>(origin.y)) + ") has no nav area within 150u.";
+                    issue.fixActionName = "Create Area Below";
+                    m_diagnostics.push_back(issue);
+                }
+            }
+        }
+    }
+
+    ShowToast("Mesh Diagnostics: found " + std::to_string(m_diagnostics.size()) + " issue(s)");
+}
+
+bool EditorScene::FixDiagnosticIssue(size_t index, CommandManager& cmdMgr) {
+    if (index >= m_diagnostics.size()) return false;
+    const DiagnosticIssue& issue = m_diagnostics[index];
+
+    if (issue.type == DiagnosticType::ImpassableStep && issue.areaId != 0) {
+        NavArea* a = m_nav->GetAreaByID(issue.areaId);
+        if (a) {
+            a->SetAttributes(a->GetAttributes() | NAV_ATTR_JUMP);
+            m_isModified = true;
+            RebuildNavRenderer();
+            ShowToast("Added JUMP flag to Area #" + std::to_string(issue.areaId));
+            RunDiagnostics();
+            return true;
+        }
+    } else if (issue.type == DiagnosticType::CrouchClearance && issue.areaId != 0) {
+        NavArea* a = m_nav->GetAreaByID(issue.areaId);
+        if (a) {
+            a->SetAttributes(a->GetAttributes() | NAV_ATTR_CROUCH);
+            m_isModified = true;
+            RebuildNavRenderer();
+            ShowToast("Added CROUCH flag to Area #" + std::to_string(issue.areaId));
+            RunDiagnostics();
+            return true;
+        }
+    } else if (issue.type == DiagnosticType::OrphanArea && issue.areaId != 0) {
+        DeleteArea(issue.areaId, cmdMgr);
+        ShowToast("Deleted orphan Area #" + std::to_string(issue.areaId));
+        RunDiagnostics();
+        return true;
+    } else if (issue.type == DiagnosticType::TrapArea && issue.areaId != 0) {
+        SelectArea(issue.areaId);
+        BatchSnapToNeighbors(cmdMgr);
+        ShowToast("Connected Area #" + std::to_string(issue.areaId) + " to neighbors");
+        RunDiagnostics();
+        return true;
+    }
+
+    return false;
+}
+
+// --- Full Map Auto-Generation ---
+
+bool EditorScene::StartFullMapNavGeneration(float stepHeight, float maxJump, float crouchClearance, float gridResolution) {
+    if (!m_bsp || !m_bsp->IsLoaded()) {
+        ShowToast("Cannot generate: No BSP map loaded!");
+        return false;
+    }
+    if (m_navGenProgress.isGenerating) return false;
+
+    m_navGenProgress.isGenerating = true;
+    m_navGenProgress.progress = 0.0f;
+    m_navGenProgress.statusMessage = "Starting mesh generation...";
+    m_navGenProgress.completed = false;
+    m_navGenProgress.success = false;
+    m_navGenProgress.generatedAreas = 0;
+    m_navGenProgress.errorMessage.clear();
+
+    NavGenerateOptions options;
+    options.stepHeight = stepHeight;
+    options.jumpHeight = maxJump;
+    options.crouchClearance = crouchClearance;
+    options.gridSize = gridResolution;
+
+    if (m_navGenThread.joinable()) {
+        m_navGenThread.join();
+    }
+
+    m_navGenThread = std::thread([this, options]() {
+        auto newNav = std::make_unique<NavMesh>();
+        auto progressCb = [this](float p, const std::string& msg) {
+            m_navGenProgress.progress = p;
+            m_navGenProgress.statusMessage = msg;
+        };
+
+        NavGenerateResult res = NavGenerator::Generate(*m_bsp, *newNav, options, progressCb);
+        if (res.success) {
+            m_nav = std::move(newNav);
+            m_navGenProgress.success = true;
+            m_navGenProgress.generatedAreas = res.areasGenerated;
+            m_navGenProgress.statusMessage = "Complete! " + std::to_string(res.areasGenerated) + " areas generated.";
+        } else {
+            m_navGenProgress.success = false;
+            m_navGenProgress.errorMessage = res.errorMessage;
+            m_navGenProgress.statusMessage = "Failed: " + res.errorMessage;
+        }
+        m_navGenProgress.isGenerating = false;
+        m_navGenProgress.completed = true;
+    });
+
+    return true;
+}
+
+void EditorScene::UpdateNavGeneration() {
+    if (m_navGenProgress.completed) {
+        m_navGenProgress.completed = false;
+        if (m_navGenThread.joinable()) {
+            m_navGenThread.join();
+        }
+        if (m_navGenProgress.success) {
+            m_isModified = true;
+            RebuildNavRenderer();
+            ShowToast("Generated " + std::to_string(m_navGenProgress.generatedAreas) + " navigation areas!");
+        } else {
+            ShowToast("Navmesh generation failed: " + m_navGenProgress.errorMessage);
+        }
+    }
+}
+
+// --- Toast Notification System ---
+
+void EditorScene::ShowToast(const std::string& message, float duration) {
+    ToastNotification toast;
+    toast.message = message;
+    toast.remainingSeconds = duration;
+    m_toasts.push_back(toast);
+}
+
+void EditorScene::UpdateToasts(float deltaTime) {
+    for (auto it = m_toasts.begin(); it != m_toasts.end();) {
+        it->remainingSeconds -= deltaTime;
+        if (it->remainingSeconds <= 0.0f) {
+            it = m_toasts.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+// --- Workflow QoL ---
+
+bool EditorScene::ReloadCurrentMap() {
+    if (m_bspPath.empty() && m_navPath.empty()) {
+        ShowToast("No file path to reload");
+        return false;
+    }
+    std::string bspToReload = m_bspPath;
+    if (!bspToReload.empty()) {
+        StartAsyncLoad(bspToReload);
+        ShowToast("Reloading map: " + bspToReload);
+        return true;
+    } else if (!m_navPath.empty()) {
+        LoadNavMesh(m_navPath);
+        ShowToast("Reloading NAV mesh: " + m_navPath);
+        return true;
+    }
+    return false;
+}
+
+bool EditorScene::ExportNavToJSON(const std::string& jsonFilePath) const {
+    if (!m_nav || !m_nav->IsLoaded()) return false;
+    std::ofstream out(jsonFilePath);
+    if (!out.is_open()) return false;
+
+    out << "{\n";
+    out << "  \"version\": " << m_nav->GetVersion() << ",\n";
+    out << "  \"bsp_size\": " << m_nav->GetBspSize() << ",\n";
+    out << "  \"area_count\": " << m_nav->GetAreaCount() << ",\n";
+    out << "  \"places\": [\n";
+    const auto& places = m_nav->GetPlaceNames();
+    for (size_t i = 0; i < places.size(); ++i) {
+        out << "    \"" << places[i] << "\"" << (i + 1 < places.size() ? "," : "") << "\n";
+    }
+    out << "  ],\n";
+
+    out << "  \"areas\": [\n";
+    const auto& areas = m_nav->GetAreas();
+    for (size_t i = 0; i < areas.size(); ++i) {
+        const NavArea* a = areas[i];
+        if (!a) continue;
+        const NavExtent& ext = a->GetExtent();
+        out << "    {\n";
+        out << "      \"id\": " << a->GetID() << ",\n";
+        out << "      \"attributes\": " << static_cast<int>(a->GetAttributes()) << ",\n";
+        out << "      \"place\": \"" << m_nav->GetPlaceName(a->GetPlace()) << "\",\n";
+        out << "      \"bounds\": { \"min\": [" << ext.lo.x << ", " << ext.lo.y << ", " << ext.lo.z << "], "
+            << "\"max\": [" << ext.hi.x << ", " << ext.hi.y << ", " << ext.hi.z << "] },\n";
+        out << "      \"ne_z\": " << a->GetNEZ() << ", \"sw_z\": " << a->GetSWZ() << ",\n";
+        out << "      \"connections\": {\n";
+        for (int d = 0; d < 4; ++d) {
+            std::string dname = (d == 0) ? "north" : (d == 1) ? "east" : (d == 2) ? "south" : "west";
+            out << "        \"" << dname << "\": [";
+            for (size_t c = 0; c < a->GetAdjacentCount(static_cast<NavDirType>(d)); ++c) {
+                const NavArea* adj = a->GetAdjacentArea(static_cast<NavDirType>(d), c);
+                if (adj) out << adj->GetID() << (c + 1 < a->GetAdjacentCount(static_cast<NavDirType>(d)) ? ", " : "");
+            }
+            out << "]" << (d < 3 ? "," : "") << "\n";
+        }
+        out << "      }\n";
+        out << "    }" << (i + 1 < areas.size() ? "," : "") << "\n";
+    }
+    out << "  ],\n";
+
+    out << "  \"ladders\": [\n";
+    const auto& ladders = m_nav->GetLadders();
+    for (size_t i = 0; i < ladders.size(); ++i) {
+        const NavLadder* l = ladders[i];
+        if (!l) continue;
+        out << "    {\n";
+        out << "      \"id\": " << l->id << ",\n";
+        out << "      \"width\": " << l->width << ",\n";
+        out << "      \"direction\": " << static_cast<int>(l->dir) << ",\n";
+        out << "      \"top\": [" << l->top.x << ", " << l->top.y << ", " << l->top.z << "],\n";
+        out << "      \"bottom\": [" << l->bottom.x << ", " << l->bottom.y << ", " << l->bottom.z << "]\n";
+        out << "    }" << (i + 1 < ladders.size() ? "," : "") << "\n";
+    }
+    out << "  ]\n";
+    out << "}\n";
+    return true;
+}
+
+std::string EditorScene::GeneratePawnWaypointsCode(bool fromSelectionOnly) const {
+    if (!m_nav || !m_nav->IsLoaded()) return "// No navigation mesh loaded\n";
+
+    std::ostringstream ss;
+    ss << "// Generated by NavStudio (" << (fromSelectionOnly ? "Selected Areas" : "Full Mesh") << ")\n";
+    ss << "// Map: " << m_bspName << "\n\n";
+
+    std::vector<const NavArea*> list;
+    if (fromSelectionOnly && !m_selectedAreaIds.empty()) {
+        for (uint32_t aid : m_selectedAreaIds) {
+            const NavArea* a = m_nav->GetAreaByID(aid);
+            if (a) list.push_back(a);
+        }
+    } else if (fromSelectionOnly && m_selectedAreaId != 0) {
+        const NavArea* a = m_nav->GetAreaByID(m_selectedAreaId);
+        if (a) list.push_back(a);
+    } else {
+        list = m_nav->GetAreas();
+    }
+
+    ss << "new const Float:g_Waypoints[" << list.size() << "][3] = {\n";
+    for (size_t i = 0; i < list.size(); ++i) {
+        const NavArea* a = list[i];
+        if (!a) continue;
+        Vector3 c = a->GetCenter();
+        ss << "    { " << c.x << ", " << c.y << ", " << c.z << " }"
+           << (i + 1 < list.size() ? "," : " ")
+           << " // #" << a->GetID();
+        if (a->GetPlace() != 0) {
+            ss << " [" << m_nav->GetPlaceName(a->GetPlace()) << "]";
+        }
+        ss << "\n";
+    }
+    ss << "};\n";
+    return ss.str();
 }
 

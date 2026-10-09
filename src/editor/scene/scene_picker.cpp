@@ -167,6 +167,53 @@ uint32_t ScenePicker::PickNavArea(const EditorScene& scene, const Ray& ray, Vect
     return closestAreaId;
 }
 
+uint32_t ScenePicker::PickLadder(const EditorScene& scene, const Ray& ray, float* outT) {
+    if (!scene.HasNAV()) return 0;
+
+    const auto& ladders = scene.GetNAV().GetLadders();
+    uint32_t closestLadderId = 0;
+    float closestDist = std::numeric_limits<float>::max();
+
+    for (const NavLadder* ladder : ladders) {
+        if (!ladder) continue;
+
+        Vector3 top = ladder->top;
+        Vector3 bottom = ladder->bottom;
+        float halfW = std::max(12.0f, ladder->width * 0.5f);
+
+        Vector3 normal(0, 1, 0);
+        if (ladder->dir == NAV_DIR_NORTH) normal = Vector3(0, 1, 0);
+        else if (ladder->dir == NAV_DIR_SOUTH) normal = Vector3(0, -1, 0);
+        else if (ladder->dir == NAV_DIR_EAST) normal = Vector3(1, 0, 0);
+        else if (ladder->dir == NAV_DIR_WEST) normal = Vector3(-1, 0, 0);
+
+        Vector3 sideDir = normal.Cross(Vector3(0, 0, 1)).Normalized();
+
+        Vector3 p0 = bottom - sideDir * halfW;
+        Vector3 p1 = bottom + sideDir * halfW;
+        Vector3 p2 = top + sideDir * halfW;
+        Vector3 p3 = top - sideDir * halfW;
+
+        float t = 0.0f;
+        Vector3 hit;
+        if (RayIntersectsTriangle(ray, p0, p1, p2, t, hit) ||
+            RayIntersectsTriangle(ray, p0, p2, p3, t, hit) ||
+            RayIntersectsTriangle(ray, p1, p0, p2, t, hit) ||
+            RayIntersectsTriangle(ray, p2, p0, p3, t, hit)) {
+            if (t < closestDist) {
+                closestDist = t;
+                closestLadderId = ladder->id;
+            }
+        }
+    }
+
+    if (closestLadderId != 0 && outT) {
+        *outT = closestDist;
+    }
+
+    return closestLadderId;
+}
+
 bool ScenePicker::PickBSPFloor(const EditorScene& scene, const Ray& ray, Vector3* outHitPoint) {
     if (!scene.HasBSP()) return false;
 

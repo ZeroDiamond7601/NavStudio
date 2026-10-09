@@ -27,7 +27,9 @@ public:
                       uint32_t connectTargetId = 0, int transformAxis = 0,
                       SelectedHandleType hoveredHandle = HANDLE_NONE,
                       SelectedHandleType selectedHandle = HANDLE_NONE,
-                      const std::vector<uint32_t>* selectedIds = nullptr);
+                      const std::vector<uint32_t>* selectedIds = nullptr,
+                      uint32_t selectedLadderId = 0,
+                      uint32_t diagnosticAreaId = 0);
     void Clear();
 
     void Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp);
@@ -40,6 +42,9 @@ public:
     float GetMaxStepHeight() const { return m_maxStepHeight; }
     void SetMaxStepHeight(float step) { m_maxStepHeight = step; }
     size_t GetInvalidConnectionCount() const { return m_invalidConnectionCount; }
+
+    bool GetShowHidingSpots() const { return m_showHidingSpots; }
+    void SetShowHidingSpots(bool show) { m_showHidingSpots = show; }
 
     void SetSelectedConnection(uint32_t fromId, uint32_t toId) {
         m_selConnFrom = fromId;
@@ -75,6 +80,7 @@ private:
     uint32_t m_selConnFrom{0};
     uint32_t m_selConnTo{0};
     bool m_showIslandColors{false};
+    bool m_showHidingSpots{true};
     std::unordered_map<uint32_t, int> m_areaClusterMap;
 };
 

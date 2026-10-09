@@ -388,10 +388,84 @@ public:
     };
     void AlignSelectedAreas(AlignMode mode, class CommandManager& cmdMgr);
 
-    // Ladder Management (func_ladder integration)
+    // Ladder Management & Manual Creation
     size_t BuildLaddersFromBSP();
     void ClearLadders();
     size_t GetLadderCount() const { return (m_nav && m_nav->IsLoaded()) ? m_nav->GetLadders().size() : 0; }
+    uint32_t GetSelectedLadderID() const { return m_selectedLadderId; }
+    void SelectLadder(uint32_t id);
+    NavLadder* GetSelectedLadder() const;
+    NavLadder* AddManualLadder(const Vector3& top, const Vector3& bottom, float width = 32.0f, NavDirType dir = NAV_DIR_NORTH);
+    bool DeleteSelectedLadder();
+    bool DeleteLadder(uint32_t id);
+    void ConnectLadderToNearestAreas(uint32_t ladderId);
+
+    // Tactical Hiding Spots
+    void AddHidingSpot(uint32_t areaId, const Vector3& pos, uint8_t flags);
+    void RemoveHidingSpot(uint32_t areaId, uint32_t spotId);
+    void SetHidingSpotFlags(uint32_t areaId, uint32_t spotId, uint8_t flags);
+
+    // Mesh Diagnostics ("Mesh Doctor")
+    enum class DiagnosticSeverity {
+        DiagError = 0,
+        DiagWarning,
+        DiagInfo
+    };
+
+    enum class DiagnosticType {
+        ImpassableStep = 0,
+        TrapArea,
+        OrphanArea,
+        CrouchClearance,
+        SpawnDisconnected,
+        ZeroDimension
+    };
+
+    struct DiagnosticIssue {
+        DiagnosticSeverity severity{DiagnosticSeverity::DiagWarning};
+        DiagnosticType type{DiagnosticType::ImpassableStep};
+        uint32_t areaId{0};
+        Vector3 location{0.0f, 0.0f, 0.0f};
+        std::string title;
+        std::string description;
+        std::string fixActionName;
+    };
+
+    void RunDiagnostics();
+    const std::vector<DiagnosticIssue>& GetDiagnostics() const { return m_diagnostics; }
+    void ClearDiagnostics() { m_diagnostics.clear(); }
+    bool FixDiagnosticIssue(size_t index, class CommandManager& cmdMgr);
+    uint32_t GetDiagnosticHighlightArea() const { return m_diagnosticHighlightAreaId; }
+    void SetDiagnosticHighlightArea(uint32_t id);
+
+    // Full Map Auto-Generation
+    struct NavGenProgress {
+        std::atomic<bool> isGenerating{false};
+        std::atomic<float> progress{0.0f};
+        std::string statusMessage{"Idle"};
+        bool completed{false};
+        bool success{false};
+        size_t generatedAreas{0};
+        std::string errorMessage;
+    };
+    NavGenProgress& GetNavGenProgress() { return m_navGenProgress; }
+    const NavGenProgress& GetNavGenProgress() const { return m_navGenProgress; }
+    bool StartFullMapNavGeneration(float stepHeight, float maxJump, float crouchClearance, float gridResolution);
+    void UpdateNavGeneration();
+
+    // Toast Notification System
+    struct ToastNotification {
+        std::string message;
+        float remainingSeconds{3.0f};
+    };
+    void ShowToast(const std::string& message, float duration = 3.5f);
+    void UpdateToasts(float deltaTime);
+    const std::vector<ToastNotification>& GetToasts() const { return m_toasts; }
+
+    // Workflow QoL (Hot Reload, JSON & Pawn Export)
+    bool ReloadCurrentMap();
+    bool ExportNavToJSON(const std::string& jsonFilePath) const;
+    std::string GeneratePawnWaypointsCode(bool fromSelectionOnly = false) const;
 
     // User Preferences
     EditorPreferences& GetPreferences() { return m_prefs; }
@@ -613,6 +687,18 @@ private:
     bool m_showIslandColors{false};
     bool m_showClearanceHull{false};
     bool m_clearanceCrouch{false};
+
+    // Diagnostics & Ladders state
+    std::vector<DiagnosticIssue> m_diagnostics;
+    uint32_t m_diagnosticHighlightAreaId{0};
+    uint32_t m_selectedLadderId{0};
+
+    // Full Map Generator thread state
+    NavGenProgress m_navGenProgress;
+    std::thread m_navGenThread;
+
+    // Toast notifications
+    std::vector<ToastNotification> m_toasts;
 
     void PostGenerateOptimize();
 };

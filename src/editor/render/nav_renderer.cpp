@@ -37,7 +37,9 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
                                uint32_t connectTargetId, int transformAxis,
                                SelectedHandleType hoveredHandle,
                                SelectedHandleType selectedHandle,
-                               const std::vector<uint32_t>* selectedIds) {
+                               const std::vector<uint32_t>* selectedIds,
+                               uint32_t selectedLadderId,
+                               uint32_t diagnosticAreaId) {
     Clear();
     if (!nav.IsLoaded()) return false;
 
@@ -426,6 +428,65 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
         }
     }
 
+    // Tactical Hiding Spots & Sniper Points rendering
+    if (m_showHidingSpots) {
+        for (const NavArea* a : areas) {
+            if (!a) continue;
+            for (const NavHidingSpot& spot : a->GetHidingSpots()) {
+                float hr = 0.2f, hg = 0.9f, hb = 0.2f, ha = 0.95f; // Default Cover: green
+                if (spot.flags & NAV_HIDING_GOOD_SNIPER_SPOT) {
+                    hr = 0.2f; hg = 0.6f; hb = 1.0f; // Blue
+                }
+                if (spot.flags & NAV_HIDING_IDEAL_SNIPER) {
+                    hr = 0.85f; hg = 0.2f; hb = 0.9f; // Magenta
+                }
+                if (spot.flags & NAV_HIDING_EXPOSED) {
+                    hr = 1.0f; hg = 0.55f; hb = 0.1f; // Orange
+                }
+
+                Vector3 p = spot.pos + Vector3(0, 0, 10.0f);
+                float sz = 6.0f;
+                uint32_t bIdx = static_cast<uint32_t>(lineVertices.size());
+                lineVertices.push_back({ p.x - sz, p.y, p.z, 0,0,1, 0,0, hr, hg, hb, ha });
+                lineVertices.push_back({ p.x + sz, p.y, p.z, 0,0,1, 0,0, hr, hg, hb, ha });
+                lineVertices.push_back({ p.x, p.y - sz, p.z, 0,0,1, 0,0, hr, hg, hb, ha });
+                lineVertices.push_back({ p.x, p.y + sz, p.z, 0,0,1, 0,0, hr, hg, hb, ha });
+                lineVertices.push_back({ p.x, p.y, p.z - sz, 0,0,1, 0,0, hr, hg, hb, ha });
+                lineVertices.push_back({ p.x, p.y, p.z + sz, 0,0,1, 0,0, hr, hg, hb, ha });
+
+                lineIndices.push_back(bIdx + 0); lineIndices.push_back(bIdx + 1);
+                lineIndices.push_back(bIdx + 2); lineIndices.push_back(bIdx + 3);
+                lineIndices.push_back(bIdx + 4); lineIndices.push_back(bIdx + 5);
+
+                // Ground peg down to spot.pos
+                uint32_t pegIdx = static_cast<uint32_t>(lineVertices.size());
+                lineVertices.push_back({ spot.pos.x, spot.pos.y, spot.pos.z, 0,0,1, 0,0, hr, hg, hb, 0.5f });
+                lineIndices.push_back(bIdx + 4);
+                lineIndices.push_back(pegIdx);
+            }
+        }
+    }
+
+    // Diagnostic Highlight Box
+    if (diagnosticAreaId != 0) {
+        const NavArea* diagArea = nav.GetAreaByID(diagnosticAreaId);
+        if (diagArea) {
+            const NavExtent& ext = diagArea->GetExtent();
+            uint32_t dIdx = static_cast<uint32_t>(lineVertices.size());
+            float dr = 1.0f, dg = 0.15f, db = 0.15f, da = 1.0f;
+            float zTop = std::max(ext.hi.z, diagArea->GetNEZ()) + 12.0f;
+            lineVertices.push_back({ ext.lo.x - 4, ext.lo.y - 4, zTop, 0,0,1, 0,0, dr, dg, db, da });
+            lineVertices.push_back({ ext.hi.x + 4, ext.lo.y - 4, zTop, 0,0,1, 0,0, dr, dg, db, da });
+            lineVertices.push_back({ ext.hi.x + 4, ext.hi.y + 4, zTop, 0,0,1, 0,0, dr, dg, db, da });
+            lineVertices.push_back({ ext.lo.x - 4, ext.hi.y + 4, zTop, 0,0,1, 0,0, dr, dg, db, da });
+
+            lineIndices.push_back(dIdx + 0); lineIndices.push_back(dIdx + 1);
+            lineIndices.push_back(dIdx + 1); lineIndices.push_back(dIdx + 2);
+            lineIndices.push_back(dIdx + 2); lineIndices.push_back(dIdx + 3);
+            lineIndices.push_back(dIdx + 3); lineIndices.push_back(dIdx + 0);
+        }
+    }
+
     // Ladder rendering with rungs
     for (const NavLadder* ladder : nav.GetLadders()) {
         if (!ladder) continue;
@@ -447,7 +508,11 @@ bool NavRenderer::BuildFromNav(const NavMesh& nav, uint32_t selectedId, uint32_t
         Vector3 p3 = top - sideDir * halfW;
 
         uint32_t baseL = static_cast<uint32_t>(lineVertices.size());
-        float lr = 1.0f, lg = 0.85f, lb = 0.2f, la = 0.95f;
+        bool isSelLadder = (selectedLadderId != 0 && ladder->id == selectedLadderId);
+        float lr = isSelLadder ? 0.2f : 1.0f;
+        float lg = isSelLadder ? 0.95f : 0.85f;
+        float lb = isSelLadder ? 1.0f : 0.2f;
+        float la = isSelLadder ? 1.0f : 0.95f;
 
         lineVertices.push_back({ p0.x, p0.y, p0.z, 0,0,1, 0,0, lr, lg, lb, la });
         lineVertices.push_back({ p1.x, p1.y, p1.z, 0,0,1, 0,0, lr, lg, lb, la });

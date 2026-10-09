@@ -325,7 +325,10 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     }
                 }
 
-                // Pick entity and NavArea with accurate distance comparison
+                // Pick ladder, entity, and NavArea with accurate distance comparison
+                float ladDist = std::numeric_limits<float>::max();
+                uint32_t hitLadder = ScenePicker::PickLadder(*g_activeScene, ray, &ladDist);
+
                 float entDist = std::numeric_limits<float>::max();
                 int hitEntity = ScenePicker::PickEntity(*g_activeScene, ray, &entDist);
 
@@ -336,14 +339,23 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                 bool additive = (mods & GLFW_MOD_SHIFT) != 0;
                 bool toggle = (mods & GLFW_MOD_CONTROL) != 0;
 
-                // If NavArea is hit and is closer to camera or within threshold, pick NavArea
-                if (hitArea != 0 && (hitEntity < 0 || navDist <= entDist + 16.0f)) {
+                // Priority: ladder -> area -> entity
+                if (hitLadder != 0 && (hitLadder && ladDist <= navDist + 8.0f && ladDist <= entDist + 8.0f)) {
+                    g_activeScene->SelectLadder(hitLadder);
+                    g_activeScene->ClearSelection();
+                    g_activeScene->SelectEntity(-1);
+                    if (g_activeScene->HasSelectedConnection()) {
+                        g_activeScene->ClearSelectedConnection();
+                    }
+                } else if (hitArea != 0 && (hitEntity < 0 || navDist <= entDist + 16.0f)) {
+                    g_activeScene->SelectLadder(0);
                     g_activeScene->SelectArea(hitArea, additive, toggle);
                     g_activeScene->SelectEntity(-1);
                     if (g_activeScene->HasSelectedConnection() && !g_activeScene->IsConnectionSelectionMode()) {
                         g_activeScene->ClearSelectedConnection();
                     }
                 } else if (hitEntity >= 0) {
+                    g_activeScene->SelectLadder(0);
                     g_activeScene->SelectEntity(hitEntity);
                     g_activeScene->ClearSelection();
                     if (g_activeScene->HasSelectedConnection()) {
@@ -351,6 +363,7 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     }
                 } else {
                     if (!additive && !toggle) {
+                        g_activeScene->SelectLadder(0);
                         g_activeScene->ClearSelection();
                         g_activeScene->ClearSelectedConnection();
                         g_activeScene->SelectEntity(-1);
@@ -510,8 +523,16 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 if (g_editorUI) g_editorUI->TogglePathPanel();
             } else if (key == GLFW_KEY_COMMA && ctrlDown) { // Ctrl+,: Preferences
                 if (g_editorUI) g_editorUI->OpenPreferences();
+            } else if (key == GLFW_KEY_F && ctrlDown) { // Ctrl+F: Find Area Modal
+                if (g_editorUI) g_editorUI->OpenFindModal();
+            } else if (key == GLFW_KEY_R && ctrlDown && (mods & GLFW_MOD_SHIFT) == 0) { // Ctrl+R: Reload Map & NAV
+                if (g_activeScene) g_activeScene->ReloadCurrentMap();
             } else if (key == GLFW_KEY_L && ctrlDown) { // Ctrl+L: Landmarks / Spawns
                 if (g_editorUI) g_editorUI->OpenLandmarksModal();
+            } else if (key == GLFW_KEY_L && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0 &&
+                       g_activeScene->GetSelectedAreaID() == 0 && g_activeScene->GetSelectedAreaIDs().empty() &&
+                       g_activeScene->GetSelectedEntityIndex() < 0) { // L: Create Ladder Modal
+                if (g_editorUI) g_editorUI->OpenLadderCreateModal();
             } else if (key == GLFW_KEY_A && ctrlDown) { // Ctrl+A: Select All
                 g_activeScene->SelectAllAreas();
             } else if (key == GLFW_KEY_F12 && action == GLFW_PRESS) { // F12: Screenshot
@@ -520,7 +541,11 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 std::time_t now = std::time(nullptr);
                 char buf[64];
                 std::strftime(buf, sizeof(buf), "navstudio_%Y%m%d_%H%M%S.bmp", std::localtime(&now));
-                SaveScreenToBMP(buf, displayW, displayH);
+                if (SaveScreenToBMP(buf, displayW, displayH)) {
+                    if (g_activeScene) {
+                        g_activeScene->ShowToast(std::string("Screenshot saved: ") + buf);
+                    }
+                }
             } else if (key == GLFW_KEY_ESCAPE) {
                 if (g_activeScene->IsBoxSelectMode()) {
                     g_activeScene->SetBoxSelectMode(false);
@@ -536,6 +561,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                     g_activeScene->SetPathToolActive(false);
                 } else if (g_activeScene->HasSelectedConnection()) {
                     g_activeScene->ClearSelectedConnection();
+                } else if (g_activeScene->GetSelectedLadderID() != 0) {
+                    g_activeScene->SelectLadder(0);
                 } else if (!g_activeScene->GetSelectedAreaIDs().empty() || g_activeScene->GetSelectedAreaID() != 0) {
                     g_activeScene->ClearSelection();
                 } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {
@@ -543,7 +570,7 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 }
             }
 
-            // Normal Selection Mode Hotkeys (Connection selection takes priority over area selection)
+            // Normal Selection Mode Hotkeys (Connection & Ladder selection take priority over area selection)
             if (key != GLFW_KEY_ESCAPE) {
                 if (g_activeScene->HasSelectedConnection()) {
                     if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
@@ -558,6 +585,16 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                         const NavArea* a2 = g_activeScene->GetNAV().GetAreaByID(sc.toId);
                         if (a1 && a2) {
                             Vector3 mid = (a1->GetCenter() + a2->GetCenter()) * 0.5f;
+                            g_camera.FocusOn(mid);
+                        }
+                    }
+                } else if (g_activeScene->GetSelectedLadderID() != 0) {
+                    if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
+                        g_activeScene->DeleteSelectedLadder();
+                    } else if (key == GLFW_KEY_F) {
+                        NavLadder* lad = g_activeScene->GetSelectedLadder();
+                        if (lad) {
+                            Vector3 mid = (lad->top + lad->bottom) * 0.5f;
                             g_camera.FocusOn(mid);
                         }
                     }
@@ -636,16 +673,45 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 }
             }
 
-            // Camera Bookmarks: Ctrl+0..9 to Save, Alt+0..9 or Numpad 0..9 to Recall
+            // DCC View Presets on Numpad (Hammer / Blender style)
+            if ((mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT | GLFW_MOD_SHIFT)) == 0) {
+                if (key == GLFW_KEY_KP_7) {
+                    g_camera.SnapToPreset(0);
+                    g_camera.SetMode(CAMERA_MODE_TOPDOWN_2D);
+                    if (g_activeScene) g_activeScene->ShowToast("Camera: Top-Down (2D Ortho)");
+                } else if (key == GLFW_KEY_KP_1) {
+                    g_camera.SnapToPreset(1);
+                    g_camera.SetMode(CAMERA_MODE_FPS);
+                    if (g_activeScene) g_activeScene->ShowToast("Camera: Front View");
+                } else if (key == GLFW_KEY_KP_3) {
+                    g_camera.SnapToPreset(2);
+                    g_camera.SetMode(CAMERA_MODE_FPS);
+                    if (g_activeScene) g_activeScene->ShowToast("Camera: Side View");
+                } else if (key == GLFW_KEY_KP_5) {
+                    if (g_camera.GetMode() == CAMERA_MODE_TOPDOWN_2D) {
+                        g_camera.SetMode(CAMERA_MODE_FPS);
+                        if (g_activeScene) g_activeScene->ShowToast("Camera: Perspective (3D)");
+                    } else {
+                        g_camera.SetMode(CAMERA_MODE_TOPDOWN_2D);
+                        if (g_activeScene) g_activeScene->ShowToast("Camera: Orthographic (2D)");
+                    }
+                } else if (key == GLFW_KEY_KP_0) {
+                    g_camera.SnapToPreset(3);
+                    g_camera.SetMode(CAMERA_MODE_FPS);
+                    if (g_activeScene) g_activeScene->ShowToast("Camera: Perspective 3D");
+                }
+            }
+
+            // Camera Bookmarks: Ctrl+0..9 to Save, Alt+0..9 or Alt+Numpad 0..9 to Recall
             for (int slot = 0; slot <= 9; ++slot) {
                 int keyNum = (slot == 0) ? GLFW_KEY_0 : (GLFW_KEY_0 + slot);
                 int keyKp = (slot == 0) ? GLFW_KEY_KP_0 : (GLFW_KEY_KP_0 + slot);
-                if (key == keyNum || key == keyKp) {
+                if (key == keyNum || (key == keyKp && (mods & GLFW_MOD_ALT) != 0)) {
                     if ((mods & GLFW_MOD_CONTROL) != 0 && (mods & (GLFW_MOD_ALT | GLFW_MOD_SHIFT)) == 0) {
                         g_camera.SaveBookmark(slot);
                         std::printf("[NavStudio] Saved camera bookmark slot %d @ (%.0f, %.0f, %.0f)\n",
                             slot, g_camera.GetPosition().x, g_camera.GetPosition().y, g_camera.GetPosition().z);
-                    } else if (((mods & GLFW_MOD_ALT) != 0 || key == keyKp) && (mods & GLFW_MOD_CONTROL) == 0) {
+                    } else if (((mods & GLFW_MOD_ALT) != 0) && (mods & GLFW_MOD_CONTROL) == 0) {
                         if (g_camera.RecallBookmark(slot)) {
                             std::printf("[NavStudio] Recalled camera bookmark slot %d\n", slot);
                         }
