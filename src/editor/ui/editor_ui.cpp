@@ -2525,9 +2525,17 @@ void EditorUI::RenderStatusBar(const EditorScene& scene, const Camera& camera) {
             }
         } else if (scene.HasSelectedConnection()) {
             const auto& conn = scene.GetSelectedConnection();
+            bool isTwoWay = false;
+            if (scene.HasNAV()) {
+                const NavArea* a1 = scene.GetNAV().GetAreaByID(conn.fromId);
+                const NavArea* a2 = scene.GetNAV().GetAreaByID(conn.toId);
+                if (a1 && a2) {
+                    isTwoWay = a2->IsConnected(a1);
+                }
+            }
             ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f),
                 "Connection #%u %s #%u | Del/X: Delete | R: Reverse | 2: Toggle 2-Way | F: Focus Midpoint | Esc: Deselect | Grid: %.0f [%s]",
-                conn.fromId, conn.isBidirectional ? "<==>" : "-->", conn.toId, grid, snap ? "SNAP" : "FREE");
+                conn.fromId, isTwoWay ? "<==>" : "-->", conn.toId, grid, snap ? "SNAP" : "FREE");
         } else if (scene.GetSelectedAreaIDs().size() > 1) {
             ImGui::Text("Map: %s | Multi-Selection: %zu NavAreas Selected | Grid: %.0f [%s] | Esc to clear",
                 bspName, scene.GetSelectedAreaIDs().size(), grid, snap ? "SNAP" : "FREE");

@@ -582,7 +582,7 @@ bool EditorScene::ExportNAVToOBJ(const std::string& filepath) const {
     const auto& areas = m_nav->GetAreas();
     const auto& ladders = m_nav->GetLadders();
 
-    out << "# Wavefront OBJ exported by NavStudio v1.5.2\n";
+    out << "# Wavefront OBJ exported by NavStudio v1.5.3\n";
     out << "# Map: " << m_bspPath << "\n";
     out << "# Navigation Areas: " << areas.size() << "\n";
     out << "# Ladders: " << ladders.size() << "\n\n";
