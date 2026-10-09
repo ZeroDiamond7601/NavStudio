@@ -151,6 +151,14 @@ public:
     NavMesh& GetNAV() { return *m_nav; }
 
     const std::string& GetBSPPath() const { return m_bspPath; }
+    std::string GetBSPName() const {
+        if (m_bsp && m_bsp->IsLoaded()) return m_bsp->GetMapName();
+        if (!m_bspPath.empty()) {
+            size_t slash = m_bspPath.find_last_of("/\\");
+            return (slash != std::string::npos) ? m_bspPath.substr(slash + 1) : m_bspPath;
+        }
+        return "";
+    }
     std::string GetNAVPath() const {
         if (!m_navPath.empty()) return m_navPath;
         if (!m_bspPath.empty()) {

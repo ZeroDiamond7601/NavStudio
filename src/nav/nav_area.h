@@ -40,6 +40,8 @@ public:
     Vector3 GetClosestPoint(const Vector3& pos) const;
     float GetDistanceSquaredToPoint(const Vector3& pos) const;
     Vector3 GetCorner(NavCornerType corner) const;
+    float GetWidth() const { return m_extent.hi.x - m_extent.lo.x; }
+    float GetLength() const { return m_extent.hi.y - m_extent.lo.y; }
 
     // Connections
     const std::vector<NavConnect>& GetAdjacentList(NavDirType dir) const { return m_connect[dir]; }

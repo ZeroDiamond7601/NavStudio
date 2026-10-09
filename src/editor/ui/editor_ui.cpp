@@ -4791,7 +4791,10 @@ void EditorUI::RenderFindModal(EditorScene& scene, Camera& camera) {
                     if (filterStr.empty() || idStr.find(filterStr) != std::string::npos || lowerPlace.find(filterStr) != std::string::npos) {
                         matchCount++;
                         char label[128];
-                        std::snprintf(label, sizeof(label), "Area #%u  [W: %.0f, L: %.0f]  %s", a->GetID(), a->GetWidth(), a->GetLength(), placeStr.empty() ? "" : ("(" + placeStr + ")").c_str());
+                        float w = a->GetWidth();
+                        float l = a->GetLength();
+                        std::string pStr = placeStr.empty() ? "" : ("(" + placeStr + ")");
+                        std::snprintf(label, sizeof(label), "Area #%u  [W: %.0f, L: %.0f]  %s", a->GetID(), static_cast<double>(w), static_cast<double>(l), pStr.c_str());
                         if (ImGui::Selectable(label)) {
                             scene.SelectArea(a->GetID());
                             camera.FocusOn(a->GetCenter(), 350.0f);
