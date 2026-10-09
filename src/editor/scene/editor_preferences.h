@@ -15,6 +15,9 @@ struct EditorPreferences {
     float cornerSnapTolerance{8.0f};
     bool enableCollinearSnap{true};
     float collinearSnapTolerance{6.0f};
+    bool enableSnapToEdgeOnMove{true};
+    bool autoConnectOnEdgeSnap{true};
+    bool extrudeCameraFacing{true};
     int maxUndoSteps{100};
     bool enableAutosave{true};
     int autosaveIntervalMinutes{5};
@@ -60,6 +63,9 @@ struct EditorPreferences {
         cornerSnapTolerance = 8.0f;
         enableCollinearSnap = true;
         collinearSnapTolerance = 6.0f;
+        enableSnapToEdgeOnMove = true;
+        autoConnectOnEdgeSnap = true;
+        extrudeCameraFacing = true;
         maxUndoSteps = 100;
         enableAutosave = true;
         autosaveIntervalMinutes = 5;
@@ -107,6 +113,9 @@ struct EditorPreferences {
                 else if (key == "cornerSnapTolerance") cornerSnapTolerance = std::stof(val);
                 else if (key == "enableCollinearSnap") enableCollinearSnap = (val == "1" || val == "true");
                 else if (key == "collinearSnapTolerance") collinearSnapTolerance = std::stof(val);
+                else if (key == "enableSnapToEdgeOnMove") enableSnapToEdgeOnMove = (val == "1" || val == "true");
+                else if (key == "autoConnectOnEdgeSnap") autoConnectOnEdgeSnap = (val == "1" || val == "true");
+                else if (key == "extrudeCameraFacing") extrudeCameraFacing = (val == "1" || val == "true");
                 else if (key == "maxUndoSteps") maxUndoSteps = std::stoi(val);
                 else if (key == "enableAutosave") enableAutosave = (val == "1" || val == "true");
                 else if (key == "autosaveIntervalMinutes") autosaveIntervalMinutes = std::stoi(val);
@@ -148,6 +157,9 @@ struct EditorPreferences {
         file << "cornerSnapTolerance=" << cornerSnapTolerance << "\n";
         file << "enableCollinearSnap=" << (enableCollinearSnap ? "1" : "0") << "\n";
         file << "collinearSnapTolerance=" << collinearSnapTolerance << "\n";
+        file << "enableSnapToEdgeOnMove=" << (enableSnapToEdgeOnMove ? "1" : "0") << "\n";
+        file << "autoConnectOnEdgeSnap=" << (autoConnectOnEdgeSnap ? "1" : "0") << "\n";
+        file << "extrudeCameraFacing=" << (extrudeCameraFacing ? "1" : "0") << "\n";
         file << "maxUndoSteps=" << maxUndoSteps << "\n";
         file << "enableAutosave=" << (enableAutosave ? "1" : "0") << "\n";
         file << "autosaveIntervalMinutes=" << autosaveIntervalMinutes << "\n";

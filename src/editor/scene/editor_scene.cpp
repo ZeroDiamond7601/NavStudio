@@ -78,6 +78,9 @@ void EditorScene::ApplyPreferences() {
     m_meshSnap = m_prefs.defaultMeshSnap;
     m_meshSnapTolerance = m_prefs.meshSnapTolerance;
     m_cornerSnapTolerance = m_prefs.cornerSnapTolerance;
+    m_enableSnapToEdgeOnMove = m_prefs.enableSnapToEdgeOnMove;
+    m_autoConnectOnEdgeSnap = m_prefs.autoConnectOnEdgeSnap;
+    m_extrudeCameraFacing = m_prefs.extrudeCameraFacing;
     SetShowSkybox(m_prefs.show3DSkybox);
     m_navRenderer.SetShowConnectionValidity(m_prefs.showConnectionValidity);
     m_navRenderer.SetMaxStepHeight(m_prefs.maxStepHeight);
@@ -219,6 +222,179 @@ float EditorScene::SnapToNeighborEdge(uint32_t currentAreaId, float candidateVal
     }
 
     return SnapValue(candidateVal);
+}
+
+SelectedHandleType EditorScene::GetCameraFacingEdge() const {
+    float fx = m_cameraForward.x;
+    float fy = m_cameraForward.y;
+
+    if (std::abs(fx) > std::abs(fy)) {
+        return (fx > 0.0f) ? HANDLE_EDGE_EAST : HANDLE_EDGE_WEST;
+    } else {
+        return (fy < 0.0f) ? HANDLE_EDGE_NORTH : HANDLE_EDGE_SOUTH;
+    }
+}
+
+void EditorScene::SnapMovedAreaToNeighborEdges(uint32_t areaId, NavExtent& inOutExt, float& inOutNeZ, float& inOutSwZ) const {
+    if (!m_nav || !m_nav->IsLoaded()) return;
+
+    float bestDistX = m_meshSnapTolerance;
+    float snapShiftX = 0.0f;
+    bool foundSnapX = false;
+
+    float bestDistY = m_meshSnapTolerance;
+    float snapShiftY = 0.0f;
+    bool foundSnapY = false;
+
+    const float overlapMargin = 2.0f;
+
+    for (const auto* other : m_nav->GetAreas()) {
+        if (!other || other->GetID() == areaId) continue;
+        const NavExtent& oExt = other->GetExtent();
+
+        // Check if areas overlap in Y (for X snapping)
+        bool overlapY = (inOutExt.hi.y > oExt.lo.y + overlapMargin && inOutExt.lo.y < oExt.hi.y - overlapMargin);
+        if (overlapY) {
+            // 1. Moving East edge touches other's West edge (Flush East-to-West)
+            float d1 = oExt.lo.x - inOutExt.hi.x;
+            if (std::abs(d1) < bestDistX) {
+                bestDistX = std::abs(d1);
+                snapShiftX = d1;
+                foundSnapX = true;
+            }
+            // 2. Moving West edge touches other's East edge (Flush West-to-East)
+            float d2 = oExt.hi.x - inOutExt.lo.x;
+            if (std::abs(d2) < bestDistX) {
+                bestDistX = std::abs(d2);
+                snapShiftX = d2;
+                foundSnapX = true;
+            }
+            // 3. Collinear edge alignments
+            if (m_prefs.enableCollinearSnap) {
+                float d3 = oExt.lo.x - inOutExt.lo.x;
+                if (std::abs(d3) < bestDistX) {
+                    bestDistX = std::abs(d3);
+                    snapShiftX = d3;
+                    foundSnapX = true;
+                }
+                float d4 = oExt.hi.x - inOutExt.hi.x;
+                if (std::abs(d4) < bestDistX) {
+                    bestDistX = std::abs(d4);
+                    snapShiftX = d4;
+                    foundSnapX = true;
+                }
+            }
+        }
+
+        // Check if areas overlap in X (for Y snapping)
+        bool overlapX = (inOutExt.hi.x > oExt.lo.x + overlapMargin && inOutExt.lo.x < oExt.hi.x - overlapMargin);
+        if (overlapX) {
+            // 1. Moving South edge (+Y) touches other's North edge (-Y)
+            float d1 = oExt.lo.y - inOutExt.hi.y;
+            if (std::abs(d1) < bestDistY) {
+                bestDistY = std::abs(d1);
+                snapShiftY = d1;
+                foundSnapY = true;
+            }
+            // 2. Moving North edge (-Y) touches other's South edge (+Y)
+            float d2 = oExt.hi.y - inOutExt.lo.y;
+            if (std::abs(d2) < bestDistY) {
+                bestDistY = std::abs(d2);
+                snapShiftY = d2;
+                foundSnapY = true;
+            }
+            // 3. Collinear edge alignments
+            if (m_prefs.enableCollinearSnap) {
+                float d3 = oExt.lo.y - inOutExt.lo.y;
+                if (std::abs(d3) < bestDistY) {
+                    bestDistY = std::abs(d3);
+                    snapShiftY = d3;
+                    foundSnapY = true;
+                }
+                float d4 = oExt.hi.y - inOutExt.hi.y;
+                if (std::abs(d4) < bestDistY) {
+                    bestDistY = std::abs(d4);
+                    snapShiftY = d4;
+                    foundSnapY = true;
+                }
+            }
+        }
+    }
+
+    if (foundSnapX) {
+        inOutExt.lo.x += snapShiftX;
+        inOutExt.hi.x += snapShiftX;
+    }
+    if (foundSnapY) {
+        inOutExt.lo.y += snapShiftY;
+        inOutExt.hi.y += snapShiftY;
+    }
+
+    // Snap elevations along touching edges to achieve seamless flush connection
+    for (const auto* other : m_nav->GetAreas()) {
+        if (!other || other->GetID() == areaId) continue;
+        const NavExtent& oExt = other->GetExtent();
+
+        // Flush East-to-West: our hi.x == other.lo.x
+        if (std::abs(inOutExt.hi.x - oExt.lo.x) <= 1.0f &&
+            inOutExt.hi.y > oExt.lo.y + 2.0f && inOutExt.lo.y < oExt.hi.y - 2.0f) {
+            inOutNeZ = other->GetCorner(NAV_CORNER_NORTH_WEST).z;
+            inOutExt.hi.z = other->GetCorner(NAV_CORNER_SOUTH_WEST).z;
+        }
+        // Flush West-to-East: our lo.x == other.hi.x
+        else if (std::abs(inOutExt.lo.x - oExt.hi.x) <= 1.0f &&
+                 inOutExt.hi.y > oExt.lo.y + 2.0f && inOutExt.lo.y < oExt.hi.y - 2.0f) {
+            inOutExt.lo.z = other->GetCorner(NAV_CORNER_NORTH_EAST).z;
+            inOutSwZ = other->GetCorner(NAV_CORNER_SOUTH_EAST).z;
+        }
+        // Flush South-to-North: our hi.y == other.lo.y
+        else if (std::abs(inOutExt.hi.y - oExt.lo.y) <= 1.0f &&
+                 inOutExt.hi.x > oExt.lo.x + 2.0f && inOutExt.lo.x < oExt.hi.x - 2.0f) {
+            inOutSwZ = other->GetCorner(NAV_CORNER_NORTH_WEST).z;
+            inOutExt.hi.z = other->GetCorner(NAV_CORNER_NORTH_EAST).z;
+        }
+        // Flush North-to-South: our lo.y == other.hi.y
+        else if (std::abs(inOutExt.lo.y - oExt.hi.y) <= 1.0f &&
+                 inOutExt.hi.x > oExt.lo.x + 2.0f && inOutExt.lo.x < oExt.hi.x - 2.0f) {
+            inOutExt.lo.z = other->GetCorner(NAV_CORNER_SOUTH_WEST).z;
+            inOutNeZ = other->GetCorner(NAV_CORNER_SOUTH_EAST).z;
+        }
+    }
+}
+
+void EditorScene::AutoConnectTouchingNeighbors(uint32_t areaId) {
+    if (!m_autoConnectOnEdgeSnap || !m_nav || !m_nav->IsLoaded()) return;
+    NavArea* area = m_nav->GetAreaByID(areaId);
+    if (!area) return;
+
+    const NavExtent& ext = area->GetExtent();
+    const float kTouchTol = 2.0f;
+
+    for (NavArea* other : m_nav->GetAreas()) {
+        if (!other || other->GetID() == areaId) continue;
+        const NavExtent& oExt = other->GetExtent();
+
+        // North edge of area touching South edge of other
+        if (std::abs(ext.lo.y - oExt.hi.y) <= kTouchTol &&
+            ext.hi.x > oExt.lo.x + 2.0f && ext.lo.x < oExt.hi.x - 2.0f) {
+            m_nav->ConnectAreas(areaId, other->GetID(), true, NAV_DIR_NORTH);
+        }
+        // South edge of area touching North edge of other
+        else if (std::abs(ext.hi.y - oExt.lo.y) <= kTouchTol &&
+                 ext.hi.x > oExt.lo.x + 2.0f && ext.lo.x < oExt.hi.x - 2.0f) {
+            m_nav->ConnectAreas(areaId, other->GetID(), true, NAV_DIR_SOUTH);
+        }
+        // West edge of area touching East edge of other
+        else if (std::abs(ext.lo.x - oExt.hi.x) <= kTouchTol &&
+                 ext.hi.y > oExt.lo.y + 2.0f && ext.lo.y < oExt.hi.y - 2.0f) {
+            m_nav->ConnectAreas(areaId, other->GetID(), true, NAV_DIR_WEST);
+        }
+        // East edge of area touching West edge of other
+        else if (std::abs(ext.hi.x - oExt.lo.x) <= kTouchTol &&
+                 ext.hi.y > oExt.lo.y + 2.0f && ext.lo.y < oExt.hi.y - 2.0f) {
+            m_nav->ConnectAreas(areaId, other->GetID(), true, NAV_DIR_EAST);
+        }
+    }
 }
 
 bool EditorScene::SnapToAreaCorner(Vector3& pos, float tolerance) {
@@ -1476,6 +1652,12 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
                 NavExtent nextExt = m_dragStartExtent;
                 nextExt.lo.x += shiftX;
                 nextExt.hi.x += shiftX;
+                float curNeZ = m_dragStartNeZ;
+                float curSwZ = m_dragStartSwZ;
+                if (m_enableSnapToEdgeOnMove) {
+                    SnapMovedAreaToNeighborEdges(area->GetID(), nextExt, curNeZ, curSwZ);
+                    area->SetCornerHeights(curNeZ, curSwZ);
+                }
                 area->SetExtent(nextExt);
             } else if (ent) {
                 float targetX = SnapValue(m_dragStartEntityOrigin.x + deltaX);
@@ -1506,6 +1688,12 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
                 NavExtent nextExt = m_dragStartExtent;
                 nextExt.lo.y += shiftY;
                 nextExt.hi.y += shiftY;
+                float curNeZ = m_dragStartNeZ;
+                float curSwZ = m_dragStartSwZ;
+                if (m_enableSnapToEdgeOnMove) {
+                    SnapMovedAreaToNeighborEdges(area->GetID(), nextExt, curNeZ, curSwZ);
+                    area->SetCornerHeights(curNeZ, curSwZ);
+                }
                 area->SetExtent(nextExt);
             } else if (ent) {
                 float targetY = SnapValue(m_dragStartEntityOrigin.y + deltaYAxis);
@@ -1570,6 +1758,12 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
             NavExtent nextExt = m_dragStartExtent;
             nextExt.lo.x += shiftX; nextExt.hi.x += shiftX;
             nextExt.lo.y += shiftY; nextExt.hi.y += shiftY;
+            float curNeZ = m_dragStartNeZ;
+            float curSwZ = m_dragStartSwZ;
+            if (m_enableSnapToEdgeOnMove) {
+                SnapMovedAreaToNeighborEdges(area->GetID(), nextExt, curNeZ, curSwZ);
+                area->SetCornerHeights(curNeZ, curSwZ);
+            }
             area->SetExtent(nextExt);
         } else if (ent) {
             ent->origin.x = SnapValue(m_dragStartEntityOrigin.x + groundDelta.x);
@@ -1606,6 +1800,12 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
                 NavExtent nextExt = m_dragStartExtent;
                 nextExt.lo.x += shiftX; nextExt.hi.x += shiftX;
                 nextExt.lo.y += shiftY; nextExt.hi.y += shiftY;
+                float curNeZ = m_dragStartNeZ;
+                float curSwZ = m_dragStartSwZ;
+                if (m_enableSnapToEdgeOnMove) {
+                    SnapMovedAreaToNeighborEdges(area->GetID(), nextExt, curNeZ, curSwZ);
+                    area->SetCornerHeights(curNeZ, curSwZ);
+                }
                 area->SetExtent(nextExt);
             } else if (ent) {
                 ent->origin.x = SnapValue(m_dragStartEntityOrigin.x + delta.x);
@@ -2057,6 +2257,8 @@ bool EditorScene::EndDragHandle(CommandManager& cmdMgr) {
 
     if (m_multiDragStates.size() > 1 && m_nav && m_nav->IsLoaded()) {
         std::vector<std::unique_ptr<IEditCommand>> cmds;
+        std::vector<uint32_t> movedIds;
+        SelectedHandleType finishedHandle = m_draggedHandle;
         for (const auto& state : m_multiDragStates) {
             NavArea* a = m_nav->GetAreaByID(state.areaId);
             if (a) {
@@ -2073,6 +2275,7 @@ bool EditorScene::EndDragHandle(CommandManager& cmdMgr) {
                     cmds.push_back(std::make_unique<CmdTransformArea>(this, state.areaId,
                         state.startExtent, state.startNeZ, state.startSwZ,
                         curExt, curNeZ, curSwZ, "Multi-Area Transform"));
+                    movedIds.push_back(state.areaId);
                 }
             }
         }
@@ -2081,6 +2284,11 @@ bool EditorScene::EndDragHandle(CommandManager& cmdMgr) {
         m_draggedHandle = HANDLE_NONE;
         if (!cmds.empty()) {
             cmdMgr.ExecuteCommand(std::make_unique<CmdCompound>(std::move(cmds), "Multi-Area Transform"));
+            if (m_autoConnectOnEdgeSnap && (finishedHandle == HANDLE_GIZMO_CENTER || finishedHandle == HANDLE_PLANE_XY || finishedHandle == HANDLE_GIZMO_X || finishedHandle == HANDLE_GIZMO_Y)) {
+                for (uint32_t movedId : movedIds) {
+                    AutoConnectTouchingNeighbors(movedId);
+                }
+            }
         }
         return true;
     }
@@ -2094,10 +2302,17 @@ bool EditorScene::EndDragHandle(CommandManager& cmdMgr) {
         area->SetExtent(m_dragStartExtent);
         area->SetCornerHeights(m_dragStartNeZ, m_dragStartSwZ);
 
+        SelectedHandleType finishedHandle = m_draggedHandle;
+        uint32_t areaId = area->GetID();
+
         const char* cmdName = GetHandleName(m_draggedHandle);
-        cmdMgr.ExecuteCommand(std::make_unique<CmdTransformArea>(this, area->GetID(),
+        cmdMgr.ExecuteCommand(std::make_unique<CmdTransformArea>(this, areaId,
             m_dragStartExtent, m_dragStartNeZ, m_dragStartSwZ,
             newExt, newNeZ, newSwZ, cmdName));
+
+        if (m_autoConnectOnEdgeSnap && (finishedHandle == HANDLE_GIZMO_CENTER || finishedHandle == HANDLE_PLANE_XY || finishedHandle == HANDLE_GIZMO_X || finishedHandle == HANDLE_GIZMO_Y)) {
+            AutoConnectTouchingNeighbors(areaId);
+        }
     }
 
     m_multiDragStates.clear();
@@ -2231,10 +2446,16 @@ bool EditorScene::ConfirmTransform(CommandManager& cmdMgr) {
     area->SetExtent(m_initialExtent);
     area->SetCornerHeights(m_initialNeZ, m_initialSwZ);
 
+    uint32_t areaId = area->GetID();
+    bool wasTranslate = (m_transformMode == TRANSFORM_TRANSLATE);
     const char* cmdName = (m_transformMode == TRANSFORM_SCALE) ? "Scale Area" : "Move Area";
-    cmdMgr.ExecuteCommand(std::make_unique<CmdTransformArea>(this, area->GetID(),
+    cmdMgr.ExecuteCommand(std::make_unique<CmdTransformArea>(this, areaId,
         m_initialExtent, m_initialNeZ, m_initialSwZ,
         curExt, curNeZ, curSwZ, cmdName));
+
+    if (m_autoConnectOnEdgeSnap && wasTranslate) {
+        AutoConnectTouchingNeighbors(areaId);
+    }
 
     m_transformMode = TRANSFORM_NONE;
     m_transformAxis = AXIS_NONE;
@@ -2258,8 +2479,15 @@ void EditorScene::UpdateTransform(const Vector3& currentHitPoint, float mouseDel
         NavExtent newExt;
         newExt.lo = m_initialExtent.lo + delta;
         newExt.hi = m_initialExtent.hi + delta;
+        float curNeZ = m_initialNeZ + delta.z;
+        float curSwZ = m_initialSwZ + delta.z;
+
+        if (m_enableSnapToEdgeOnMove) {
+            SnapMovedAreaToNeighborEdges(area->GetID(), newExt, curNeZ, curSwZ);
+        }
+
         area->SetExtent(newExt);
-        area->SetCornerHeights(m_initialNeZ + delta.z, m_initialSwZ + delta.z);
+        area->SetCornerHeights(curNeZ, curSwZ);
         RebuildNavRenderer();
     } else if (m_transformMode == TRANSFORM_SCALE) {
         Vector3 center = (m_initialExtent.lo + m_initialExtent.hi) * 0.5f;
@@ -2319,8 +2547,15 @@ void EditorScene::UpdateTransformWithRay(const Ray& ray, float mouseX, float mou
             NavExtent newExt;
             newExt.lo = m_initialExtent.lo + moveDelta;
             newExt.hi = m_initialExtent.hi + moveDelta;
+            float curNeZ = m_initialNeZ + moveDelta.z;
+            float curSwZ = m_initialSwZ + moveDelta.z;
+
+            if (m_enableSnapToEdgeOnMove) {
+                SnapMovedAreaToNeighborEdges(area->GetID(), newExt, curNeZ, curSwZ);
+            }
+
             area->SetExtent(newExt);
-            area->SetCornerHeights(m_initialNeZ + moveDelta.z, m_initialSwZ + moveDelta.z);
+            area->SetCornerHeights(curNeZ, curSwZ);
         }
         RebuildNavRenderer();
     } else if (m_transformMode == TRANSFORM_SCALE) {
@@ -2458,14 +2693,22 @@ void EditorScene::RotateSelectedArea90(CommandManager& cmdMgr) {
         newExt, area->GetNEZ(), area->GetSWZ(), "Rotate Area 90°"));
 }
 
-void EditorScene::ExtrudeSelectedEdge(CommandManager& cmdMgr, float length) {
+void EditorScene::ExtrudeSelectedEdge(CommandManager& cmdMgr, float length, bool useCameraFacing) {
     NavArea* area = GetSelectedArea();
     if (!area) return;
 
     SelectedHandleType edge = m_selectedHandle;
+    if (useCameraFacing || edge < HANDLE_EDGE_NORTH || edge > HANDLE_EDGE_WEST) {
+        if (m_extrudeCameraFacing || edge < HANDLE_EDGE_NORTH || edge > HANDLE_EDGE_WEST) {
+            edge = GetCameraFacingEdge();
+        }
+    }
+
     if (edge < HANDLE_EDGE_NORTH || edge > HANDLE_EDGE_WEST) {
         edge = HANDLE_EDGE_NORTH;
     }
+
+    m_selectedHandle = edge;
 
     if (length <= 0.0f) {
         length = (m_gridSize >= 4.0f) ? m_gridSize : 64.0f;
@@ -2933,7 +3176,7 @@ size_t EditorScene::FloodFillAreaAt(const Ray& ray, CommandManager& cmdMgr) {
 void EditorScene::BatchExtrude(CommandManager& cmdMgr, SelectedHandleType edge, float length) {
     if (m_selectedAreaIds.empty()) return;
     if (edge < HANDLE_EDGE_NORTH || edge > HANDLE_EDGE_WEST) {
-        edge = HANDLE_EDGE_NORTH;
+        edge = m_extrudeCameraFacing ? GetCameraFacingEdge() : HANDLE_EDGE_NORTH;
     }
     if (length <= 0.0f) {
         length = (m_gridSize >= 4.0f) ? m_gridSize : 64.0f;

@@ -256,7 +256,7 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     if (shiftPressed && (handle >= HANDLE_EDGE_NORTH && handle <= HANDLE_EDGE_WEST)) {
                         // Hammer Shift+Drag Edge Extrude: create new adjacent area & drag it
                         g_activeScene->SetSelectedHandle(handle);
-                        g_activeScene->ExtrudeSelectedEdge(*g_cmdMgr);
+                        g_activeScene->ExtrudeSelectedEdge(*g_cmdMgr, 0.0f, false);
                         g_activeScene->StartDragHandle(handle, static_cast<float>(mouseX), static_cast<float>(mouseY), ray);
                     } else {
                         g_activeScene->StartDragHandle(handle, static_cast<float>(mouseX), static_cast<float>(mouseY), ray);
@@ -831,6 +831,7 @@ int main(int argc, char* argv[]) {
 
         glfwPollEvents();
         ProcessInput(window, deltaTime);
+        scene.SetCameraForward(g_camera.GetForward());
         UpdateAppTitle(window, scene);
 
         // Update background scene loading and stage progress

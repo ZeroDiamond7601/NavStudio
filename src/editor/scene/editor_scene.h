@@ -221,6 +221,22 @@ public:
                              float refMinOtherAxis, float refMaxOtherAxis) const;
     void SnapSelectedAreaToNeighbors(class CommandManager& cmdMgr);
 
+    // Edge Snapping on Move & Seamless Auto-Connections
+    bool GetSnapToEdgeOnMove() const { return m_enableSnapToEdgeOnMove; }
+    void SetSnapToEdgeOnMove(bool enable) { m_enableSnapToEdgeOnMove = enable; }
+    void ToggleSnapToEdgeOnMove() { m_enableSnapToEdgeOnMove = !m_enableSnapToEdgeOnMove; }
+    bool GetAutoConnectOnEdgeSnap() const { return m_autoConnectOnEdgeSnap; }
+    void SetAutoConnectOnEdgeSnap(bool enable) { m_autoConnectOnEdgeSnap = enable; }
+    void SnapMovedAreaToNeighborEdges(uint32_t areaId, NavExtent& inOutExt, float& inOutNeZ, float& inOutSwZ) const;
+    void AutoConnectTouchingNeighbors(uint32_t areaId);
+
+    // Camera-oriented view tracking for extrude & navigation
+    void SetCameraForward(const Vector3& fwd) { m_cameraForward = fwd; }
+    Vector3 GetCameraForward() const { return m_cameraForward; }
+    SelectedHandleType GetCameraFacingEdge() const;
+    bool GetExtrudeCameraFacing() const { return m_extrudeCameraFacing; }
+    void SetExtrudeCameraFacing(bool enable) { m_extrudeCameraFacing = enable; }
+
     // Bridge Tool (Click Edge A and Edge B to create intermediate connecting NavArea)
     bool IsBridgeMode() const { return m_isBridgeMode; }
     void StartBridgeMode();
@@ -453,7 +469,7 @@ public:
     void RotateSelectedArea90(class CommandManager& cmdMgr);
 
     // Hammer-style editing tools
-    void ExtrudeSelectedEdge(class CommandManager& cmdMgr, float length = 0.0f);
+    void ExtrudeSelectedEdge(class CommandManager& cmdMgr, float length = 0.0f, bool useCameraFacing = true);
     void SplitSelectedArea(class CommandManager& cmdMgr);
     void MergeSelectedArea(class CommandManager& cmdMgr);
 
@@ -497,6 +513,10 @@ private:
     // Mesh-to-Mesh Snapping
     bool m_meshSnap{true};
     float m_meshSnapTolerance{16.0f};
+    bool m_enableSnapToEdgeOnMove{true};
+    bool m_autoConnectOnEdgeSnap{true};
+    bool m_extrudeCameraFacing{true};
+    Vector3 m_cameraForward{0.0f, -1.0f, 0.0f};
 
     // Bridge Tool
     bool m_isBridgeMode{false};

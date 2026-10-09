@@ -1038,23 +1038,23 @@ public:
             if (!other || other->GetID() == m_areaId) continue;
             const NavExtent& oExt = other->GetExtent();
 
-            // Check North edge gap
-            if (std::abs(m_newExt.hi.y - oExt.lo.y) <= m_tolerance &&
+            // Check North edge gap (-Y)
+            if (std::abs(m_newExt.lo.y - oExt.hi.y) <= m_tolerance &&
                 m_newExt.hi.x > oExt.lo.x + 4.0f && m_newExt.lo.x < oExt.hi.x - 4.0f) {
-                m_newExt.hi.y = oExt.lo.y;
+                m_newExt.lo.y = oExt.hi.y;
                 m_newExt.lo.z = other->GetCorner(NAV_CORNER_SOUTH_WEST).z;
                 m_newNeZ = other->GetCorner(NAV_CORNER_SOUTH_EAST).z;
                 m_connectedNeighbors.push_back({ other->GetID(), NAV_DIR_NORTH });
             }
-            // Check South edge gap
-            if (std::abs(m_newExt.lo.y - oExt.hi.y) <= m_tolerance &&
+            // Check South edge gap (+Y)
+            if (std::abs(m_newExt.hi.y - oExt.lo.y) <= m_tolerance &&
                 m_newExt.hi.x > oExt.lo.x + 4.0f && m_newExt.lo.x < oExt.hi.x - 4.0f) {
-                m_newExt.lo.y = oExt.hi.y;
+                m_newExt.hi.y = oExt.lo.y;
                 m_newSwZ = other->GetCorner(NAV_CORNER_NORTH_WEST).z;
                 m_newExt.hi.z = other->GetCorner(NAV_CORNER_NORTH_EAST).z;
                 m_connectedNeighbors.push_back({ other->GetID(), NAV_DIR_SOUTH });
             }
-            // Check East edge gap
+            // Check East edge gap (+X)
             if (std::abs(m_newExt.hi.x - oExt.lo.x) <= m_tolerance &&
                 m_newExt.hi.y > oExt.lo.y + 4.0f && m_newExt.lo.y < oExt.hi.y - 4.0f) {
                 m_newExt.hi.x = oExt.lo.x;
@@ -1062,7 +1062,7 @@ public:
                 m_newExt.hi.z = other->GetCorner(NAV_CORNER_SOUTH_WEST).z;
                 m_connectedNeighbors.push_back({ other->GetID(), NAV_DIR_EAST });
             }
-            // Check West edge gap
+            // Check West edge gap (-X)
             if (std::abs(m_newExt.lo.x - oExt.hi.x) <= m_tolerance &&
                 m_newExt.hi.y > oExt.lo.y + 4.0f && m_newExt.lo.y < oExt.hi.y - 4.0f) {
                 m_newExt.lo.x = oExt.hi.x;

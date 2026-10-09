@@ -215,6 +215,7 @@ void EditorUI::Init() {
 }
 
 void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr, float /*deltaTime*/) {
+    scene.SetCameraForward(camera.GetForward());
     ImGuiIO& io = ImGui::GetIO();
     m_mouseOverUI = io.WantCaptureMouse;
 
@@ -570,6 +571,21 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
             if (ImGui::MenuItem("Snap to Neighbors (Close Gaps)", "Shift+S", false, sel != nullptr)) {
                 scene.SnapSelectedAreaToNeighbors(cmdMgr);
+            }
+            bool snapEdgeOnMove = scene.GetSnapToEdgeOnMove();
+            if (ImGui::MenuItem("Snap Edges on Move", nullptr, &snapEdgeOnMove)) {
+                scene.SetSnapToEdgeOnMove(snapEdgeOnMove);
+                scene.GetPreferences().enableSnapToEdgeOnMove = snapEdgeOnMove;
+            }
+            bool autoConnect = scene.GetAutoConnectOnEdgeSnap();
+            if (ImGui::MenuItem("Auto-Connect Touching Edges", nullptr, &autoConnect)) {
+                scene.SetAutoConnectOnEdgeSnap(autoConnect);
+                scene.GetPreferences().autoConnectOnEdgeSnap = autoConnect;
+            }
+            bool extrudeCamFacing = scene.GetExtrudeCameraFacing();
+            if (ImGui::MenuItem("Extrude in Camera Facing Direction", nullptr, &extrudeCamFacing)) {
+                scene.SetExtrudeCameraFacing(extrudeCamFacing);
+                scene.GetPreferences().extrudeCameraFacing = extrudeCamFacing;
             }
             if (ImGui::MenuItem("Extrude Selected Edge", "E", false, sel != nullptr)) {
                 scene.ExtrudeSelectedEdge(cmdMgr);
@@ -2554,6 +2570,23 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Spacing();
+                ImGui::Text("Edge Snapping & Extrusion:");
+                if (ImGui::Checkbox("Snap to Neighbor Edges on Move", &prefs.enableSnapToEdgeOnMove)) {
+                    scene.SetSnapToEdgeOnMove(prefs.enableSnapToEdgeOnMove);
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Aligns area edges flush against neighboring areas and matches elevations during translation");
+                if (ImGui::Checkbox("Auto-Connect Touching Edges (Seamless Connections)", &prefs.autoConnectOnEdgeSnap)) {
+                    scene.SetAutoConnectOnEdgeSnap(prefs.autoConnectOnEdgeSnap);
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Automatically establishes bidirectional connections with adjacent touching areas after moving");
+                if (ImGui::Checkbox("Extrude in Camera Facing Direction", &prefs.extrudeCameraFacing)) {
+                    scene.SetExtrudeCameraFacing(prefs.extrudeCameraFacing);
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("When extruding without an explicit edge selected, extrude towards the direction the camera is looking");
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
                 ImGui::Text("Autosave & Backup:");
                 ImGui::Checkbox("Enable Periodic Autosave (.nav.bak)", &prefs.enableAutosave);
                 if (prefs.enableAutosave) {
@@ -3782,6 +3815,11 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
             { "Edit", "Clear Selection", "Esc", [&]() { scene.ClearSelection(); } },
             { "Edit", "Delete Selected Areas", "Delete", [&]() { scene.BatchDelete(cmdMgr); } },
             { "Edit", "Duplicate Selected Areas", "Shift+D", [&]() { scene.BatchDuplicate(cmdMgr); } },
+            { "Edit", "Extrude Edge (Camera Facing)", "E", [&]() { scene.ExtrudeSelectedEdge(cmdMgr); } },
+            { "Edit", "Snap to Neighbors (Close Gaps)", "Shift+S", [&]() { scene.SnapSelectedAreaToNeighbors(cmdMgr); } },
+            { "Edit", "Toggle Snap to Neighbor Edges on Move", "", [&]() { scene.ToggleSnapToEdgeOnMove(); } },
+            { "Edit", "Toggle Auto-Connect Touching Edges", "", [&]() { scene.SetAutoConnectOnEdgeSnap(!scene.GetAutoConnectOnEdgeSnap()); } },
+            { "Edit", "Toggle Camera-Facing Extrusion", "", [&]() { scene.SetExtrudeCameraFacing(!scene.GetExtrudeCameraFacing()); } },
             { "Edit", "Undo", "Ctrl+Z", [&]() { cmdMgr.Undo(); } },
             { "Edit", "Redo", "Ctrl+Y", [&]() { cmdMgr.Redo(); } },
             { "Tool", "Marquee Box Selection", "Shift+B", [&]() { scene.ToggleBoxSelectMode(); } },
