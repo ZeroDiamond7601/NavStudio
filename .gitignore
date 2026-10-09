@@ -46,4 +46,6 @@ third_party/
 
 # Helper scripts
 push.bat
-
+# Runtime config & state
+imgui.ini
+navstudio_recent.txt

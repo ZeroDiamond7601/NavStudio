@@ -11,6 +11,34 @@ It provides real-time OpenGL 3.3 Core rendering with Dear ImGui docking, Valve H
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/navstudio_viewport_textured.png" alt="NavStudio 3D Textured Viewport & Transform Gizmo" width="95%" />
+  <br />
+  <em>Real-time GoldSrc BSP rendering with WAD3 textures, navigation area selection, 3D multi-axis transform gizmo, directional connection flow, and docked Property Inspector.</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/navstudio_entity_archetypes.png" alt="GoldSrc Entity Archetypes and Navigation Mesh Overview" width="95%" />
+  <br />
+  <em>GoldSrc 3D entity archetypes (Terrorist player spawns with head blocks and yaw facing pointers), floor navigation mesh, and Navigation Mesh Overview inspector.</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/navstudio_clay_shading.png" alt="Studio Clay Shading Mode" width="95%" />
+  <br />
+  <em>Studio Clay untextured shading mode (F4) with Z-Up hemisphere lighting and brush edge outlines.</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/navstudio_ct_spawns.png" alt="Counter-Terrorist Spawns and Point Entities" width="95%" />
+  <br />
+  <em>Counter-Terrorist spawns with 3D player hulls, point light octahedrons, and wooden crate brush entities.</em>
+</p>
+
+---
+
 ## Key Features
 
 ### 3D Hardware-Accelerated Viewport & Shading Modes (`F4`)
