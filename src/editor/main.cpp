@@ -959,7 +959,7 @@ int main(int argc, char* argv[]) {
         scene.UpdateAsyncLoading(deltaTime);
         scene.UpdateAutosave(deltaTime);
 
-        if (!screenshotPath.empty() && !scene.IsAsyncLoading()) {
+        if (!screenshotPath.empty() && !scene.IsLoading()) {
             static bool s_configured = false;
             if (!s_configured) {
                 s_configured = true;
@@ -1022,7 +1022,7 @@ int main(int argc, char* argv[]) {
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-        if (!screenshotPath.empty() && !scene.IsAsyncLoading()) {
+        if (!screenshotPath.empty() && !scene.IsLoading()) {
             static int s_renderFrames = 0;
             s_renderFrames++;
             if (s_renderFrames >= screenshotWaitFrames) {
