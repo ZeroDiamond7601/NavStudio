@@ -2,6 +2,7 @@
 #define NAV_RENDERER_H
 
 #include <vector>
+#include <unordered_map>
 #include <cstdint>
 #include "editor/glad/include/glad/glad.h"
 #include "nav/nav_file.h"

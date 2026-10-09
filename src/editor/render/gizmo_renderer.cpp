@@ -1,6 +1,7 @@
 #include "editor/render/gizmo_renderer.h"
 #include <cmath>
 #include <algorithm>
+#include <cstddef>
 
 static const float kPi = 3.14159265358979323846f;
 

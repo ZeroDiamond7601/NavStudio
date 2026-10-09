@@ -1,5 +1,6 @@
 #include "editor/camera/camera.h"
 #include <algorithm>
+#include <cmath>
 
 static const float DEG2RAD = 3.14159265358979323846f / 180.0f;
 
