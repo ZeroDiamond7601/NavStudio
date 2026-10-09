@@ -9,9 +9,6 @@
 
 It provides real-time OpenGL 3.3 Core rendering with Dear ImGui docking, Valve Hammer Editor-style 3D textured rendering, WAD3 archive texture resolution, interactive mesh modeling tools, collision tracing, and Wavefront OBJ export.
 
-> [!TIP]
-> **Game Server Module:** Looking for the server-side AMX Mod X module with runtime pathfinding and Pawn natives? Visit **[amxmodx-navmesh](https://github.com/ZeroDiamond7601/amxmodx-navmesh)**!
-
 ---
 
 ## Key Features
