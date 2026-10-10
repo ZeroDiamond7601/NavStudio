@@ -2,8 +2,11 @@
 #include <chrono>
 #include <cmath>
 #include <queue>
+#include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
+#include <cstdint>
+#include <cstddef>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846

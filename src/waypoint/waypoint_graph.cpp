@@ -565,7 +565,8 @@ WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile*
             // Clean any remaining self-references or references to deleted
             for (auto& n : m_nodes) {
                 for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
-                    if (n.connections[c] == static_cast<int16_t>(n.id) || toDelete.count(static_cast<uint32_t>(n.connections[c]))) {
+                    if (n.connections[c] == static_cast<int16_t>(n.id) ||
+                        (n.connections[c] > 0 && toDelete.count(static_cast<uint32_t>(n.connections[c])))) {
                         n.connections[c] = -1;
                         n.connectionFlags[c] = 0;
                     }
@@ -721,7 +722,7 @@ WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile*
             }), m_nodes.end());
             for (auto& n : m_nodes) {
                 for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
-                    if (collinearToDelete.count(static_cast<uint32_t>(n.connections[c]))) {
+                    if (n.connections[c] > 0 && collinearToDelete.count(static_cast<uint32_t>(n.connections[c]))) {
                         n.connections[c] = -1;
                         n.connectionFlags[c] = 0;
                     }

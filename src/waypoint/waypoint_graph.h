@@ -5,6 +5,8 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <cstddef>
+#include <cstdint>
 
 class WaypointGraph {
 public:
