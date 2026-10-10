@@ -23,6 +23,9 @@
 #include "waypoint/ebot_generator.h"
 #include "editor/render/waypoint_renderer.h"
 #include <vector>
+#include <unordered_set>
+
+class Camera;
 
 struct AsyncLoadContext {
     std::atomic<bool> inProgress{false};

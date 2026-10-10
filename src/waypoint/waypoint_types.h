@@ -56,7 +56,8 @@ enum WaypointConnectionFlags : uint16_t {
     WPT_CONN_NONE             = 0,
     WPT_CONN_JUMP             = (1 << 0),   // Leap required
     WPT_CONN_DOUBLE           = (1 << 1),   // Boost / double jump required
-    WPT_CONN_VISIBLE          = (1 << 2)    // Line of sight must remain clear
+    WPT_CONN_VISIBLE          = (1 << 2),   // Line of sight must remain clear
+    WPT_CONN_CROUCH           = (1 << 3)    // Crouch through duct / opening
 };
 
 // Maximum connection degree per waypoint across GoldSrc formats

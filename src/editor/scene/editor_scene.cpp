@@ -11,6 +11,7 @@
 #include <cmath>
 #include <queue>
 #include <unordered_map>
+#include <unordered_set>
 #include <filesystem>
 #include <chrono>
 #include <imgui.h>
@@ -4972,11 +4973,11 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
         // Check clearance: standing hull (32x32x72) vs crouch hull (32x32x36)
         Vector3 standTop = groundPos + Vector3(0.0f, 0.0f, 72.0f);
         BSPTraceResult standTr;
-        bool canStand = m_bsp->TraceWorld(groundPos + Vector3(0.0f, 0.0f, 1.0f), standTop, HULL_PLAYER, &standTr) && standTr.fraction >= 1.0f;
+        bool canStand = m_bsp->TraceWorld(groundPos + Vector3(0.0f, 0.0f, 1.0f), standTop, HULL_HUMAN, &standTr) && standTr.fraction >= 1.0f;
 
         Vector3 crouchTop = groundPos + Vector3(0.0f, 0.0f, 36.0f);
         BSPTraceResult crouchTr;
-        bool canCrouch = m_bsp->TraceWorld(groundPos + Vector3(0.0f, 0.0f, 1.0f), crouchTop, HULL_CROUCH, &crouchTr) && crouchTr.fraction >= 1.0f;
+        bool canCrouch = m_bsp->TraceWorld(groundPos + Vector3(0.0f, 0.0f, 1.0f), crouchTop, HULL_HEAD, &crouchTr) && crouchTr.fraction >= 1.0f;
 
         if (!canStand && !canCrouch) {
             continue; // Not walkable
@@ -5157,7 +5158,10 @@ bool EditorScene::CreateConnectionToCached(int conType) {
         case 3: // Jumping
             ok = m_waypoints.ConnectNodes(m_cachedWaypointId, m_selectedWaypointId, true, WPT_CONN_JUMP);
             break;
-        case 4: // Boosting / Double jump
+        case 4: // Crouch
+            ok = m_waypoints.ConnectNodes(m_cachedWaypointId, m_selectedWaypointId, true, WPT_CONN_CROUCH);
+            break;
+        case 5: // Boosting / Double jump
             ok = m_waypoints.ConnectNodes(m_cachedWaypointId, m_selectedWaypointId, true, WPT_CONN_DOUBLE);
             break;
     }
