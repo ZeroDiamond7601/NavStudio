@@ -204,10 +204,16 @@ void EditorUI::ApplyPreferencesToRuntime(EditorScene& scene, Camera& camera, Com
     camera.SetFov(prefs.fieldOfView);
     camera.SetSensitivity(prefs.mouseSensitivity);
     camera.SetInvertY(prefs.invertY);
+    camera.SetNearPlane(prefs.nearClipDistance);
+    camera.SetFarPlane(prefs.farClipDistance);
     cmdMgr.SetMaxHistory(prefs.maxUndoSteps);
     m_showStatsOverlay = prefs.showFps;
+    m_nudgeStepLinear = prefs.defaultLinearNudgeStep;
+    m_nudgeStepAngular = prefs.defaultAngularNudgeStep;
+    m_showGizmoNudgeHUD = prefs.showGizmoNudgeHUD;
     ApplyTheme(prefs.themeIndex);
     scene.RebuildNavRenderer();
+    scene.RebuildWaypointRenderer();
 }
 
 void EditorUI::Init() {
@@ -307,6 +313,9 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     RenderInspector(scene, camera, cmdMgr);
     RenderStatusBar(scene, camera);
     RenderTransformHUD(scene, cmdMgr);
+    if (m_showGizmoNudgeHUD) {
+        RenderGizmoNudgeHUD(scene, camera, cmdMgr);
+    }
 
     if (m_showStatsOverlay) {
         RenderStatsOverlay(scene, camera);
@@ -1230,6 +1239,7 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             ImGui::Separator();
             ImGui::MenuItem("Performance & FPS Overlay", nullptr, &m_showStatsOverlay);
             ImGui::MenuItem("Blender Viewport Compass", nullptr, &scene.GetPreferences().showCompass);
+            ImGui::MenuItem("Precision Nudge HUD", nullptr, &m_showGizmoNudgeHUD);
 
             ImGui::EndMenu();
         }
@@ -2206,12 +2216,32 @@ void EditorUI::RenderEntityInspector(EditorScene& scene, Camera& camera) {
     ImGui::Separator();
 
     // Transform Coordinates
-    ImGui::Text("Origin:");
-    ImGui::Text("  X: %.1f  Y: %.1f  Z: %.1f", ent->origin.x, ent->origin.y, ent->origin.z);
+    ImGui::TextDisabled("Nudge Step:");
+    const float entStepPresets[] = { 1.0f, 8.0f, 16.0f, 32.0f, 64.0f };
+    for (int s = 0; s < 5; ++s) {
+        ImGui::SameLine();
+        char sLbl[16];
+        std::snprintf(sLbl, sizeof(sLbl), "%.0f##ent_stp%d", entStepPresets[s], s);
+        if (m_nudgeStepLinear == entStepPresets[s]) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.55f, 0.9f, 1.0f));
+        if (ImGui::Button(sLbl, ImVec2(24, 18))) m_nudgeStepLinear = entStepPresets[s];
+        if (m_nudgeStepLinear == entStepPresets[s]) ImGui::PopStyleColor();
+    }
 
-    if (ent->yaw != 0.0f || ent->angles.x != 0.0f || ent->angles.z != 0.0f) {
-        ImGui::Text("Angles:");
-        ImGui::Text("  Pitch: %.1f  Yaw: %.1f  Roll: %.1f", ent->angles.x, ent->angles.y, ent->angles.z);
+    float entPos[3] = { ent->origin.x, ent->origin.y, ent->origin.z };
+    if (DrawNudgeFloat3("Origin", entPos, m_nudgeStepLinear)) {
+        EditorEntity* mutableEnt = scene.GetSelectedEntity();
+        if (mutableEnt) {
+            mutableEnt->origin = Vector3(entPos[0], entPos[1], entPos[2]);
+        }
+    }
+
+    float entAngles[3] = { ent->angles.x, ent->angles.y, ent->angles.z };
+    if (DrawNudgeAngle3("Angles", entAngles, m_nudgeStepAngular)) {
+        EditorEntity* mutableEnt = scene.GetSelectedEntity();
+        if (mutableEnt) {
+            mutableEnt->angles = Vector3(entAngles[0], entAngles[1], entAngles[2]);
+            mutableEnt->yaw = entAngles[1];
+        }
     }
 
     // Special item info: Armoury
@@ -2635,8 +2665,19 @@ void EditorUI::RenderAreaInspector(EditorScene& scene, Camera& camera, CommandMa
         float width = extent.hi.x - extent.lo.x;
         float length = extent.hi.y - extent.lo.y;
 
+        ImGui::TextDisabled("Nudge Step:");
+        const float areaStepPresets[] = { 1.0f, 8.0f, 16.0f, 32.0f, 64.0f };
+        for (int s = 0; s < 5; ++s) {
+            ImGui::SameLine();
+            char sLbl[16];
+            std::snprintf(sLbl, sizeof(sLbl), "%.0f##area_stp%d", areaStepPresets[s], s);
+            if (m_nudgeStepLinear == areaStepPresets[s]) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.55f, 0.9f, 1.0f));
+            if (ImGui::Button(sLbl, ImVec2(24, 18))) m_nudgeStepLinear = areaStepPresets[s];
+            if (m_nudgeStepLinear == areaStepPresets[s]) ImGui::PopStyleColor();
+        }
+
         float pos[3] = { center.x, center.y, center.z };
-        if (ImGui::DragFloat3("Position (X,Y,Z)", pos, 1.0f, -65536.0f, 65536.0f, "%.1f")) {
+        if (DrawNudgeFloat3("Position (X,Y,Z)", pos, m_nudgeStepLinear, -65536.0f, 65536.0f)) {
             Vector3 delta(pos[0] - center.x, pos[1] - center.y, pos[2] - center.z);
             NavExtent newExt;
             newExt.lo = extent.lo + delta;
@@ -2649,7 +2690,7 @@ void EditorUI::RenderAreaInspector(EditorScene& scene, Camera& camera, CommandMa
         }
 
         float size[2] = { width, length };
-        if (ImGui::DragFloat2("Size (W, L)", size, 1.0f, 8.0f, 8192.0f, "%.1f")) {
+        if (DrawNudgeFloat2("Size (W, L)", size, m_nudgeStepLinear, 8.0f, 8192.0f, "%.1f")) {
             float hw = std::max(4.0f, size[0] * 0.5f);
             float hl = std::max(4.0f, size[1] * 0.5f);
             NavExtent newExt;
@@ -2667,7 +2708,17 @@ void EditorUI::RenderAreaInspector(EditorScene& scene, Camera& camera, CommandMa
             area->GetCorner(NAV_CORNER_SOUTH_EAST).z,
             area->GetSWZ()
         };
-        if (ImGui::DragFloat4("Corners (NW,NE,SE,SW)", corners, 0.5f, -65536.0f, 65536.0f, "%.1f")) {
+        ImGui::Text("Corners Elevation:");
+        const char* cLabels[4] = { "NW", "NE", "SE", "SW" };
+        bool cornersChanged = false;
+        for (int c = 0; c < 4; ++c) {
+            char cId[32];
+            std::snprintf(cId, sizeof(cId), "%s##corner_%d", cLabels[c], c);
+            if (DrawNudgeFloat(cId, &corners[c], m_nudgeStepLinear, -65536.0f, 65536.0f, "%.1f")) {
+                cornersChanged = true;
+            }
+        }
+        if (cornersChanged) {
             NavExtent newExt = extent;
             newExt.lo.z = corners[0];
             newExt.hi.z = corners[2];
@@ -3520,15 +3571,17 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
 
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(560, 480));
+    ImGui::SetNextWindowSize(ImVec2(640, 560), ImGuiCond_Appearing);
 
     if (ImGui::BeginPopupModal("Preferences##NavStudioPrefs", &m_showPreferencesModal)) {
         EditorPreferences& prefs = scene.GetPreferences();
 
         if (ImGui::BeginTabBar("PreferencesTabs")) {
             if (ImGui::BeginTabItem("General")) {
+                ImGui::BeginChild("GeneralTabScroll", ImVec2(0, -42), false);
+
                 ImGui::Spacing();
-                ImGui::Text("Grid & Snapping Defaults:");
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Grid & Snapping Defaults:");
                 ImGui::SliderFloat("Default Grid Size", &prefs.defaultGridSize, 4.0f, 128.0f, "%.0f u");
                 ImGui::Checkbox("Enable Grid Snap by Default", &prefs.defaultGridSnap);
                 ImGui::Checkbox("Enable Mesh Neighbor Snap by Default", &prefs.defaultMeshSnap);
@@ -3542,7 +3595,7 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Spacing();
-                ImGui::Text("Edge Snapping & Extrusion:");
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Edge Snapping & Extrusion:");
                 if (ImGui::Checkbox("Snap to Neighbor Edges on Move", &prefs.enableSnapToEdgeOnMove)) {
                     scene.SetSnapToEdgeOnMove(prefs.enableSnapToEdgeOnMove);
                 }
@@ -3559,45 +3612,144 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Spacing();
-                ImGui::Text("Autosave & Backup:");
-                ImGui::Checkbox("Enable Periodic Autosave (.nav.bak)", &prefs.enableAutosave);
-                if (prefs.enableAutosave) {
-                    ImGui::SliderInt("Autosave Interval", &prefs.autosaveIntervalMinutes, 1, 30, "%d min");
-                }
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Precision Nudge & Gizmo Defaults:");
+                ImGui::SliderFloat("Linear Nudge Step", &prefs.defaultLinearNudgeStep, 1.0f, 64.0f, "%.0f u");
+                ImGui::SliderFloat("Angular Nudge Step", &prefs.defaultAngularNudgeStep, 1.0f, 90.0f, "%.0f deg");
+                ImGui::Checkbox("Show Precision Nudge Viewport HUD by Default", &prefs.showGizmoNudgeHUD);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Displays clickable increment/decrement arrows on-screen whenever an area, waypoint, or entity is selected");
 
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Spacing();
-                ImGui::Text("Undo History:");
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Autosave, Recovery & Backups:");
+                ImGui::Checkbox("Enable Periodic NavMesh Autosave (.nav.bak)", &prefs.enableAutosave);
+                if (prefs.enableAutosave) {
+                    ImGui::SliderInt("NavMesh Autosave Interval", &prefs.autosaveIntervalMinutes, 1, 30, "%d min");
+                }
+                ImGui::Checkbox("Enable Periodic Waypoint Autosave (.ewp.bak)", &prefs.enableWaypointAutosave);
+                ImGui::SliderInt("Maximum Backups to Retain", &prefs.maxBackupsToKeep, 1, 20, "%d files");
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "User Interface & Productivity:");
+                ImGui::Checkbox("Confirm Before Deleting Areas / Waypoints", &prefs.confirmDeleteArea);
+                ImGui::Checkbox("Show Rich Viewport Tooltips", &prefs.showTooltips);
+                ImGui::SliderFloat("Status Toast Notification Duration", &prefs.statusToastDuration, 1.0f, 10.0f, "%.1f s");
+                ImGui::SliderInt("Max Recent Files History", &prefs.maxRecentFiles, 5, 30, "%d files");
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Undo History:");
                 ImGui::SliderInt("Max Undo History Steps", &prefs.maxUndoSteps, 10, 500, "%d steps");
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Limits RAM usage for large mesh editing sessions");
 
+                ImGui::EndChild();
                 ImGui::EndTabItem();
             }
 
             if (ImGui::BeginTabItem("Navigation & Mesh")) {
+                ImGui::BeginChild("NavMeshTabScroll", ImVec2(0, -42), false);
+
                 ImGui::Spacing();
-                ImGui::Text("Auto-Generation Defaults:");
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Auto-Generation Defaults:");
                 ImGui::SliderFloat("Default Step Size", &prefs.defaultGenStep, 16.0f, 64.0f, "%.0f u");
                 ImGui::SliderFloat("Max Step Height", &prefs.maxStepHeight, 12.0f, 32.0f, "%.0f u (Standard CS: 18u)");
+                ImGui::SliderFloat("Max Jump Height", &prefs.navMaxJumpHeight, 32.0f, 72.0f, "%.0f u (CS Duck-jump: 58-62u)");
+                ImGui::SliderFloat("Max Drop Fall Height", &prefs.navMaxDropHeight, 64.0f, 1024.0f, "%.0f u");
+                ImGui::Checkbox("Auto-Detect Jump-Crouch Entrances & Low Vents", &prefs.navDetectCrouchVents);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Probes elevated perches with headroom < 68u and tags NAV_ATTR_CROUCH | NAV_ATTR_JUMP");
+                ImGui::Checkbox("Connect Jump Spots to Elevated Platforms", &prefs.navConnectJumpSpots);
+                ImGui::Checkbox("Auto-Link func_ladder Entities to Adjacent Mesh", &prefs.navLinkLadders);
+                ImGui::Checkbox("Seed Base and Top Dismount Platforms for Ladders", &prefs.navSeedLadderTops);
                 ImGui::Checkbox("Auto-Optimize (Merge Coplanar Quads) After Generation", &prefs.autoOptimizeAfterGen);
                 ImGui::Checkbox("Seamless Border Height Smoothing on Flood Fill", &prefs.floodFillSmoothSeams);
 
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Spacing();
-                ImGui::Text("Connection Validation:");
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "NavMesh Tuning & Proximity:");
+                ImGui::SliderFloat("Ladder Attachment Proximity", &prefs.navLadderConnectRadius, 64.0f, 500.0f, "%.0f u");
+                ImGui::SliderFloat("Crouch Ceiling Clearance Threshold", &prefs.navCrouchCeilingThreshold, 48.0f, 72.0f, "%.0f u");
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "NavMesh Shading & Overlays:");
                 if (ImGui::Checkbox("Highlight Impassable Steps (> 18u) in Crimson Red", &prefs.showConnectionValidity)) {
                     scene.GetNavRenderer().SetShowConnectionValidity(prefs.showConnectionValidity);
                     scene.RebuildNavRenderer();
                 }
+                ImGui::Checkbox("Draw Area Wireframe Outlines", &prefs.navWireframeEdges);
+                ImGui::SliderFloat("NavMesh Polygon Transparency", &prefs.navMeshOpacity, 0.1f, 1.0f, "%.2f");
+                ImGui::Checkbox("Show 3D Nav Area ID Numbers", &prefs.navShowAreaIDs);
 
+                ImGui::EndChild();
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Bot Waypoints")) {
+                ImGui::BeginChild("WaypointsTabScroll", ImVec2(0, -42), false);
+
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Auto-Generation Defaults:");
+                ImGui::SliderFloat("Node Grid Spacing", &prefs.defaultWptSpacing, 64.0f, 300.0f, "%.0f u (Recommended: 160u)");
+                ImGui::SliderFloat("Minimum Separation Distance", &prefs.defaultWptMinDist, 40.0f, 200.0f, "%.0f u (Prevents clumping)");
+                ImGui::SliderFloat("Connection Search Radius", &prefs.defaultWptConnectRadius, 80.0f, 400.0f, "%.0f u");
+                ImGui::SliderFloat("Max Jump Connection Height", &prefs.defaultWptMaxJump, 20.0f, 70.0f, "%.0f u");
+                ImGui::Checkbox("Prune Crossing Diagonal Links (RNG / Gabriel Filter)", &prefs.defaultWptPruneCrossing);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Eliminates crossing yellow 'X' links and redundant diagonals that confuse bot navigation");
+                ImGui::Checkbox("Prune Redundant Collinear Corridor Nodes", &prefs.defaultWptPruneCollinear);
+                if (prefs.defaultWptPruneCollinear) {
+                    ImGui::SliderFloat("Collinear Angle Tolerance", &prefs.defaultWptCollinearAngle, 5.0f, 45.0f, "%.1f deg");
+                }
+                ImGui::Checkbox("Auto-Calculate Wayzone Radii via Map Raycasts", &prefs.defaultWptCalcWayzones);
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Default Bot Profile & Game Mod:");
+                const char* botProfiles[] = { "CS-EBOT (.ewp)", "SyPB (.spt)", "YaPB (.pwf)", "POD-Bot (.wpt)" };
+                ImGui::Combo("Default Bot Type", &prefs.defaultBotType, botProfiles, 4);
+                const char* gameMods[] = { "Standard Counter-Strike", "Zombie Plague", "Deathmatch" };
+                ImGui::Combo("Default Game Mod", &prefs.defaultGameMod, gameMods, 3);
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Viewport Rendering & Visibility:");
+                if (ImGui::Checkbox("Show Waypoint Connections by Default", &prefs.defaultShowWptConnections)) {
+                    scene.GetWaypointRenderer().SetShowConnections(prefs.defaultShowWptConnections);
+                }
+                if (ImGui::Checkbox("Show Wayzone Tolerance Radii by Default", &prefs.defaultShowWptRadii)) {
+                    scene.GetWaypointRenderer().SetShowRadii(prefs.defaultShowWptRadii);
+                }
+                if (ImGui::Checkbox("Show Aim / Camp Direction Cones", &prefs.defaultShowWptDirection)) {
+                    scene.GetWaypointRenderer().SetShowDirection(prefs.defaultShowWptDirection);
+                }
+                ImGui::Checkbox("Show 3D Waypoint ID Labels", &prefs.wptShowLabels);
+                ImGui::SliderFloat("Label Distance Cutoff", &prefs.wptMaxLabelDistance, 200.0f, 3000.0f, "%.0f u");
+                ImGui::SliderFloat("Node Sphere Render Size", &prefs.wptNodeRenderSize, 2.0f, 16.0f, "%.1f u");
+                ImGui::SliderFloat("Connection Line Thickness", &prefs.wptLineWidth, 1.0f, 8.0f, "%.1f px");
+                ImGui::SliderFloat("Wayzone Cylinder Transparency", &prefs.wayzoneAlpha, 0.05f, 0.90f, "%.2f");
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Interactive Tools & Workflow:");
+                ImGui::Checkbox("Auto Floor-Snap When Adding Waypoints", &prefs.wptAutoFloorSnap);
+                ImGui::SliderFloat("Pen Tool Breadcrumb Spacing", &prefs.wptPenTraceSpacing, 40.0f, 300.0f, "%.0f u");
+
+                ImGui::EndChild();
                 ImGui::EndTabItem();
             }
 
             if (ImGui::BeginTabItem("Camera & Viewport")) {
+                ImGui::BeginChild("CameraTabScroll", ImVec2(0, -42), false);
+
                 ImGui::Spacing();
-                ImGui::Text("Camera Movement:");
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Camera Movement:");
                 float moveSpeed = prefs.cameraMoveSpeed;
                 if (ImGui::SliderFloat("Camera Move Speed", &moveSpeed, 100.0f, 3000.0f, "%.0f u/s")) {
                     prefs.cameraMoveSpeed = moveSpeed;
@@ -3615,13 +3767,36 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
                     prefs.fieldOfView = fov;
                     camera.SetFov(fov);
                 }
+                float nearClip = prefs.nearClipDistance;
+                if (ImGui::SliderFloat("Near Clip Distance", &nearClip, 1.0f, 32.0f, "%.1f u")) {
+                    prefs.nearClipDistance = nearClip;
+                    camera.SetNearPlane(nearClip);
+                }
+                float farClip = prefs.farClipDistance;
+                if (ImGui::SliderFloat("Far Clip Distance", &farClip, 2000.0f, 64000.0f, "%.0f u")) {
+                    prefs.farClipDistance = farClip;
+                    camera.SetFarPlane(farClip);
+                }
 
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Flight & Controls:");
+                ImGui::Checkbox("Smooth Camera Flight (Momentum)", &prefs.cameraSmoothFlight);
+                if (prefs.cameraSmoothFlight) {
+                    ImGui::SliderFloat("Smooth Flight Response Factor", &prefs.cameraSmoothFactor, 4.0f, 30.0f, "%.1f");
+                }
+                ImGui::SliderFloat("Mouse Wheel Speed Step", &prefs.cameraSpeedScrollStep, 10.0f, 200.0f, "%.0f u");
+
+                ImGui::EndChild();
                 ImGui::EndTabItem();
             }
 
             if (ImGui::BeginTabItem("Visuals & Theme")) {
+                ImGui::BeginChild("VisualsTabScroll", ImVec2(0, -42), false);
+
                 ImGui::Spacing();
-                ImGui::Text("Visual Features:");
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Atmosphere & Overlays:");
                 if (ImGui::Checkbox("Show 3D Skybox Atmosphere by Default", &prefs.show3DSkybox)) {
                     scene.SetShowSkybox(prefs.show3DSkybox);
                 }
@@ -3629,17 +3804,29 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
                     m_showStatsOverlay = prefs.showFps;
                 }
                 ImGui::Checkbox("Show Blender Navigation Compass", &prefs.showCompass);
+                ImGui::Checkbox("Show Player Clearance Cylinder Hull by Default", &prefs.showClearanceHullDefault);
+                ImGui::Checkbox("Show Bounding Box Around Selection", &prefs.showSelectedAABB);
+                ImGui::Checkbox("Render Entity Icons & Spawn Volumes", &prefs.showEntityModels);
 
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Spacing();
-                ImGui::Text("UI Theme:");
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "BSP Shading & Outlines:");
+                const char* wireColors[] = { "Cyan Blue", "Clean White", "GoldSrc Amber", "Matrix Green" };
+                ImGui::Combo("BSP Wireframe Edge Color", &prefs.bspWireframeColor, wireColors, 4);
+                ImGui::SliderFloat("Ghost / X-Ray Mode Alpha", &prefs.bspGhostAlpha, 0.05f, 0.70f, "%.2f");
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "UI Theme Style:");
                 const char* themes[] = { "Modern Slate (Dark)", "Classic GoldSrc", "Clean Studio (Neutral)", "Light Studio" };
                 if (ImGui::Combo("Theme Style", &prefs.themeIndex, themes, 4)) {
                     ApplyTheme(prefs.themeIndex);
                 }
                 ImGui::TextDisabled("Themes adapt all windows, docking tabs, buttons, and popups.");
 
+                ImGui::EndChild();
                 ImGui::EndTabItem();
             }
 
@@ -3927,6 +4114,430 @@ void EditorUI::RenderTransformHUD(EditorScene& scene, CommandManager& /*cmdMgr*/
     ImGui::End();
 }
 
+bool EditorUI::DrawNudgeFloat(const char* label, float* v, float step, float minVal, float maxVal, const char* fmt) {
+    if (!v) return false;
+    bool changed = false;
+    ImGui::PushID(label);
+
+    float availW = ImGui::GetContentRegionAvail().x;
+    float btnW = 20.0f;
+    float spacing = ImGui::GetStyle().ItemSpacing.x;
+    float inputW = std::max(60.0f, availW - (btnW * 2.0f + spacing * 2.0f + 110.0f));
+
+    ImGui::SetNextItemWidth(inputW);
+    if (ImGui::DragFloat("##val", v, step * 0.1f, minVal, maxVal, fmt)) {
+        changed = true;
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("-##dec", ImVec2(btnW, 20))) {
+        *v = std::clamp(*v - step, minVal, maxVal);
+        changed = true;
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Step down by -%.1f units", step);
+
+    ImGui::SameLine();
+    if (ImGui::Button("+##inc", ImVec2(btnW, 20))) {
+        *v = std::clamp(*v + step, minVal, maxVal);
+        changed = true;
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Step up by +%.1f units", step);
+
+    ImGui::SameLine();
+    ImGui::TextUnformatted(label);
+
+    ImGui::PopID();
+    return changed;
+}
+
+bool EditorUI::DrawNudgeFloat2(const char* label, float v[2], float step, float minVal, float maxVal, const char* fmt) {
+    if (!v) return false;
+    bool changed = false;
+    ImGui::PushID(label);
+    ImGui::Text("%s:", label);
+
+    const char* axisLabels[] = { "W", "L" };
+    const ImVec4 axisColors[] = {
+        ImVec4(0.85f, 0.45f, 0.20f, 1.0f),
+        ImVec4(0.25f, 0.75f, 0.85f, 1.0f)
+    };
+    float btnW = 20.0f;
+    float contentW = ImGui::GetContentRegionAvail().x;
+    float colW = (contentW - 6.0f) / 2.0f;
+
+    for (int i = 0; i < 2; ++i) {
+        if (i > 0) ImGui::SameLine(0.0f, 6.0f);
+        ImGui::PushID(i);
+        ImGui::BeginGroup();
+        ImGui::TextColored(axisColors[i], "%s", axisLabels[i]);
+        ImGui::SameLine();
+        if (ImGui::Button("-", ImVec2(btnW, 20))) {
+            v[i] = std::clamp(v[i] - step, minVal, maxVal);
+            changed = true;
+        }
+        ImGui::SameLine(0.0f, 2.0f);
+        float inputW = std::max(40.0f, colW - btnW * 2.0f - 26.0f);
+        ImGui::SetNextItemWidth(inputW);
+        if (ImGui::DragFloat("##val", &v[i], step * 0.1f, minVal, maxVal, fmt)) {
+            changed = true;
+        }
+        ImGui::SameLine(0.0f, 2.0f);
+        if (ImGui::Button("+", ImVec2(btnW, 20))) {
+            v[i] = std::clamp(v[i] + step, minVal, maxVal);
+            changed = true;
+        }
+        ImGui::EndGroup();
+        ImGui::PopID();
+    }
+    ImGui::PopID();
+    return changed;
+}
+
+bool EditorUI::DrawNudgeFloat3(const char* label, float v[3], float step, float minVal, float maxVal) {
+    if (!v) return false;
+    bool changed = false;
+    ImGui::PushID(label);
+    ImGui::Text("%s:", label);
+
+    const char* axisLabels[] = { "X", "Y", "Z" };
+    const ImVec4 axisColors[] = {
+        ImVec4(0.85f, 0.25f, 0.25f, 1.0f),
+        ImVec4(0.25f, 0.85f, 0.35f, 1.0f),
+        ImVec4(0.35f, 0.55f, 0.95f, 1.0f)
+    };
+    float btnW = 20.0f;
+    float contentW = ImGui::GetContentRegionAvail().x;
+    float colW = (contentW - 8.0f) / 3.0f;
+
+    for (int i = 0; i < 3; ++i) {
+        if (i > 0) ImGui::SameLine(0.0f, 4.0f);
+        ImGui::PushID(i);
+        ImGui::BeginGroup();
+        ImGui::TextColored(axisColors[i], "%s", axisLabels[i]);
+        ImGui::SameLine();
+        if (ImGui::Button("-", ImVec2(btnW, 20))) {
+            v[i] = std::clamp(v[i] - step, minVal, maxVal);
+            changed = true;
+        }
+        ImGui::SameLine(0.0f, 2.0f);
+        float inputW = std::max(40.0f, colW - btnW * 2.0f - 24.0f);
+        ImGui::SetNextItemWidth(inputW);
+        if (ImGui::DragFloat("##val", &v[i], step * 0.1f, minVal, maxVal, "%.1f")) {
+            changed = true;
+        }
+        ImGui::SameLine(0.0f, 2.0f);
+        if (ImGui::Button("+", ImVec2(btnW, 20))) {
+            v[i] = std::clamp(v[i] + step, minVal, maxVal);
+            changed = true;
+        }
+        ImGui::EndGroup();
+        ImGui::PopID();
+    }
+    ImGui::PopID();
+    return changed;
+}
+
+bool EditorUI::DrawNudgeAngle(const char* label, float* v, float step, float minVal, float maxVal, bool wrap360) {
+    if (!v) return false;
+    bool changed = false;
+    ImGui::PushID(label);
+
+    float availW = ImGui::GetContentRegionAvail().x;
+    float btnW = 20.0f;
+    float spacing = ImGui::GetStyle().ItemSpacing.x;
+    float inputW = std::max(60.0f, availW - (btnW * 2.0f + spacing * 2.0f + 90.0f));
+
+    ImGui::SetNextItemWidth(inputW);
+    if (ImGui::SliderFloat("##val", v, minVal, maxVal, "%.1f deg")) {
+        changed = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("-##dec", ImVec2(btnW, 20))) {
+        *v -= step;
+        if (wrap360) {
+            while (*v < 0.0f) *v += 360.0f;
+            while (*v >= 360.0f) *v -= 360.0f;
+        } else {
+            *v = std::clamp(*v, minVal, maxVal);
+        }
+        changed = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("+##inc", ImVec2(btnW, 20))) {
+        *v += step;
+        if (wrap360) {
+            while (*v < 0.0f) *v += 360.0f;
+            while (*v >= 360.0f) *v -= 360.0f;
+        } else {
+            *v = std::clamp(*v, minVal, maxVal);
+        }
+        changed = true;
+    }
+    ImGui::SameLine();
+    ImGui::TextUnformatted(label);
+    ImGui::PopID();
+    return changed;
+}
+
+bool EditorUI::DrawNudgeAngle3(const char* label, float v[3], float step) {
+    if (!v) return false;
+    bool changed = false;
+    ImGui::PushID(label);
+    ImGui::Text("%s (Pitch/Yaw/Roll):", label);
+
+    const char* angLabels[] = { "P", "Y", "R" };
+    float btnW = 20.0f;
+    float contentW = ImGui::GetContentRegionAvail().x;
+    float colW = (contentW - 8.0f) / 3.0f;
+
+    for (int i = 0; i < 3; ++i) {
+        if (i > 0) ImGui::SameLine(0.0f, 4.0f);
+        ImGui::PushID(i);
+        ImGui::BeginGroup();
+        ImGui::TextDisabled("%s", angLabels[i]);
+        ImGui::SameLine();
+        if (ImGui::Button("-", ImVec2(btnW, 20))) {
+            v[i] -= step;
+            while (v[i] < -180.0f) v[i] += 360.0f;
+            while (v[i] > 180.0f) v[i] -= 360.0f;
+            changed = true;
+        }
+        ImGui::SameLine(0.0f, 2.0f);
+        float inputW = std::max(40.0f, colW - btnW * 2.0f - 24.0f);
+        ImGui::SetNextItemWidth(inputW);
+        if (ImGui::DragFloat("##val", &v[i], 1.0f, -180.0f, 180.0f, "%.0f")) {
+            changed = true;
+        }
+        ImGui::SameLine(0.0f, 2.0f);
+        if (ImGui::Button("+", ImVec2(btnW, 20))) {
+            v[i] += step;
+            while (v[i] < -180.0f) v[i] += 360.0f;
+            while (v[i] > 180.0f) v[i] -= 360.0f;
+            changed = true;
+        }
+        ImGui::EndGroup();
+        ImGui::PopID();
+    }
+    ImGui::PopID();
+    return changed;
+}
+
+void EditorUI::RenderGizmoNudgeHUD(EditorScene& scene, Camera& /*camera*/, CommandManager& /*cmdMgr*/) {
+    uint32_t selAreaId = scene.GetSelectedAreaID();
+    uint32_t selWptId = scene.GetSelectedWaypointID();
+    const auto& selWptIds = scene.GetSelectedWaypointIDs();
+    int selEntIdx = scene.GetSelectedEntityIndex();
+
+    bool hasSelection = (selAreaId != 0) || (selWptId != 0) || (selWptIds.size() > 1) || (selEntIdx >= 0);
+    if (!hasSelection) return;
+
+    ImGuiIO& io = ImGui::GetIO();
+    ImVec2 hudPos(20.0f, io.DisplaySize.y - 190.0f);
+    ImGui::SetNextWindowPos(hudPos, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowBgAlpha(0.88f);
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoSavedSettings;
+
+    if (ImGui::Begin("Precision Nudge HUD##GizmoNudge", &m_showGizmoNudgeHUD, flags)) {
+        if (selAreaId != 0) {
+            ImGui::TextColored(ImVec4(0.2f, 0.85f, 1.0f, 1.0f), "Target: NavArea #%u", selAreaId);
+        } else if (selWptIds.size() > 1) {
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "Target: %zu Waypoints", selWptIds.size());
+        } else if (selWptId != 0) {
+            ImGui::TextColored(ImVec4(0.2f, 0.95f, 0.4f, 1.0f), "Target: Waypoint #%u", selWptId);
+        } else if (selEntIdx >= 0) {
+            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Target: Entity #%d", selEntIdx);
+        }
+
+        ImGui::Separator();
+
+        ImGui::Text("Step:");
+        const float presets[] = { 1.0f, 4.0f, 8.0f, 16.0f, 32.0f, 64.0f };
+        for (int i = 0; i < 6; ++i) {
+            ImGui::SameLine();
+            char sLbl[16];
+            std::snprintf(sLbl, sizeof(sLbl), "%.0f##nudge_p%d", presets[i], i);
+            bool isCur = (m_nudgeStepLinear == presets[i]);
+            if (isCur) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.55f, 0.9f, 1.0f));
+            if (ImGui::Button(sLbl, ImVec2(24, 18))) {
+                m_nudgeStepLinear = presets[i];
+            }
+            if (isCur) ImGui::PopStyleColor();
+        }
+
+        float step = m_nudgeStepLinear;
+        auto NudgeNavArea = [&](float dx, float dy, float dz) {
+            NavArea* area = scene.GetNAV().GetAreaByID(selAreaId);
+            if (!area) return;
+            NavExtent ext = area->GetExtent();
+            Vector3 delta(dx, dy, dz);
+            ext.lo = ext.lo + delta;
+            ext.hi = ext.hi + delta;
+            scene.GetNAV().GetGrid().RemoveArea(area);
+            area->SetExtent(ext);
+            area->SetCornerHeights(area->GetNEZ() + dz, area->GetSWZ() + dz);
+            scene.GetNAV().GetGrid().AddArea(area);
+            scene.RebuildNavRenderer();
+        };
+
+        auto NudgeSingleWpt = [&](float dx, float dy, float dz) {
+            WaypointNode* node = scene.GetWaypoints().GetNode(selWptId);
+            if (!node) return;
+            node->origin.x += dx;
+            node->origin.y += dy;
+            node->origin.z += dz;
+            scene.RebuildWaypointRenderer();
+        };
+
+        auto NudgeMultiWpt = [&](float dx, float dy, float dz) {
+            for (uint32_t id : selWptIds) {
+                WaypointNode* node = scene.GetWaypoints().GetNode(id);
+                if (node) {
+                    node->origin.x += dx;
+                    node->origin.y += dy;
+                    node->origin.z += dz;
+                }
+            }
+            scene.RebuildWaypointRenderer();
+        };
+
+        auto NudgeEntity = [&](float dx, float dy, float dz) {
+            if (!scene.HasBSP()) return;
+            auto& ents = scene.GetEntities();
+            if (selEntIdx >= 0 && selEntIdx < static_cast<int>(ents.size())) {
+                ents[selEntIdx].origin.x += dx;
+                ents[selEntIdx].origin.y += dy;
+                ents[selEntIdx].origin.z += dz;
+            }
+        };
+
+        auto DoNudge = [&](float dx, float dy, float dz) {
+            if (selAreaId != 0) NudgeNavArea(dx, dy, dz);
+            else if (selWptIds.size() > 1) NudgeMultiWpt(dx, dy, dz);
+            else if (selWptId != 0) NudgeSingleWpt(dx, dy, dz);
+            else if (selEntIdx >= 0) NudgeEntity(dx, dy, dz);
+        };
+
+        ImGui::Spacing();
+        float btnW = 52.0f;
+        ImGui::TextColored(ImVec4(0.9f, 0.3f, 0.3f, 1.0f), "X:");
+        ImGui::SameLine(24.0f);
+        if (ImGui::Button("<- -X", ImVec2(btnW, 20))) DoNudge(-step, 0.0f, 0.0f);
+        ImGui::SameLine();
+        if (ImGui::Button("+X ->", ImVec2(btnW, 20))) DoNudge(step, 0.0f, 0.0f);
+
+        ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.4f, 1.0f), "Y:");
+        ImGui::SameLine(24.0f);
+        if (ImGui::Button("<- -Y", ImVec2(btnW, 20))) DoNudge(0.0f, -step, 0.0f);
+        ImGui::SameLine();
+        if (ImGui::Button("+Y ->", ImVec2(btnW, 20))) DoNudge(0.0f, step, 0.0f);
+
+        ImGui::TextColored(ImVec4(0.4f, 0.6f, 1.0f, 1.0f), "Z:");
+        ImGui::SameLine(24.0f);
+        if (ImGui::Button("<- -Z", ImVec2(btnW, 20))) DoNudge(0.0f, 0.0f, -step);
+        ImGui::SameLine();
+        if (ImGui::Button("+Z ->", ImVec2(btnW, 20))) DoNudge(0.0f, 0.0f, step);
+
+        if (selAreaId != 0) {
+            ImGui::Separator();
+            ImGui::Text("Size (W/L):");
+            NavArea* area = scene.GetNAV().GetAreaByID(selAreaId);
+            if (area) {
+                if (ImGui::Button("W -##hud", ImVec2(34, 18))) {
+                    NavExtent ext = area->GetExtent();
+                    float w = std::max(8.0f, (ext.hi.x - ext.lo.x) - step);
+                    float cx = (ext.lo.x + ext.hi.x) * 0.5f;
+                    ext.lo.x = cx - w * 0.5f; ext.hi.x = cx + w * 0.5f;
+                    scene.GetNAV().GetGrid().RemoveArea(area);
+                    area->SetExtent(ext);
+                    scene.GetNAV().GetGrid().AddArea(area);
+                    scene.RebuildNavRenderer();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("W +##hud", ImVec2(34, 18))) {
+                    NavExtent ext = area->GetExtent();
+                    float w = (ext.hi.x - ext.lo.x) + step;
+                    float cx = (ext.lo.x + ext.hi.x) * 0.5f;
+                    ext.lo.x = cx - w * 0.5f; ext.hi.x = cx + w * 0.5f;
+                    scene.GetNAV().GetGrid().RemoveArea(area);
+                    area->SetExtent(ext);
+                    scene.GetNAV().GetGrid().AddArea(area);
+                    scene.RebuildNavRenderer();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("L -##hud", ImVec2(34, 18))) {
+                    NavExtent ext = area->GetExtent();
+                    float l = std::max(8.0f, (ext.hi.y - ext.lo.y) - step);
+                    float cy = (ext.lo.y + ext.hi.y) * 0.5f;
+                    ext.lo.y = cy - l * 0.5f; ext.hi.y = cy + l * 0.5f;
+                    scene.GetNAV().GetGrid().RemoveArea(area);
+                    area->SetExtent(ext);
+                    scene.GetNAV().GetGrid().AddArea(area);
+                    scene.RebuildNavRenderer();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("L +##hud", ImVec2(34, 18))) {
+                    NavExtent ext = area->GetExtent();
+                    float l = (ext.hi.y - ext.lo.y) + step;
+                    float cy = (ext.lo.y + ext.hi.y) * 0.5f;
+                    ext.lo.y = cy - l * 0.5f; ext.hi.y = cy + l * 0.5f;
+                    scene.GetNAV().GetGrid().RemoveArea(area);
+                    area->SetExtent(ext);
+                    scene.GetNAV().GetGrid().AddArea(area);
+                    scene.RebuildNavRenderer();
+                }
+            }
+        } else if (selWptId != 0 || selWptIds.size() > 1) {
+            ImGui::Separator();
+            ImGui::Text("Radius & Yaw:");
+            if (ImGui::Button("Rad -8##hud", ImVec2(52, 18))) {
+                if (selWptId != 0) {
+                    WaypointNode* n = scene.GetWaypoints().GetNode(selWptId);
+                    if (n) { n->radius = std::max(0.0f, n->radius - 8.0f); scene.RebuildWaypointRenderer(); }
+                } else {
+                    for (uint32_t id : selWptIds) {
+                        WaypointNode* n = scene.GetWaypoints().GetNode(id);
+                        if (n) n->radius = std::max(0.0f, n->radius - 8.0f);
+                    }
+                    scene.RebuildWaypointRenderer();
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Rad +8##hud", ImVec2(52, 18))) {
+                if (selWptId != 0) {
+                    WaypointNode* n = scene.GetWaypoints().GetNode(selWptId);
+                    if (n) { n->radius = std::min(255.0f, n->radius + 8.0f); scene.RebuildWaypointRenderer(); }
+                } else {
+                    for (uint32_t id : selWptIds) {
+                        WaypointNode* n = scene.GetWaypoints().GetNode(id);
+                        if (n) n->radius = std::min(255.0f, n->radius + 8.0f);
+                    }
+                    scene.RebuildWaypointRenderer();
+                }
+            }
+            if (selWptId != 0) {
+                WaypointNode* n = scene.GetWaypoints().GetNode(selWptId);
+                if (n) {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Yaw -15##hud", ImVec2(54, 18))) {
+                        n->campYaw -= 15.0f;
+                        while (n->campYaw < 0.0f) n->campYaw += 360.0f;
+                        scene.RebuildWaypointRenderer();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Yaw +15##hud", ImVec2(54, 18))) {
+                        n->campYaw += 15.0f;
+                        while (n->campYaw >= 360.0f) n->campYaw -= 360.0f;
+                        scene.RebuildWaypointRenderer();
+                    }
+                }
+            }
+        }
+    }
+    ImGui::End();
+}
+
 void EditorUI::RenderGenerateModal(EditorScene& scene) {
     ImGui::OpenPopup("Auto-Generate NavMesh");
 
@@ -3952,9 +4563,9 @@ void EditorUI::RenderGenerateModal(EditorScene& scene) {
         ImGui::SliderFloat("Max Drop Height", &m_genOptions.maxDrop, 100.0f, 600.0f, "%.0f units");
 
         ImGui::Spacing();
-        ImGui::Checkbox("Detect Crouch Passages", &m_genOptions.generateCrouch);
-        ImGui::Checkbox("Connect Jump-Down Drops", &m_genOptions.generateJumpConnections);
-        ImGui::Checkbox("Link Ladder Entities", &m_genOptions.generateLadders);
+        ImGui::Checkbox("Detect Crouch Passages & Camp Vents", &m_genOptions.generateCrouch);
+        ImGui::Checkbox("Connect Jump Spots & Crouch Camp Entrances", &m_genOptions.generateJumpConnections);
+        ImGui::Checkbox("Link Ladder Entities to NavMesh", &m_genOptions.generateLadders);
         ImGui::Checkbox("Merge Coplanar Adjacent Areas", &m_genOptions.mergeAreas);
 
         if (!m_generateStatusText.empty()) {

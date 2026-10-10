@@ -28,15 +28,26 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
     ImGui::TextDisabled("(%s - %s)", botNames[std::clamp(curBot, 0, 3)], modNames[std::clamp(curMod, 0, 2)]);
     ImGui::Separator();
 
-    // Coordinates
+    // Coordinates with Precision Nudge Step
+    ImGui::Text("Nudge Step:");
+    const float wptStepPresets[] = { 1.0f, 4.0f, 8.0f, 16.0f, 32.0f };
+    for (int s = 0; s < 5; ++s) {
+        ImGui::SameLine();
+        char sLbl[16];
+        std::snprintf(sLbl, sizeof(sLbl), "%.0f##wpt_stp%d", wptStepPresets[s], s);
+        if (m_nudgeStepLinear == wptStepPresets[s]) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.55f, 0.9f, 1.0f));
+        if (ImGui::Button(sLbl, ImVec2(24, 18))) m_nudgeStepLinear = wptStepPresets[s];
+        if (m_nudgeStepLinear == wptStepPresets[s]) ImGui::PopStyleColor();
+    }
+
     float pos[3] = { node->origin.x, node->origin.y, node->origin.z };
-    if (ImGui::DragFloat3("Origin (X/Y/Z)", pos, 1.0f)) {
+    if (DrawNudgeFloat3("Origin", pos, m_nudgeStepLinear)) {
         node->origin = Vector3(pos[0], pos[1], pos[2]);
         scene.RebuildWaypointRenderer();
     }
 
     // Radius
-    if (ImGui::SliderFloat("Radius", &node->radius, 0.0f, 255.0f, "%.0f units")) {
+    if (DrawNudgeFloat("Radius", &node->radius, 8.0f, 0.0f, 255.0f, "%.0f u")) {
         scene.RebuildWaypointRenderer();
     }
     if (ImGui::IsItemHovered()) {
@@ -78,10 +89,10 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
     // Camp Pitch & Yaw
     ImGui::Spacing();
     ImGui::Text("Aim / Camp Orientation:");
-    if (ImGui::SliderFloat("Pitch", &node->campPitch, -89.0f, 89.0f, "%.1f deg")) {
+    if (DrawNudgeAngle("Pitch", &node->campPitch, m_nudgeStepAngular, -89.0f, 89.0f)) {
         scene.RebuildWaypointRenderer();
     }
-    if (ImGui::SliderFloat("Yaw", &node->campYaw, 0.0f, 360.0f, "%.1f deg")) {
+    if (DrawNudgeAngle("Yaw", &node->campYaw, m_nudgeStepAngular, 0.0f, 360.0f, true)) {
         scene.RebuildWaypointRenderer();
     }
     if (ImGui::Button("0 deg (E)", ImVec2(50, 20))) { node->campYaw = 0.0f; scene.RebuildWaypointRenderer(); }
@@ -959,6 +970,35 @@ void EditorUI::RenderWaypointMultiInspector(EditorScene& scene, CommandManager& 
         FlagBtn("Set WPT_FLAG_TEAM_T", WPT_FLAG_TERRORIST);
         ImGui::TreePop();
     }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Text("Batch Precision Nudge:");
+    float batchStep = m_nudgeStepLinear;
+    float nBtnW = 42.0f;
+    ImGui::Text("Nudge Position (+/- %.0fu):", batchStep);
+    auto BatchNudge = [&](float dx, float dy, float dz) {
+        for (uint32_t id : selIds) {
+            WaypointNode* n = scene.GetWaypoints().GetNode(id);
+            if (n) {
+                n->origin.x += dx;
+                n->origin.y += dy;
+                n->origin.z += dz;
+            }
+        }
+        scene.RebuildWaypointRenderer();
+    };
+    if (ImGui::Button("-X##bn", ImVec2(nBtnW, 20))) BatchNudge(-batchStep, 0.0f, 0.0f);
+    ImGui::SameLine();
+    if (ImGui::Button("+X##bn", ImVec2(nBtnW, 20))) BatchNudge(batchStep, 0.0f, 0.0f);
+    ImGui::SameLine(0, 10.0f);
+    if (ImGui::Button("-Y##bn", ImVec2(nBtnW, 20))) BatchNudge(0.0f, -batchStep, 0.0f);
+    ImGui::SameLine();
+    if (ImGui::Button("+Y##bn", ImVec2(nBtnW, 20))) BatchNudge(0.0f, batchStep, 0.0f);
+    ImGui::SameLine(0, 10.0f);
+    if (ImGui::Button("-Z##bn", ImVec2(nBtnW, 20))) BatchNudge(0.0f, 0.0f, -batchStep);
+    ImGui::SameLine();
+    if (ImGui::Button("+Z##bn", ImVec2(nBtnW, 20))) BatchNudge(0.0f, 0.0f, batchStep);
 
     ImGui::Spacing();
     ImGui::Separator();

@@ -455,28 +455,40 @@ void NavMesh::BuildLadders(const BSPFile* bsp) {
     uint32_t nextLadderId = 1;
 
     for (const BSPEntity* ent : ladderEntities) {
-        std::string modelStr = ent->GetString("model");
-        if (modelStr.empty() || modelStr[0] != '*') continue;
+        Vector3 origin;
+        bool hasOrigin = ent->GetOrigin(origin);
+        Vector3 bMin, bMax;
+        bool valid = false;
 
-        int modelIdx = std::atoi(modelStr.c_str() + 1);
-        const dmodel_t* mod = bsp->GetModel(modelIdx);
-        if (!mod) continue;
+        std::string modelStr = ent->GetString("model");
+        if (!modelStr.empty() && modelStr[0] == '*') {
+            int modelIdx = std::atoi(modelStr.c_str() + 1);
+            const dmodel_t* mod = bsp->GetModel(modelIdx);
+            if (mod) {
+                bMin = Vector3(mod->mins.x, mod->mins.y, mod->mins.z);
+                bMax = Vector3(mod->maxs.x, mod->maxs.y, mod->maxs.z);
+                origin = (bMin + bMax) * 0.5f;
+                valid = true;
+            }
+        } else if (hasOrigin) {
+            bMin = origin - Vector3(16.0f, 16.0f, 64.0f);
+            bMax = origin + Vector3(16.0f, 16.0f, 64.0f);
+            valid = true;
+        }
+
+        if (!valid) continue;
 
         NavLadder* ladder = new NavLadder();
         ladder->id = nextLadderId++;
-        ladder->top = Vector3((mod->mins.x + mod->maxs.x) * 0.5f,
-                              (mod->mins.y + mod->maxs.y) * 0.5f,
-                              mod->maxs.z);
-        ladder->bottom = Vector3((mod->mins.x + mod->maxs.x) * 0.5f,
-                                 (mod->mins.y + mod->maxs.y) * 0.5f,
-                                 mod->mins.z);
-        ladder->length = mod->maxs.z - mod->mins.z;
-        ladder->width = std::max(mod->maxs.x - mod->mins.x, mod->maxs.y - mod->mins.y);
-        ladder->dir = (mod->maxs.x - mod->mins.x >= mod->maxs.y - mod->mins.y) ? NAV_DIR_NORTH : NAV_DIR_EAST;
+        ladder->top = Vector3(origin.x, origin.y, bMax.z);
+        ladder->bottom = Vector3(origin.x, origin.y, bMin.z);
+        ladder->length = bMax.z - bMin.z;
+        ladder->width = std::max(bMax.x - bMin.x, bMax.y - bMin.y);
+        ladder->dir = (bMax.x - bMin.x >= bMax.y - bMin.y) ? NAV_DIR_NORTH : NAV_DIR_EAST;
 
-        // Find closest areas near top and bottom
-        ladder->topForwardArea = m_grid.GetNearestArea(ladder->top, 200.0f);
-        ladder->bottomArea = m_grid.GetNearestArea(ladder->bottom, 200.0f);
+        // Find closest areas near top and bottom (expanded radius up to 250u)
+        ladder->topForwardArea = m_grid.GetNearestArea(ladder->top, 250.0f);
+        ladder->bottomArea = m_grid.GetNearestArea(ladder->bottom, 250.0f);
 
         // Connect adjacent navigation areas across the ladder for bot traversal
         if (ladder->bottomArea && ladder->topForwardArea && ladder->bottomArea != ladder->topForwardArea) {
@@ -496,7 +508,7 @@ void NavMesh::BuildLadders(const BSPFile* bsp) {
             case NAV_DIR_EAST:  topBehind.x -= 32.0f; break;
             case NAV_DIR_WEST:  topBehind.x += 32.0f; break;
         }
-        ladder->topBehindArea = m_grid.GetNearestArea(topBehind, 150.0f);
+        ladder->topBehindArea = m_grid.GetNearestArea(topBehind, 180.0f);
         if (ladder->topBehindArea && ladder->bottomArea && ladder->topBehindArea != ladder->bottomArea) {
             if (!ladder->bottomArea->IsConnected(ladder->topBehindArea, ladder->dir)) {
                 ladder->bottomArea->ConnectTo(ladder->topBehindArea, ladder->dir);
@@ -504,6 +516,43 @@ void NavMesh::BuildLadders(const BSPFile* bsp) {
             NavDirType oppDir = static_cast<NavDirType>((ladder->dir + 2) % 4);
             if (!ladder->topBehindArea->IsConnected(ladder->bottomArea, oppDir)) {
                 ladder->topBehindArea->ConnectTo(ladder->bottomArea, oppDir);
+            }
+        }
+
+        // Also connect left and right top dismount areas
+        Vector3 topLeft = ladder->top;
+        Vector3 topRight = ladder->top;
+        switch (ladder->dir) {
+            case NAV_DIR_NORTH:
+            case NAV_DIR_SOUTH:
+                topLeft.x -= 32.0f;
+                topRight.x += 32.0f;
+                break;
+            case NAV_DIR_EAST:
+            case NAV_DIR_WEST:
+                topLeft.y -= 32.0f;
+                topRight.y += 32.0f;
+                break;
+        }
+        ladder->topLeftArea = m_grid.GetNearestArea(topLeft, 180.0f);
+        if (ladder->topLeftArea && ladder->bottomArea && ladder->topLeftArea != ladder->bottomArea) {
+            if (!ladder->bottomArea->IsConnected(ladder->topLeftArea, ladder->dir)) {
+                ladder->bottomArea->ConnectTo(ladder->topLeftArea, ladder->dir);
+            }
+            NavDirType oppDir = static_cast<NavDirType>((ladder->dir + 2) % 4);
+            if (!ladder->topLeftArea->IsConnected(ladder->bottomArea, oppDir)) {
+                ladder->topLeftArea->ConnectTo(ladder->bottomArea, oppDir);
+            }
+        }
+
+        ladder->topRightArea = m_grid.GetNearestArea(topRight, 180.0f);
+        if (ladder->topRightArea && ladder->bottomArea && ladder->topRightArea != ladder->bottomArea) {
+            if (!ladder->bottomArea->IsConnected(ladder->topRightArea, ladder->dir)) {
+                ladder->bottomArea->ConnectTo(ladder->topRightArea, ladder->dir);
+            }
+            NavDirType oppDir = static_cast<NavDirType>((ladder->dir + 2) % 4);
+            if (!ladder->topRightArea->IsConnected(ladder->bottomArea, oppDir)) {
+                ladder->topRightArea->ConnectTo(ladder->bottomArea, oppDir);
             }
         }
 

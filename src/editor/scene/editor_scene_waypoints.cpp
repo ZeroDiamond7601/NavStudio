@@ -709,7 +709,8 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
 
                 Vector3 diff = other->origin - node->origin;
                 float dsq = diff.Dot(diff);
-                if (dsq <= (snapDist * 1.65f) * (snapDist * 1.65f) && std::abs(diff.z) <= 45.0f) {
+                // Enforce orthogonal connections (1.25x snapDist) to avoid diagonal cross-link clutter
+                if (dsq <= (snapDist * 1.25f) * (snapDist * 1.25f) && std::abs(diff.z) <= 45.0f) {
                     // Check line of sight
                     BSPTraceResult losTr;
                     m_bsp->TraceWorld(node->origin + Vector3(0.0f, 0.0f, 10.0f),

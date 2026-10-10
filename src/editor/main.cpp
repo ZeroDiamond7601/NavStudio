@@ -985,7 +985,7 @@ static void ProcessInput(GLFWwindow* window, float deltaTime) {
 
 static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
     static std::string lastTitle = "";
-    std::string title = "NavStudio v1.6.7";
+    std::string title = "NavStudio v1.6.8";
     if (scene.HasBSP() || scene.HasNAV() || scene.HasWaypoints()) {
         std::string map = "";
         if (scene.HasBSP()) {
@@ -1015,7 +1015,7 @@ static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
 
 int main(int argc, char* argv[]) {
     std::printf("====================================================\n");
-    std::printf("  NavStudio v1.6.7\n");
+    std::printf("  NavStudio v1.6.8\n");
     std::printf("====================================================\n");
 
     if (!glfwInit()) {
@@ -1091,7 +1091,7 @@ int main(int argc, char* argv[]) {
         initialHeight = 1080;
     }
 
-    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.6.7", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.6.8", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "[Error] Failed to create GLFW window\n");
         glfwTerminate();

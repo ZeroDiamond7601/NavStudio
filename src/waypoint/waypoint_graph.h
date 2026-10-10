@@ -15,6 +15,8 @@ using WaypointProgressCallback = std::function<void(float progress, const std::s
 struct WaypointOptimizeOptions {
     bool mergeOverlapping{true};
     float mergeDistance{25.0f};
+    bool pruneCrossingLinks{true};
+    bool pruneRedundantDiagonals{true};
     bool pruneCollinear{true};
     float collinearMaxAngle{15.0f};
     bool fixOneWayLinks{true};
@@ -25,6 +27,8 @@ struct WaypointOptimizeOptions {
 
 struct WaypointOptimizeStats {
     size_t overlappingMerged{0};
+    size_t crossingLinksPruned{0};
+    size_t diagonalChordsPruned{0};
     size_t collinearPruned{0};
     size_t blockedLinksPruned{0};
     size_t oneWayLinksFixed{0};

@@ -101,6 +101,14 @@ private:
     void RenderPawnExportModal(EditorScene& scene);
     void RenderLadderCreateModal(EditorScene& scene, Camera& camera);
     void RenderToastHUD(const EditorScene& scene);
+    void RenderGizmoNudgeHUD(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
+
+    // Precision Nudge UI Helpers with on-screen increment/decrement arrows
+    static bool DrawNudgeFloat(const char* label, float* v, float step = 16.0f, float minVal = -65536.0f, float maxVal = 65536.0f, const char* fmt = "%.1f");
+    static bool DrawNudgeFloat2(const char* label, float v[2], float step = 16.0f, float minVal = 1.0f, float maxVal = 65536.0f, const char* fmt = "%.1f");
+    static bool DrawNudgeFloat3(const char* label, float v[3], float step = 16.0f, float minVal = -65536.0f, float maxVal = 65536.0f, const char* fmt = "%.1f");
+    static bool DrawNudgeAngle(const char* label, float* v, float step = 15.0f, float minVal = -180.0f, float maxVal = 360.0f, bool wrap360 = false);
+    static bool DrawNudgeAngle3(const char* label, float v[3], float step = 15.0f);
 
     // Bot Waypoint System UI
     void RenderWaypointInspector(EditorScene& scene, CommandManager& cmdMgr);
@@ -211,6 +219,11 @@ private:
     bool m_showGhostBotModal{false};
     int m_ghostBotInputStart{0};
     int m_ghostBotInputGoal{0};
+
+    // Precision Nudge State
+    float m_nudgeStepLinear{16.0f};
+    float m_nudgeStepAngular{15.0f};
+    bool m_showGizmoNudgeHUD{true};
 };
 
 #endif // EDITOR_UI_H

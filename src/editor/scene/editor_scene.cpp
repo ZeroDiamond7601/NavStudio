@@ -96,6 +96,9 @@ void EditorScene::ApplyPreferences() {
     SetShowSkybox(m_prefs.show3DSkybox);
     m_navRenderer.SetShowConnectionValidity(m_prefs.showConnectionValidity);
     m_navRenderer.SetMaxStepHeight(m_prefs.maxStepHeight);
+    m_waypointRenderer.SetShowRadii(m_prefs.defaultShowWptRadii);
+    m_waypointRenderer.SetShowDirection(m_prefs.defaultShowWptDirection);
+    m_waypointRenderer.SetShowConnections(m_prefs.defaultShowWptConnections);
 }
 
 void EditorScene::AddRecentFile(const std::string& path) {

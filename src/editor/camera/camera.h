@@ -52,7 +52,9 @@ public:
     void SetFov(float fov) { m_fov = fov; }
 
     float GetNearPlane() const { return m_nearPlane; }
+    void SetNearPlane(float n) { m_nearPlane = n; }
     float GetFarPlane() const { return m_farPlane; }
+    void SetFarPlane(float f) { m_farPlane = f; }
 
     // Orthographic bounds for 2D mode
     float GetOrthoSize() const { return m_orthoSize; }

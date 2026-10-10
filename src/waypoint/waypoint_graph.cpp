@@ -148,6 +148,35 @@ size_t WaypointGraph::AutoLinkNodes(float maxDist, const BSPFile* bsp) {
 
         for (const auto& cand : candidates) {
             if (from.GetFreeSlotCount() == 0) break;
+
+            const WaypointNode* toNode = GetNodeByID(cand.id);
+            if (!toNode) continue;
+            float candDist = std::sqrt(cand.distSq);
+
+            // Relative Neighborhood Graph (RNG) / Gabriel rule:
+            // Check if there exists an intermediate closer node 'mid' inside the lune between 'from' and 'to'.
+            // If mid is closer to both 'from' and 'to' than candDist, then connecting 'from' directly to 'to'
+            // is a redundant diagonal cross-link or hallway bypass that creates bot confusion and visual clutter.
+            bool hasIntermediateNode = false;
+            for (const auto& otherCand : candidates) {
+                if (otherCand.id == cand.id) continue;
+                if (otherCand.distSq >= cand.distSq) break; // candidates are sorted by distance
+                const WaypointNode* midNode = GetNodeByID(otherCand.id);
+                if (!midNode) continue;
+                if (std::abs(midNode->origin.z - from.origin.z) > 36.0f) continue;
+
+                float dFromMid = std::sqrt(otherCand.distSq);
+                float dToMid = (toNode->origin - midNode->origin).Length();
+                if (std::max(dFromMid, dToMid) < candDist * 0.94f) {
+                    hasIntermediateNode = true;
+                    break;
+                }
+            }
+
+            if (hasIntermediateNode) {
+                continue; // Prune diagonal cross-link or corridor bypass
+            }
+
             uint16_t cFlags = (cand.dz > 18.0f) ? WPT_CONN_JUMP : WPT_CONN_NONE;
             if (ConnectNodes(from.id, cand.id, true, cFlags)) {
                 ++created;
@@ -666,8 +695,103 @@ WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile*
         }
     }
 
+    // Pass 3b: Prune Planar Crossing Links and Redundant Diagonal Chords
+    if (progressCb) progressCb(0.50f, "Pass 3b/6: Pruning crossing links and redundant diagonals...");
+    if (options.pruneCrossingLinks || options.pruneRedundantDiagonals) {
+        struct EdgeInfo {
+            uint32_t u, v;
+            Vector3 p1, p2;
+            float len;
+        };
+        std::vector<EdgeInfo> edges;
+        for (const auto& n : m_nodes) {
+            for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+                int16_t tid = n.connections[c];
+                if (tid > 0 && static_cast<uint32_t>(tid) > n.id) {
+                    const WaypointNode* target = GetNodeByID(static_cast<uint32_t>(tid));
+                    if (target) {
+                        float l = (target->origin - n.origin).Length();
+                        edges.push_back({ n.id, target->id, n.origin, target->origin, l });
+                    }
+                }
+            }
+        }
+
+        auto CCW = [](float ax, float ay, float bx, float by, float cx, float cy) {
+            return (cy - ay) * (bx - ax) > (by - ay) * (cx - ax);
+        };
+        auto SegmentsIntersect2D = [&](const Vector3& a, const Vector3& b, const Vector3& c, const Vector3& d) -> bool {
+            bool c1 = CCW(a.x, a.y, c.x, c.y, d.x, d.y) != CCW(b.x, b.y, c.x, c.y, d.x, d.y);
+            bool c2 = CCW(a.x, a.y, b.x, b.y, c.x, c.y) != CCW(a.x, a.y, b.x, b.y, d.x, d.y);
+            return c1 && c2;
+        };
+
+        // 1. Detect intersecting crossing edges (e.g. "X" criss-crosses across floors)
+        if (options.pruneCrossingLinks) {
+            std::vector<std::pair<uint32_t, uint32_t>> toPrune;
+            for (size_t e1 = 0; e1 < edges.size(); ++e1) {
+                for (size_t e2 = e1 + 1; e2 < edges.size(); ++e2) {
+                    const auto& a = edges[e1];
+                    const auto& b = edges[e2];
+                    if (a.u == b.u || a.u == b.v || a.v == b.u || a.v == b.v) continue;
+                    if (std::abs(a.p1.z - b.p1.z) > 40.0f) continue;
+
+                    if (SegmentsIntersect2D(a.p1, a.p2, b.p1, b.p2)) {
+                        // Between the crossing pair, prune the longer edge
+                        if (a.len >= b.len) {
+                            toPrune.push_back({ a.u, a.v });
+                        } else {
+                            toPrune.push_back({ b.u, b.v });
+                        }
+                    }
+                }
+            }
+
+            for (const auto& pr : toPrune) {
+                DisconnectNodes(pr.first, pr.second, true);
+                stats.crossingLinksPruned++;
+            }
+        }
+
+        // 2. Detect quad diagonal chords: in any quadrilateral A-B-C-D-A, if diagonal A-C or B-D exists, prune it
+        if (options.pruneRedundantDiagonals) {
+            std::vector<std::pair<uint32_t, uint32_t>> diagToPrune;
+            for (const auto& nA : m_nodes) {
+                for (int cA = 0; cA < WPT_MAX_CONNECTIONS; ++cA) {
+                    int16_t idB = nA.connections[cA];
+                    if (idB <= 0 || static_cast<uint32_t>(idB) <= nA.id) continue;
+                    const WaypointNode* nB = GetNodeByID(static_cast<uint32_t>(idB));
+                    if (!nB) continue;
+
+                    for (int cA2 = 0; cA2 < WPT_MAX_CONNECTIONS; ++cA2) {
+                        int16_t idC = nA.connections[cA2];
+                        if (idC <= 0 || idC == idB) continue;
+                        const WaypointNode* nC = GetNodeByID(static_cast<uint32_t>(idC));
+                        if (!nC) continue;
+
+                        if (nB->HasConnectionTo(idC)) {
+                            // Triangle A-B-C: check if AC is a redundant diagonal shortcut across B
+                            float dAB = (nB->origin - nA.origin).Length();
+                            float dBC = (nC->origin - nB->origin).Length();
+                            float dAC = (nC->origin - nA.origin).Length();
+
+                            if (dAC > dAB * 1.15f && dAC > dBC * 1.15f && (dAB + dBC) < dAC * 1.50f) {
+                                diagToPrune.push_back({ nA.id, static_cast<uint32_t>(idC) });
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (const auto& pr : diagToPrune) {
+                DisconnectNodes(pr.first, pr.second, true);
+                stats.diagonalChordsPruned++;
+            }
+        }
+    }
+
     // Pass 4: Prune Redundant Co-linear Nodes along straight corridors
-    if (progressCb) progressCb(0.60f, "Pass 4/6: Pruning collinear corridor nodes...");
+    if (progressCb) progressCb(0.65f, "Pass 4/6: Pruning collinear corridor nodes...");
     if (options.pruneCollinear) {
         float cosTol = std::cos(options.collinearMaxAngle * (3.14159265f / 180.0f));
         std::unordered_set<uint32_t> collinearToDelete;
@@ -699,7 +823,7 @@ WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile*
                 float len1 = dir1.Length();
                 float len2 = dir2.Length();
 
-                if (len1 > 1.0f && len2 > 1.0f && (len1 + len2) <= 320.0f) {
+                if (len1 > 1.0f && len2 > 1.0f && (len1 + len2) <= 380.0f) {
                     dir1 = dir1 * (1.0f / len1);
                     dir2 = dir2 * (1.0f / len2);
                     float dot = dir1.Dot(dir2);
@@ -729,6 +853,9 @@ WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile*
                             if (aHasRev && cHasRev) {
                                 nodeC->AddConnection(static_cast<int16_t>(idA), WPT_CONN_NONE);
                             }
+
+                            nodeA->radius = std::max(nodeA->radius, mid.radius);
+                            nodeC->radius = std::max(nodeC->radius, mid.radius);
 
                             collinearToDelete.insert(mid.id);
                             stats.collinearPruned++;
@@ -770,7 +897,7 @@ WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile*
 
     auto tEnd = std::chrono::high_resolution_clock::now();
     stats.durationSeconds = std::chrono::duration<double>(tEnd - tStart).count();
-    stats.totalModified = stats.overlappingMerged + stats.collinearPruned + stats.blockedLinksPruned + stats.oneWayLinksFixed + stats.orphansRemoved;
+    stats.totalModified = stats.overlappingMerged + stats.collinearPruned + stats.blockedLinksPruned + stats.oneWayLinksFixed + stats.orphansRemoved + stats.crossingLinksPruned + stats.diagonalChordsPruned;
 
     if (progressCb) progressCb(1.0f, "Optimization complete!");
     return stats;

@@ -269,19 +269,46 @@ NavGenerateResult NavGenerator::Generate(
         }
     }
 
-    // Ladders as seeds
+    // Ladders as seeds (both base floor and top dismount platforms)
     auto ladders = bsp.FindEntities("func_ladder");
     for (const BSPEntity* ent : ladders) {
+        Vector3 origin;
+        bool hasOrigin = ent->GetOrigin(origin);
+        Vector3 bMin, bMax;
+        bool valid = false;
+
         std::string modelStr = ent->GetString("model");
         if (!modelStr.empty() && modelStr[0] == '*') {
             int modelIdx = std::atoi(modelStr.c_str() + 1);
             const dmodel_t* mod = bsp.GetModel(modelIdx);
             if (mod) {
-                Vector3 mid((mod->mins.x + mod->maxs.x) * 0.5f,
-                            (mod->mins.y + mod->maxs.y) * 0.5f,
-                            mod->mins.z + 10.0f);
-                seedCandidates.push_back(mid);
+                bMin = Vector3(mod->mins.x, mod->mins.y, mod->mins.z);
+                bMax = Vector3(mod->maxs.x, mod->maxs.y, mod->maxs.z);
+                origin = (bMin + bMax) * 0.5f;
+                valid = true;
             }
+        } else if (hasOrigin) {
+            bMin = origin - Vector3(16.0f, 16.0f, 64.0f);
+            bMax = origin + Vector3(16.0f, 16.0f, 64.0f);
+            valid = true;
+        }
+
+        if (valid) {
+            // Seed ladder bottom
+            Vector3 midBottom(origin.x, origin.y, bMin.z + 10.0f);
+            seedCandidates.push_back(midBottom);
+            seedCandidates.push_back(midBottom + Vector3(20.0f, 0.0f, 0.0f));
+            seedCandidates.push_back(midBottom - Vector3(20.0f, 0.0f, 0.0f));
+            seedCandidates.push_back(midBottom + Vector3(0.0f, 20.0f, 0.0f));
+            seedCandidates.push_back(midBottom - Vector3(0.0f, 20.0f, 0.0f));
+
+            // Seed ladder top dismount platform
+            Vector3 midTop(origin.x, origin.y, bMax.z + 10.0f);
+            seedCandidates.push_back(midTop);
+            seedCandidates.push_back(midTop + Vector3(20.0f, 0.0f, 0.0f));
+            seedCandidates.push_back(midTop - Vector3(20.0f, 0.0f, 0.0f));
+            seedCandidates.push_back(midTop + Vector3(0.0f, 20.0f, 0.0f));
+            seedCandidates.push_back(midTop - Vector3(0.0f, 20.0f, 0.0f));
         }
     }
 
@@ -533,64 +560,91 @@ NavGenerateResult NavGenerator::Generate(
             }
         }
 
-        // Jump connections (drops and jump-ups to camp spots / ledges / vents)
+        // Jump connections (drops and jump-ups to camp spots, vents, crates, and elevated perches)
         if (options.generateJumpConnections) {
             for (int d = 0; d < NUM_NAV_DIRECTIONS; ++d) {
-                if (area->GetAdjacentCount(static_cast<NavDirType>(d)) == 0) {
-                    Vector3 testPos = area->GetCenter();
-                    switch (d) {
-                        case NAV_DIR_NORTH: testPos.y = minY - options.stepSize * 0.75f; break;
-                        case NAV_DIR_EAST:  testPos.x = maxX + options.stepSize * 0.75f; break;
-                        case NAV_DIR_SOUTH: testPos.y = maxY + options.stepSize * 0.75f; break;
-                        case NAV_DIR_WEST:  testPos.x = minX - options.stepSize * 0.75f; break;
-                    }
+                NavDirType dir = static_cast<NavDirType>(d);
+                NavDirType oppDir = static_cast<NavDirType>((d + 2) % 4);
 
-                    // A) Downward drop connections
-                    Vector3 dropGround;
-                    if (bsp.GetGround(testPos + Vector3(0, 0, 10.0f), &dropGround, options.maxDrop)) {
-                        float dropDelta = area->GetCenter().z - dropGround.z;
-                        if (dropDelta > options.maxStepHeight && dropDelta <= options.maxDrop) {
-                            NavArea* dropArea = outNav.GetNearestArea(dropGround, options.stepSize * 1.5f);
-                            if (dropArea && dropArea != area && !area->IsConnected(dropArea, d)) {
-                                area->ConnectTo(dropArea, static_cast<NavDirType>(d));
-                                connectionCount++;
+                // Multi-point probing along the edge (at 25%, 50%, and 75% of edge width)
+                const float edgeFractions[3] = { 0.25f, 0.50f, 0.75f };
+                const float outwardOffsets[2] = { options.stepSize * 0.75f, options.stepSize * 1.50f };
+
+                for (float frac : edgeFractions) {
+                    for (float outOff : outwardOffsets) {
+                        Vector3 testPos = area->GetCenter();
+                        switch (d) {
+                            case NAV_DIR_NORTH:
+                                testPos.x = minX + (maxX - minX) * frac;
+                                testPos.y = minY - outOff;
+                                break;
+                            case NAV_DIR_EAST:
+                                testPos.x = maxX + outOff;
+                                testPos.y = minY + (maxY - minY) * frac;
+                                break;
+                            case NAV_DIR_SOUTH:
+                                testPos.x = minX + (maxX - minX) * frac;
+                                testPos.y = maxY + outOff;
+                                break;
+                            case NAV_DIR_WEST:
+                                testPos.x = minX - outOff;
+                                testPos.y = minY + (maxY - minY) * frac;
+                                break;
+                        }
+
+                        // A) Downward drop connections
+                        Vector3 dropGround;
+                        if (bsp.GetGround(testPos + Vector3(0, 0, 10.0f), &dropGround, options.maxDrop)) {
+                            float dropDelta = area->GetCenter().z - dropGround.z;
+                            if (dropDelta > options.maxStepHeight && dropDelta <= options.maxDrop) {
+                                NavArea* dropArea = outNav.GetNearestArea(dropGround, options.stepSize * 1.8f);
+                                if (dropArea && dropArea != area && !area->IsConnected(dropArea, d)) {
+                                    area->ConnectTo(dropArea, dir);
+                                    connectionCount++;
+                                }
                             }
                         }
-                    }
 
-                    // B) Upward jump connections (crates, ledges, vents, elevated camp perches)
-                    // CS standing jump reaches ~45u, jump-crouch (duck-jump) reaches ~58u
-                    Vector3 jumpProbeStart = testPos + Vector3(0, 0, 60.0f);
-                    Vector3 jumpGround;
-                    if (bsp.GetGround(jumpProbeStart, &jumpGround, 65.0f)) {
-                        float jumpDelta = jumpGround.z - area->GetCenter().z;
-                        if (jumpDelta > options.maxStepHeight && jumpDelta <= 58.0f) {
-                            NavArea* jumpTargetArea = outNav.GetNearestArea(jumpGround, options.stepSize * 1.5f);
-                            if (jumpTargetArea && jumpTargetArea != area && !area->IsConnected(jumpTargetArea, d)) {
-                                // Verify LOS trajectory clearance from source to jump landing
-                                BSPTraceResult trTraverse;
-                                Vector3 tStart = area->GetCenter() + Vector3(0, 0, jumpDelta + 20.0f);
-                                Vector3 tEnd = jumpGround + Vector3(0, 0, 20.0f);
-                                bsp.TraceWorld(tStart, tEnd, HULL_POINT, &trTraverse);
-                                if (trTraverse.fraction >= 0.95f) {
-                                    area->ConnectTo(jumpTargetArea, static_cast<NavDirType>(d));
-                                    connectionCount++;
+                        // B) Upward jump connections (crates, ledges, vents, elevated human camp perches)
+                        // CS standard jump reaches ~45u, jump-crouch (duck-jump) reaches ~62u
+                        Vector3 jumpProbeStart = testPos + Vector3(0, 0, 70.0f);
+                        Vector3 jumpGround;
+                        if (bsp.GetGround(jumpProbeStart, &jumpGround, 75.0f)) {
+                            float jumpDelta = jumpGround.z - area->GetCenter().z;
+                            if (jumpDelta > options.maxStepHeight && jumpDelta <= 62.0f) {
+                                NavArea* jumpTargetArea = outNav.GetNearestArea(jumpGround, options.stepSize * 1.8f);
+                                if (jumpTargetArea && jumpTargetArea != area && !area->IsConnected(jumpTargetArea, d)) {
+                                    // Verify LOS trajectory clearance from source to jump landing
+                                    BSPTraceResult trTraverse;
+                                    Vector3 tStart = area->GetCenter() + Vector3(0, 0, jumpDelta + 22.0f);
+                                    Vector3 tEnd = jumpGround + Vector3(0, 0, 22.0f);
+                                    bsp.TraceWorld(tStart, tEnd, HULL_POINT, &trTraverse);
+                                    if (trTraverse.fraction >= 0.95f) {
+                                        area->ConnectTo(jumpTargetArea, dir);
+                                        connectionCount++;
 
-                                    // Check vertical headroom clearance at target
-                                    BSPTraceResult trHead;
-                                    bsp.TraceWorld(jumpGround + Vector3(0, 0, 2.0f), jumpGround + Vector3(0, 0, 100.0f), HULL_POINT, &trHead);
-                                    float clearance = trHead.endpos.z - jumpGround.z;
-
-                                    if (clearance < options.humanHeight - 6.0f && clearance >= options.crouchHeight - 2.0f) {
-                                        // Low-clearance entrance (human camp spot, vent, crawlspace): require jump-crouch
-                                        jumpTargetArea->SetAttributes(jumpTargetArea->GetAttributes() | NAV_ATTR_CROUCH | NAV_ATTR_JUMP);
-                                        // Add a defensive hiding spot
-                                        if (jumpTargetArea->GetHidingSpots().empty()) {
-                                            NavHidingSpot spot(jumpTargetArea->GetID() * 100 + 1, jumpTargetArea->GetCenter(), HIDING_IN_COVER | HIDING_GOOD_SNIPER);
-                                            jumpTargetArea->GetHidingSpots().push_back(spot);
+                                        // Connect safe return drop back down from camp spot / perch
+                                        if (jumpDelta <= options.maxDrop && !jumpTargetArea->IsConnected(area, oppDir)) {
+                                            jumpTargetArea->ConnectTo(area, oppDir);
+                                            connectionCount++;
                                         }
-                                    } else {
-                                        jumpTargetArea->SetAttributes(jumpTargetArea->GetAttributes() | NAV_ATTR_JUMP);
+
+                                        // Check vertical headroom clearance at target
+                                        BSPTraceResult trHead;
+                                        bsp.TraceWorld(jumpGround + Vector3(0, 0, 2.0f), jumpGround + Vector3(0, 0, 100.0f), HULL_POINT, &trHead);
+                                        float clearance = trHead.endpos.z - jumpGround.z;
+
+                                        if (clearance < options.humanHeight - 4.0f && clearance >= options.crouchHeight - 4.0f) {
+                                            // Low-clearance entrance (human camp spot, vent, crawlspace): requires jump-crouch
+                                            jumpTargetArea->SetAttributes(jumpTargetArea->GetAttributes() | NAV_ATTR_CROUCH | NAV_ATTR_JUMP);
+                                            // Add a defensive hiding spot
+                                            if (jumpTargetArea->GetHidingSpots().empty()) {
+                                                NavHidingSpot spot(jumpTargetArea->GetID() * 100 + 1, jumpTargetArea->GetCenter(), HIDING_IN_COVER | HIDING_GOOD_SNIPER);
+                                                jumpTargetArea->GetHidingSpots().push_back(spot);
+                                            }
+                                        } else {
+                                            jumpTargetArea->SetAttributes(jumpTargetArea->GetAttributes() | NAV_ATTR_JUMP);
+                                        }
                                     }
                                 }
                             }

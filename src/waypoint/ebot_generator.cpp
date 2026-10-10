@@ -293,10 +293,13 @@ EBotGenerateResult EBotGenerator::Generate(
             if (nearestDist < effMinDist) {
                 // Node already exists within threshold or within existing wayzone; connect if reachable
                 if (nearbyId != 0 && nearbyId != currId) {
-                    bool isBi = (std::abs(zDiff) <= options.maxStepHeight);
-                    uint16_t cFlags = (zDiff > options.maxStepHeight) ? WPT_CONN_JUMP : WPT_CONN_NONE;
-                    if (needCrouch) cFlags |= WPT_CONN_CROUCH;
-                    outGraph.ConnectNodes(currId, nearbyId, isBi, cFlags);
+                    bool isDiagonal = (d % 2 != 0);
+                    if (!isDiagonal || !options.pruneCrossingLinks) {
+                        bool isBi = (std::abs(zDiff) <= options.maxStepHeight);
+                        uint16_t cFlags = (zDiff > options.maxStepHeight) ? WPT_CONN_JUMP : WPT_CONN_NONE;
+                        if (needCrouch) cFlags |= WPT_CONN_CROUCH;
+                        outGraph.ConnectNodes(currId, nearbyId, isBi, cFlags);
+                    }
                 }
                 continue;
             }
@@ -391,8 +394,10 @@ EBotGenerateResult EBotGenerator::Generate(
     // 6. Intelligent Graph Optimization (prunes co-linear corridor nodes, merges overlaps, fixes one-way links)
     if (progress) progress(0.89f, "Optimizing graph topology and pruning redundant nodes...");
     WaypointGraph::WaypointOptimizeOptions opt;
+    opt.pruneCrossingLinks = options.pruneCrossingLinks;
+    opt.pruneRedundantDiagonals = true;
     opt.pruneCollinear = true;
-    opt.collinearMaxAngle = 14.0f;
+    opt.collinearMaxAngle = 18.0f;
     opt.mergeOverlapping = true;
     opt.mergeDistance = options.minDistance * 0.45f;
     opt.fixOneWayLinks = true;
