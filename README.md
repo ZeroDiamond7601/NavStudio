@@ -3,7 +3,7 @@
 [![CI & Build](https://github.com/ZeroDiamond7601/NavStudio/actions/workflows/build.yml/badge.svg)](https://github.com/ZeroDiamond7601/NavStudio/actions)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20(x86)%20%7C%20Linux-brightgreen.svg)]()
-[![Release](https://img.shields.io/badge/Version-v1.6.8-orange.svg)](https://github.com/ZeroDiamond7601/NavStudio/releases)
+[![Release](https://img.shields.io/badge/Version-v1.6.8.1-orange.svg)](https://github.com/ZeroDiamond7601/NavStudio/releases)
 
 **NavStudio** is a standalone, hardware-accelerated 3D desktop visualizer, navigation mesh editor, and verification suite for **GoldSrc** (`.bsp` v30) maps and **Counter-Strike 1.6 / Condition Zero** (`.nav` v4 & v5) navigation meshes.
 
