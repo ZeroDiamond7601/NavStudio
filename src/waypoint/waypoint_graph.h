@@ -8,8 +8,34 @@
 #include <cstddef>
 #include <cstdint>
 
+// Waypoint Graph Optimizer Options & Results
+struct WaypointOptimizeOptions {
+    bool mergeOverlapping{true};
+    float mergeDistance{25.0f};
+    bool pruneCollinear{true};
+    float collinearMaxAngle{15.0f};
+    bool fixOneWayLinks{true};
+    bool pruneBlockedLinks{true};
+    bool pruneOrphans{true};
+    bool recalculateWayzones{true};
+};
+
+struct WaypointOptimizeStats {
+    size_t overlappingMerged{0};
+    size_t collinearPruned{0};
+    size_t blockedLinksPruned{0};
+    size_t oneWayLinksFixed{0};
+    size_t orphansRemoved{0};
+    size_t wayzonesCalculated{0};
+    size_t totalModified{0};
+    double durationSeconds{0.0};
+};
+
 class WaypointGraph {
 public:
+    using WaypointOptimizeOptions = ::WaypointOptimizeOptions;
+    using WaypointOptimizeStats = ::WaypointOptimizeStats;
+
     WaypointGraph();
     ~WaypointGraph() = default;
 
@@ -96,29 +122,6 @@ public:
     void CalculateWayzone(uint32_t nodeId, const class BSPFile* bsp);
     size_t CalculateAllWayzones(const class BSPFile* bsp);
     bool ValidateNodes(std::vector<std::string>* outWarnings = nullptr);
-
-    // Waypoint Graph Optimizer Options & Results
-    struct WaypointOptimizeOptions {
-        bool mergeOverlapping{true};
-        float mergeDistance{25.0f};
-        bool pruneCollinear{true};
-        float collinearMaxAngle{15.0f};
-        bool fixOneWayLinks{true};
-        bool pruneBlockedLinks{true};
-        bool pruneOrphans{true};
-        bool recalculateWayzones{true};
-    };
-
-    struct WaypointOptimizeStats {
-        size_t overlappingMerged{0};
-        size_t collinearPruned{0};
-        size_t blockedLinksPruned{0};
-        size_t oneWayLinksFixed{0};
-        size_t orphansRemoved{0};
-        size_t wayzonesCalculated{0};
-        size_t totalModified{0};
-        double durationSeconds{0.0};
-    };
 
     WaypointOptimizeStats OptimizeGraph(const class BSPFile* bsp = nullptr, const WaypointOptimizeOptions& options = WaypointOptimizeOptions());
 
