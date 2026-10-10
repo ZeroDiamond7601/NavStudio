@@ -98,7 +98,7 @@ static void UpdateMouseCursor(GLFWwindow* window, EditorScene& scene, EditorUI& 
             } else if (hovered >= HANDLE_CORNER_NW && hovered <= HANDLE_CORNER_SW) {
                 targetCursor = g_cursorHResize;
                 imCursor = ImGuiMouseCursor_ResizeAll;
-            } else if (hovered >= HANDLE_GIZMO_SCALE_X && hovered <= HANDLE_GIZMO_SCALE_Z) {
+            } else if (hovered >= HANDLE_SCALE_X && hovered <= HANDLE_SCALE_Z) {
                 targetCursor = g_cursorHResize;
                 imCursor = ImGuiMouseCursor_ResizeEW;
             } else {
