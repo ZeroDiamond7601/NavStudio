@@ -25,8 +25,19 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_EDITOR=OFF -DBUILD_CLI=ON
 
       - name: Build Project
+        shell: pwsh
         run: |
-          cmake --build build --config Release -j$(nproc) || (echo "=== BUILD FAILED, RUNNING VERBOSE BUILD ===" && cmake --build build --verbose && exit 1)
+          $output = cmake --build build --config Release 2>&1
+          $output | Out-File -FilePath build.log -Encoding utf8
+          if ($LASTEXITCODE -ne 0) {
+            $errs = $output | Select-String "error:|fatal error:|FAILED" -Context 1,1
+            foreach ($e in $errs) {
+              $clean = $e.ToString().Replace("`r", "").Replace("`n", " ")
+              Write-Host "::error title=GCC Error::$clean"
+            }
+            Get-Content build.log -Tail 100 | Write-Host
+            exit 1
+          }
 
       - name: Test CLI
         run: ./build/nav_cli --help
