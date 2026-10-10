@@ -175,6 +175,9 @@ public:
         return "";
     }
     void SetNAVPath(const std::string& path) { m_navPath = path; }
+    const std::string& GetWaypointPath() const { return m_waypointPath; }
+    void SetWaypointPath(const std::string& path) { m_waypointPath = path; }
+    bool HasWaypoints() const { return !m_waypoints.IsEmpty(); }
 
     bool HasBSP() const { return m_bsp && m_bsp->IsLoaded(); }
     bool HasNAV() const { return m_nav && m_nav->IsLoaded(); }
@@ -660,6 +663,7 @@ private:
 
     std::string m_bspPath;
     std::string m_navPath;
+    std::string m_waypointPath;
     std::string m_errorMessage;
     std::string m_gameDirectory;
 

@@ -940,16 +940,22 @@ static void ProcessInput(GLFWwindow* window, float deltaTime) {
 static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
     static std::string lastTitle = "";
     std::string title = "NavStudio v1.6.5";
-    if (scene.HasBSP() || scene.HasNAV()) {
+    if (scene.HasBSP() || scene.HasNAV() || scene.HasWaypoints()) {
         std::string map = "";
         if (scene.HasBSP()) {
             map = scene.GetBSP().GetMapName();
         } else if (!scene.GetNAVPath().empty()) {
             size_t slash = scene.GetNAVPath().find_last_of("/\\");
             map = (slash != std::string::npos) ? scene.GetNAVPath().substr(slash + 1) : scene.GetNAVPath();
+        } else if (!scene.GetWaypointPath().empty()) {
+            size_t slash = scene.GetWaypointPath().find_last_of("/\\");
+            map = (slash != std::string::npos) ? scene.GetWaypointPath().substr(slash + 1) : scene.GetWaypointPath();
         }
         if (!map.empty()) {
             title += " - " + map;
+        }
+        if (scene.IsWaypointMode()) {
+            title += " [Waypoints]";
         }
         if (scene.IsModified()) {
             title += " *";

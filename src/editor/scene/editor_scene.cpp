@@ -4839,9 +4839,11 @@ const WaypointNode* EditorScene::GetSelectedWaypoint() const {
 
 bool EditorScene::LoadWaypoints(const std::string& path) {
     if (m_waypoints.Load(path)) {
+        m_waypointPath = path;
         m_showWaypoints = true;
         m_waypointRenderer.SetShowWaypoints(true);
         RebuildWaypointRenderer();
+        AddRecentFile(path);
         ShowToast("Loaded " + std::to_string(m_waypoints.GetNodeCount()) + " waypoints from " + path);
         return true;
     }
@@ -4851,6 +4853,8 @@ bool EditorScene::LoadWaypoints(const std::string& path) {
 
 bool EditorScene::SaveWaypoints(const std::string& path, BotType bot, GameMod mod) {
     if (m_waypoints.Save(path, bot, mod)) {
+        m_waypointPath = path;
+        AddRecentFile(path);
         ShowToast("Saved " + std::to_string(m_waypoints.GetNodeCount()) + " waypoints to " + path);
         return true;
     }
@@ -4860,7 +4864,9 @@ bool EditorScene::SaveWaypoints(const std::string& path, BotType bot, GameMod mo
 
 void EditorScene::UnloadWaypoints() {
     m_waypoints.Clear();
+    m_waypointPath.clear();
     m_selectedWaypointId = 0;
+    m_cachedWaypointId = 0;
     m_waypointRenderer.Clear();
     ShowToast("Unloaded bot waypoints");
 }
