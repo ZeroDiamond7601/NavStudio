@@ -503,6 +503,44 @@ public:
     void RebuildWaypointRenderer();
     WaypointGraph::WaypointAnalysisStats AutoAnalyzeWaypoints();
 
+    enum EditorTargetMode {
+        TARGET_NAVMESH = 0,
+        TARGET_WAYPOINTS = 1
+    };
+
+    EditorTargetMode GetTargetMode() const { return m_targetMode; }
+    void SetTargetMode(EditorTargetMode mode) { m_targetMode = mode; }
+    bool IsWaypointMode() const { return m_targetMode == TARGET_WAYPOINTS; }
+
+    // Waypoint Interactive Tools
+    size_t FloodFillWaypointsAt(const Ray& ray);
+    bool IsAddWaypointMode() const { return m_isAddWaypointMode; }
+    void ToggleAddWaypointMode() { m_isAddWaypointMode = !m_isAddWaypointMode; }
+    void SetAddWaypointMode(bool active) { m_isAddWaypointMode = active; }
+    uint32_t OnAddWaypointClick(const Ray& ray);
+    uint32_t AddWaypointAt(const Vector3& pos);
+    void SnapSelectedWaypointToFloor();
+    bool ConnectSelectedWaypointTo(uint32_t targetId, uint16_t connFlags = WPT_CONN_NONE, bool bidirectional = true);
+    void DeleteSelectedWaypoint();
+
+    // Cache Waypoint & Linking (matching CS-EBOT in-game commands)
+    void CacheWaypoint(uint32_t id = 0);
+    uint32_t GetCachedWaypointID() const { return m_cachedWaypointId; }
+    void SetCachedWaypointID(uint32_t id) { m_cachedWaypointId = id; }
+    bool CreateConnectionToCached(int conType);
+    void DeleteConnectionToCached();
+    void TeleportCameraToWaypoint(uint32_t id, Camera& camera);
+
+    // Quick Add Properties
+    uint32_t GetActiveWaypointAddFlags() const { return m_activeWaypointAddFlags; }
+    void SetActiveWaypointAddFlags(uint32_t f) { m_activeWaypointAddFlags = f; }
+    float GetActiveWaypointAddRadius() const { return m_activeWaypointAddRadius; }
+    void SetActiveWaypointAddRadius(float r) { m_activeWaypointAddRadius = r; }
+    bool GetAutoConnectWaypoints() const { return m_autoConnectWaypoints; }
+    void SetAutoConnectWaypoints(bool ac) { m_autoConnectWaypoints = ac; }
+    int GetWaypointConnectType() const { return m_waypointConnectType; }
+    void SetWaypointConnectType(int t) { m_waypointConnectType = t; }
+
     // E-Bot Automated Waypoint Generator
     struct WaypointGenProgress {
         std::atomic<bool> isGenerating{false};
@@ -763,6 +801,13 @@ private:
     WaypointRenderer m_waypointRenderer;
     bool m_showWaypoints{true};
     uint32_t m_selectedWaypointId{0};
+    EditorTargetMode m_targetMode{TARGET_NAVMESH};
+    bool m_isAddWaypointMode{false};
+    uint32_t m_cachedWaypointId{0};
+    uint32_t m_activeWaypointAddFlags{WPT_FLAG_CROSSING};
+    float m_activeWaypointAddRadius{32.0f};
+    bool m_autoConnectWaypoints{true};
+    int m_waypointConnectType{2};
 
     // E-Bot Waypoint Generator thread state
     WaypointGenProgress m_waypointGenProgress;

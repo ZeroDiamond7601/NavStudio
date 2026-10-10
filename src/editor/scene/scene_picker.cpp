@@ -371,9 +371,14 @@ SelectedHandleType ScenePicker::PickAreaHandles(
         if (selEnt) {
             c = selEnt->origin;
         }
+    } else if (scene.GetSelectedWaypointID() != 0 && scene.GetShowWaypoints()) {
+        const WaypointNode* selWpt = scene.GetSelectedWaypoint();
+        if (selWpt) {
+            c = selWpt->origin + Vector3(0.0f, 0.0f, 12.0f);
+        }
     }
 
-    if (!selArea && selIds.empty() && !selEnt) return HANDLE_NONE;
+    if (!selArea && selIds.empty() && !selEnt && scene.GetSelectedWaypointID() == 0) return HANDLE_NONE;
 
     Matrix4 viewProj = projMatrix * viewMatrix;
     Matrix4 invView = viewMatrix.Inverse();

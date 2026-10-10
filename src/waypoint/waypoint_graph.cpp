@@ -6,6 +6,8 @@
 #include <cmath>
 #include <algorithm>
 #include <fstream>
+#include <unordered_map>
+#include <unordered_set>
 
 WaypointGraph::WaypointGraph() = default;
 
@@ -305,7 +307,21 @@ bool WaypointGraph::Save(const std::string& filepath, BotType bot, GameMod mod) 
 // --- EBot (.ewp) Codec ---
 
 #pragma pack(push, 1)
+// Standard CS-EBOT v127 disk path (56 bytes, matching CS-EBOT's struct Path alignment)
 struct EBotDiskPath {
+    Vector3 origin;              // 12 bytes [0..11]
+    uint32_t flags;              // 4 bytes  [12..15]
+    uint8_t radius;              // 1 byte   [16]
+    uint8_t mesh;                // 1 byte   [17]
+    int16_t index[8];            // 16 bytes [18..33]
+    uint16_t connectionFlags[8]; // 16 bytes [34..49]
+    uint16_t _pad{0};            // 2 bytes  [50..51] alignment padding in CS-EBOT struct Path
+    float gravity{0.0f};         // 4 bytes  [52..55]
+};
+static_assert(sizeof(EBotDiskPath) == 56, "EBotDiskPath must be 56 bytes to match CS-EBOT struct Path");
+
+// Legacy packed 54-byte struct (for backwards compatibility if any legacy packed file exists)
+struct EBotDiskPath54 {
     Vector3 origin;
     uint32_t flags;
     uint8_t radius;
@@ -314,6 +330,7 @@ struct EBotDiskPath {
     uint16_t connectionFlags[8];
     float gravity;
 };
+static_assert(sizeof(EBotDiskPath54) == 54, "EBotDiskPath54 must be 54 bytes");
 
 struct EBotLegacyPathOLD {
     int32_t pathNumber;
@@ -371,55 +388,97 @@ bool WaypointGraph::LoadEBot(const std::string& filepath) {
         std::fread(compData.data(), 1, compSz, f);
         std::fclose(f);
 
-        size_t expectedUncomp = numPoints * sizeof(EBotDiskPath);
-        std::vector<uint8_t> uncompData(expectedUncomp + 2048);
+        size_t expectedUncomp56 = numPoints * sizeof(EBotDiskPath);
+        size_t expectedUncomp54 = numPoints * sizeof(EBotDiskPath54);
+        std::vector<uint8_t> uncompData(expectedUncomp56 + 4096);
         size_t actualUncomp = 0;
 
         WaypointCompressor comp;
         bool decompOk = comp.Decode(compData.data(), compData.size(), uncompData.data(), uncompData.size(), actualUncomp);
-        if (!decompOk || actualUncomp < expectedUncomp) {
-            // Fallback: raw uncompressed read
-            if (compSz >= static_cast<long>(expectedUncomp)) {
-                std::memcpy(uncompData.data(), compData.data(), expectedUncomp);
+        if (!decompOk || actualUncomp < expectedUncomp54) {
+            // Fallback: raw uncompressed read if payload wasn't compressed
+            if (compSz >= static_cast<long>(expectedUncomp56)) {
+                std::memcpy(uncompData.data(), compData.data(), expectedUncomp56);
+                actualUncomp = expectedUncomp56;
+            } else if (compSz >= static_cast<long>(expectedUncomp54)) {
+                std::memcpy(uncompData.data(), compData.data(), expectedUncomp54);
+                actualUncomp = expectedUncomp54;
             } else {
                 return false;
             }
         }
 
-        const EBotDiskPath* diskPaths = reinterpret_cast<const EBotDiskPath*>(uncompData.data());
+        bool is56 = (actualUncomp >= expectedUncomp56);
+        const EBotDiskPath* diskPaths56 = reinterpret_cast<const EBotDiskPath*>(uncompData.data());
+        const EBotDiskPath54* diskPaths54 = reinterpret_cast<const EBotDiskPath54*>(uncompData.data());
+
         m_nodes.resize(numPoints);
         for (int i = 0; i < numPoints; ++i) {
             m_nodes[i].id = static_cast<uint32_t>(i + 1);
-            m_nodes[i].origin = diskPaths[i].origin;
-            m_nodes[i].flags = diskPaths[i].flags;
-            m_nodes[i].radius = static_cast<float>(diskPaths[i].radius);
-            m_nodes[i].mesh = diskPaths[i].mesh;
-            m_nodes[i].gravity = diskPaths[i].gravity;
+            Vector3 org = is56 ? diskPaths56[i].origin : diskPaths54[i].origin;
+            if (std::isnan(org.x) || std::isnan(org.y) || std::isnan(org.z) ||
+                std::abs(org.x) > 65536.0f || std::abs(org.y) > 65536.0f || std::abs(org.z) > 65536.0f) {
+                org = Vector3(0.0f, 0.0f, 0.0f);
+            }
+            m_nodes[i].origin = org;
+            m_nodes[i].flags = is56 ? diskPaths56[i].flags : diskPaths54[i].flags;
+            m_nodes[i].radius = static_cast<float>(is56 ? diskPaths56[i].radius : diskPaths54[i].radius);
+            m_nodes[i].mesh = is56 ? diskPaths56[i].mesh : diskPaths54[i].mesh;
+            m_nodes[i].gravity = is56 ? diskPaths56[i].gravity : diskPaths54[i].gravity;
             for (int c = 0; c < 8; ++c) {
-                int16_t rawIdx = diskPaths[i].index[c];
-                m_nodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints) ? (rawIdx + 1) : -1;
-                m_nodes[i].connectionFlags[c] = diskPaths[i].connectionFlags[c];
+                int16_t rawIdx = is56 ? diskPaths56[i].index[c] : diskPaths54[i].index[c];
+                if (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) {
+                    m_nodes[i].connections[c] = static_cast<int16_t>(rawIdx + 1);
+                    m_nodes[i].connectionFlags[c] = is56 ? diskPaths56[i].connectionFlags[c] : diskPaths54[i].connectionFlags[c];
+                } else {
+                    m_nodes[i].connections[c] = -1;
+                    m_nodes[i].connectionFlags[c] = 0;
+                }
             }
         }
         m_nextId = static_cast<uint32_t>(numPoints + 1);
         return true;
     } else if (hdr.fileVersion == 126) { // Uncompressed raw EBotPath
-        std::vector<EBotDiskPath> diskPaths(numPoints);
-        std::fread(diskPaths.data(), sizeof(EBotDiskPath), numPoints, f);
-        std::fclose(f);
+        std::fseek(f, 0, SEEK_END);
+        long dataSz = std::ftell(f) - static_cast<long>(sizeof(hdr));
+        std::fseek(f, sizeof(hdr), SEEK_SET);
 
+        bool is56 = (dataSz >= static_cast<long>(numPoints * sizeof(EBotDiskPath)));
         m_nodes.resize(numPoints);
-        for (int i = 0; i < numPoints; ++i) {
-            m_nodes[i].id = static_cast<uint32_t>(i + 1);
-            m_nodes[i].origin = diskPaths[i].origin;
-            m_nodes[i].flags = diskPaths[i].flags;
-            m_nodes[i].radius = static_cast<float>(diskPaths[i].radius);
-            m_nodes[i].mesh = diskPaths[i].mesh;
-            m_nodes[i].gravity = diskPaths[i].gravity;
-            for (int c = 0; c < 8; ++c) {
-                int16_t rawIdx = diskPaths[i].index[c];
-                m_nodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints) ? (rawIdx + 1) : -1;
-                m_nodes[i].connectionFlags[c] = diskPaths[i].connectionFlags[c];
+
+        if (is56) {
+            std::vector<EBotDiskPath> diskPaths(numPoints);
+            std::fread(diskPaths.data(), sizeof(EBotDiskPath), numPoints, f);
+            std::fclose(f);
+            for (int i = 0; i < numPoints; ++i) {
+                m_nodes[i].id = static_cast<uint32_t>(i + 1);
+                m_nodes[i].origin = diskPaths[i].origin;
+                m_nodes[i].flags = diskPaths[i].flags;
+                m_nodes[i].radius = static_cast<float>(diskPaths[i].radius);
+                m_nodes[i].mesh = diskPaths[i].mesh;
+                m_nodes[i].gravity = diskPaths[i].gravity;
+                for (int c = 0; c < 8; ++c) {
+                    int16_t rawIdx = diskPaths[i].index[c];
+                    m_nodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
+                    m_nodes[i].connectionFlags[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? diskPaths[i].connectionFlags[c] : 0;
+                }
+            }
+        } else {
+            std::vector<EBotDiskPath54> diskPaths(numPoints);
+            std::fread(diskPaths.data(), sizeof(EBotDiskPath54), numPoints, f);
+            std::fclose(f);
+            for (int i = 0; i < numPoints; ++i) {
+                m_nodes[i].id = static_cast<uint32_t>(i + 1);
+                m_nodes[i].origin = diskPaths[i].origin;
+                m_nodes[i].flags = diskPaths[i].flags;
+                m_nodes[i].radius = static_cast<float>(diskPaths[i].radius);
+                m_nodes[i].mesh = diskPaths[i].mesh;
+                m_nodes[i].gravity = diskPaths[i].gravity;
+                for (int c = 0; c < 8; ++c) {
+                    int16_t rawIdx = diskPaths[i].index[c];
+                    m_nodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
+                    m_nodes[i].connectionFlags[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? diskPaths[i].connectionFlags[c] : 0;
+                }
             }
         }
         m_nextId = static_cast<uint32_t>(numPoints + 1);
@@ -439,8 +498,8 @@ bool WaypointGraph::LoadEBot(const std::string& filepath) {
             m_nodes[i].campPitch = diskPaths[i].campStartY;
             for (int c = 0; c < 8; ++c) {
                 int16_t rawIdx = diskPaths[i].index[c];
-                m_nodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints) ? (rawIdx + 1) : -1;
-                m_nodes[i].connectionFlags[c] = diskPaths[i].connectionFlags[c];
+                m_nodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
+                m_nodes[i].connectionFlags[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? diskPaths[i].connectionFlags[c] : 0;
             }
         }
         m_nextId = static_cast<uint32_t>(numPoints + 1);
@@ -459,6 +518,12 @@ bool WaypointGraph::SaveEBot(const std::string& filepath, GameMod mod) {
     std::strncpy(hdr.mapName, m_mapName.c_str(), 31);
     std::strncpy(hdr.author, m_author.c_str(), 31);
 
+    // Map unique runtime node IDs to zero-based contiguous file indices
+    std::unordered_map<uint32_t, int16_t> idToIndex;
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        idToIndex[m_nodes[i].id] = static_cast<int16_t>(i);
+    }
+
     std::vector<EBotDiskPath> diskPaths(m_nodes.size());
     for (size_t i = 0; i < m_nodes.size(); ++i) {
         diskPaths[i].origin = m_nodes[i].origin;
@@ -470,12 +535,20 @@ bool WaypointGraph::SaveEBot(const std::string& filepath, GameMod mod) {
         diskPaths[i].flags = f;
         diskPaths[i].radius = static_cast<uint8_t>(std::clamp(m_nodes[i].radius, 0.0f, 255.0f));
         diskPaths[i].mesh = m_nodes[i].mesh;
+        diskPaths[i]._pad = 0;
         diskPaths[i].gravity = m_nodes[i].gravity;
 
         for (int c = 0; c < 8; ++c) {
             int16_t target = m_nodes[i].connections[c];
-            diskPaths[i].index[c] = (target > 0 && target <= static_cast<int16_t>(m_nodes.size())) ? (target - 1) : -1;
-            diskPaths[i].connectionFlags[c] = m_nodes[i].connectionFlags[c];
+            int16_t diskIdx = -1;
+            if (target > 0) {
+                auto it = idToIndex.find(static_cast<uint32_t>(target));
+                if (it != idToIndex.end() && it->second != static_cast<int16_t>(i)) {
+                    diskIdx = it->second;
+                }
+            }
+            diskPaths[i].index[c] = diskIdx;
+            diskPaths[i].connectionFlags[c] = (diskIdx >= 0) ? m_nodes[i].connectionFlags[c] : 0;
         }
     }
 
@@ -587,6 +660,12 @@ bool WaypointGraph::SaveSyPB(const std::string& filepath, GameMod mod) {
     std::strncpy(hdr.mapName, m_mapName.c_str(), 31);
     std::strncpy(hdr.author, m_author.c_str(), 31);
 
+    // Map unique runtime node IDs to zero-based contiguous file indices
+    std::unordered_map<uint32_t, int16_t> idToIndex;
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        idToIndex[m_nodes[i].id] = static_cast<int16_t>(i);
+    }
+
     std::vector<EBotLegacyPathOLD> diskPaths(m_nodes.size());
     std::memset(diskPaths.data(), 0, diskPaths.size() * sizeof(EBotLegacyPathOLD));
 
@@ -604,9 +683,15 @@ bool WaypointGraph::SaveSyPB(const std::string& filepath, GameMod mod) {
 
         for (int c = 0; c < 8; ++c) {
             int16_t target = m_nodes[i].connections[c];
-            int16_t diskTarget = (target > 0 && target <= static_cast<int16_t>(m_nodes.size())) ? (target - 1) : -1;
+            int16_t diskTarget = -1;
+            if (target > 0) {
+                auto it = idToIndex.find(static_cast<uint32_t>(target));
+                if (it != idToIndex.end() && it->second != static_cast<int16_t>(i)) {
+                    diskTarget = it->second;
+                }
+            }
             diskPaths[i].index[c] = diskTarget;
-            diskPaths[i].connectionFlags[c] = m_nodes[i].connectionFlags[c];
+            diskPaths[i].connectionFlags[c] = (diskTarget >= 0) ? m_nodes[i].connectionFlags[c] : 0;
             if (diskTarget >= 0) {
                 Vector3 diff = m_nodes[diskTarget].origin - m_nodes[i].origin;
                 diskPaths[i].distances[c] = static_cast<int32_t>(diff.Length());
@@ -718,6 +803,12 @@ bool WaypointGraph::SaveYaPB(const std::string& filepath, GameMod mod) {
     std::strncpy(hdr.mapName, m_mapName.c_str(), 31);
     std::strncpy(hdr.author, m_author.c_str(), 31);
 
+    // Map unique runtime node IDs to zero-based contiguous file indices
+    std::unordered_map<uint32_t, int16_t> idToIndex;
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        idToIndex[m_nodes[i].id] = static_cast<int16_t>(i);
+    }
+
     std::vector<YaPBDiskPath> diskPaths(m_nodes.size());
     for (size_t i = 0; i < m_nodes.size(); ++i) {
         uint32_t f = m_nodes[i].flags;
@@ -733,8 +824,15 @@ bool WaypointGraph::SaveYaPB(const std::string& filepath, GameMod mod) {
 
         for (int c = 0; c < 8; ++c) {
             int16_t target = m_nodes[i].connections[c];
-            diskPaths[i].index[c] = (target > 0 && target <= static_cast<int16_t>(m_nodes.size())) ? (target - 1) : -1;
-            diskPaths[i].connectionFlags[c] = m_nodes[i].connectionFlags[c];
+            int16_t diskIdx = -1;
+            if (target > 0) {
+                auto it = idToIndex.find(static_cast<uint32_t>(target));
+                if (it != idToIndex.end() && it->second != static_cast<int16_t>(i)) {
+                    diskIdx = it->second;
+                }
+            }
+            diskPaths[i].index[c] = diskIdx;
+            diskPaths[i].connectionFlags[c] = (diskIdx >= 0) ? m_nodes[i].connectionFlags[c] : 0;
         }
     }
 
@@ -888,6 +986,12 @@ bool WaypointGraph::SavePODBot(const std::string& filepath, GameMod mod) {
     std::strncpy(hdr.mapName, m_mapName.c_str(), 31);
     std::strncpy(hdr.author, m_author.c_str(), 31);
 
+    // Map unique runtime node IDs to zero-based contiguous file indices
+    std::unordered_map<uint32_t, int16_t> idToIndex;
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        idToIndex[m_nodes[i].id] = static_cast<int16_t>(i);
+    }
+
     std::vector<PODBotDiskNodeV6> diskPaths(m_nodes.size());
     std::memset(diskPaths.data(), 0, diskPaths.size() * sizeof(PODBotDiskNodeV6));
 
@@ -905,9 +1009,15 @@ bool WaypointGraph::SavePODBot(const std::string& filepath, GameMod mod) {
 
         for (int c = 0; c < 8; ++c) {
             int16_t target = m_nodes[i].connections[c];
-            int16_t diskTarget = (target > 0 && target <= static_cast<int16_t>(m_nodes.size())) ? (target - 1) : -1;
+            int16_t diskTarget = -1;
+            if (target > 0) {
+                auto it = idToIndex.find(static_cast<uint32_t>(target));
+                if (it != idToIndex.end() && it->second != static_cast<int16_t>(i)) {
+                    diskTarget = it->second;
+                }
+            }
             diskPaths[i].index[c] = diskTarget;
-            diskPaths[i].connectionFlags[c] = m_nodes[i].connectionFlags[c];
+            diskPaths[i].connectionFlags[c] = (diskTarget >= 0) ? m_nodes[i].connectionFlags[c] : 0;
             if (diskTarget >= 0) {
                 Vector3 diff = m_nodes[diskTarget].origin - m_nodes[i].origin;
                 diskPaths[i].distances[c] = static_cast<int32_t>(diff.Length());
@@ -926,4 +1036,211 @@ bool WaypointGraph::SavePODBot(const std::string& filepath, GameMod mod) {
     m_activeBot = BotType::PODBot;
     m_activeMod = mod;
     return true;
+}
+
+// --- E-Bot In-Game Waypoint Utilities & Optimization ---
+
+size_t WaypointGraph::DeleteOrphanNodes() {
+    if (m_nodes.empty()) return 0;
+
+    // Collect all node IDs that have at least one outgoing or incoming link
+    std::unordered_set<uint32_t> connectedNodeIds;
+    for (const auto& n : m_nodes) {
+        bool hasOutgoing = false;
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            if (n.connections[c] > 0) {
+                hasOutgoing = true;
+                connectedNodeIds.insert(static_cast<uint32_t>(n.connections[c]));
+            }
+        }
+        if (hasOutgoing) {
+            connectedNodeIds.insert(n.id);
+        }
+    }
+
+    size_t removedCount = 0;
+    auto it = m_nodes.begin();
+    while (it != m_nodes.end()) {
+        if (connectedNodeIds.find(it->id) == connectedNodeIds.end()) {
+            uint32_t delId = it->id;
+            it = m_nodes.erase(it);
+            ++removedCount;
+            // Clean up any remaining dangling references to delId
+            for (auto& remaining : m_nodes) {
+                remaining.RemoveConnection(static_cast<int16_t>(delId));
+            }
+        } else {
+            ++it;
+        }
+    }
+    return removedCount;
+}
+
+size_t WaypointGraph::FixWaypoints(const BSPFile* bsp) {
+    if (m_nodes.empty()) return 0;
+    size_t fixes = 0;
+
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        bool isLadder = (m_nodes[i].flags & WPT_FLAG_LADDER) != 0;
+
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            int16_t targetId = m_nodes[i].connections[c];
+            if (targetId <= 0) continue;
+
+            WaypointNode* target = GetNodeByID(static_cast<uint32_t>(targetId));
+            if (!target || target->id == m_nodes[i].id) {
+                m_nodes[i].connections[c] = -1;
+                m_nodes[i].connectionFlags[c] = 0;
+                ++fixes;
+                continue;
+            }
+
+            bool targetLadder = (target->flags & WPT_FLAG_LADDER) != 0;
+            float dz = target->origin.z - m_nodes[i].origin.z;
+
+            // Height check (matching CS-EBOT FixWaypoints): cannot jump up > 72 units without ladder
+            if (!isLadder && !targetLadder) {
+                if (dz > 72.0f) {
+                    m_nodes[i].connections[c] = -1;
+                    m_nodes[i].connectionFlags[c] = 0;
+                    ++fixes;
+                    continue;
+                }
+                // Check if jump flag should be set for step > 18 units
+                if (dz > 18.0f && dz <= 45.0f) {
+                    if (!(m_nodes[i].connectionFlags[c] & WPT_CONN_JUMP)) {
+                        m_nodes[i].connectionFlags[c] |= WPT_CONN_JUMP;
+                        ++fixes;
+                    }
+                }
+            }
+
+            // Line of sight check if BSP geometry is loaded
+            if (bsp && bsp->IsLoaded()) {
+                Vector3 p1 = m_nodes[i].origin + Vector3(0.0f, 0.0f, 18.0f);
+                Vector3 p2 = target->origin + Vector3(0.0f, 0.0f, 18.0f);
+                BSPTraceResult tr;
+                if (bsp->TraceWorld(p1, p2, HULL_POINT, &tr) && tr.fraction < 0.98f) {
+                    // Blocked by world geometry - remove link
+                    m_nodes[i].connections[c] = -1;
+                    m_nodes[i].connectionFlags[c] = 0;
+                    ++fixes;
+                }
+            }
+        }
+    }
+    return fixes;
+}
+
+void WaypointGraph::CalculateWayzone(uint32_t nodeId, const BSPFile* bsp) {
+    WaypointNode* node = GetNodeByID(nodeId);
+    if (!node) return;
+
+    // CS-EBOT CalculateWayzone rule: ladder, goal, camp, rescue, crouch must have radius 0
+    if (node->flags & (WPT_FLAG_LADDER | WPT_FLAG_GOAL | WPT_FLAG_CAMP | WPT_FLAG_RESCUE | WPT_FLAG_CROUCH)) {
+        node->radius = 0.0f;
+        return;
+    }
+
+    // If connected to ladder or jump point, radius must be 0
+    for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+        int16_t targetId = node->connections[c];
+        if (targetId <= 0) continue;
+        const WaypointNode* target = GetNodeByID(static_cast<uint32_t>(targetId));
+        if (target && (target->flags & (WPT_FLAG_LADDER | WPT_FLAG_JUMP))) {
+            node->radius = 0.0f;
+            return;
+        }
+    }
+
+    if (!bsp || !bsp->IsLoaded()) {
+        node->radius = 32.0f;
+        return;
+    }
+
+    // Radial raycasting across 16 horizontal directions (every 22.5 degrees)
+    // Testing clearance up to 128 units in steps of 16 units
+    float finalRadius = 128.0f;
+    Vector3 origin = node->origin + Vector3(0.0f, 0.0f, 18.0f);
+
+    for (int step = 32; step <= 128; step += 16) {
+        float testDist = static_cast<float>(step);
+        bool blocked = false;
+
+        for (int ang = 0; ang < 16; ++ang) {
+            float rad = ang * (2.0f * 3.14159265f / 16.0f);
+            Vector3 dir(std::cos(rad), std::sin(rad), 0.0f);
+            Vector3 targetPt = origin + dir * testDist;
+
+            BSPTraceResult tr;
+            if (bsp->TraceWorld(origin, targetPt, HULL_POINT, &tr) && tr.fraction < 1.0f) {
+                blocked = true;
+                finalRadius = std::max(0.0f, testDist - 16.0f);
+                break;
+            }
+
+            // Downward floor test: verify ground doesn't drop off into void
+            Vector3 dropStart = targetPt;
+            Vector3 dropEnd = dropStart - Vector3(0.0f, 0.0f, testDist + 45.0f);
+            BSPTraceResult dropTr;
+            if (!bsp->TraceWorld(dropStart, dropEnd, HULL_POINT, &dropTr) || dropTr.fraction >= 1.0f) {
+                blocked = true;
+                finalRadius = std::max(0.0f, testDist - 16.0f);
+                break;
+            }
+        }
+
+        if (blocked) break;
+    }
+
+    node->radius = std::clamp(finalRadius, 0.0f, 128.0f);
+}
+
+size_t WaypointGraph::CalculateAllWayzones(const BSPFile* bsp) {
+    size_t count = 0;
+    for (auto& n : m_nodes) {
+        CalculateWayzone(n.id, bsp);
+        ++count;
+    }
+    return count;
+}
+
+bool WaypointGraph::ValidateNodes(std::vector<std::string>* outWarnings) {
+    if (outWarnings) outWarnings->clear();
+    std::unordered_map<uint32_t, size_t> incomingCount;
+
+    for (const auto& n : m_nodes) {
+        incomingCount[n.id] = 0;
+    }
+
+    bool allValid = true;
+    for (const auto& n : m_nodes) {
+        int activeOut = 0;
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            int16_t targetId = n.connections[c];
+            if (targetId <= 0) continue;
+
+            if (targetId == static_cast<int16_t>(n.id)) {
+                if (outWarnings) outWarnings->push_back("Waypoint #" + std::to_string(n.id) + " connects to itself!");
+                allValid = false;
+                continue;
+            }
+
+            const WaypointNode* target = GetNodeByID(static_cast<uint32_t>(targetId));
+            if (!target) {
+                if (outWarnings) outWarnings->push_back("Waypoint #" + std::to_string(n.id) + " links to non-existent node #" + std::to_string(targetId));
+                allValid = false;
+            } else {
+                incomingCount[target->id]++;
+                activeOut++;
+            }
+        }
+
+        if (activeOut == 0 && incomingCount[n.id] == 0) {
+            if (outWarnings) outWarnings->push_back("Waypoint #" + std::to_string(n.id) + " is completely disconnected (orphan).");
+            allValid = false;
+        }
+    }
+
+    return allValid;
 }

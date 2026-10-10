@@ -88,6 +88,13 @@ public:
 
     WaypointAnalysisStats AnalyzeGraph(const class BSPFile* bsp = nullptr, GameMod mod = GameMod::Standard);
 
+    // E-Bot Waypoint Utilities & Optimization
+    size_t DeleteOrphanNodes();
+    size_t FixWaypoints(const class BSPFile* bsp = nullptr);
+    void CalculateWayzone(uint32_t nodeId, const class BSPFile* bsp);
+    size_t CalculateAllWayzones(const class BSPFile* bsp);
+    bool ValidateNodes(std::vector<std::string>* outWarnings = nullptr);
+
 private:
     std::vector<WaypointNode> m_nodes;
     uint32_t m_nextId{1};

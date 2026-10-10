@@ -646,112 +646,118 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             ImGui::EndMenu();
         }
 
-        if (ImGui::BeginMenu("Mesh")) {
+        if (ImGui::BeginMenu("NavMesh")) {
             NavArea* sel = scene.GetSelectedArea();
             bool hasSelection = (scene.GetSelectedAreaID() != 0 || scene.GetSelectedAreaCount() > 0);
 
-            ImGui::TextDisabled("Creation & Geometry");
-            bool drawActive = scene.IsDrawAreaMode();
-            if (ImGui::MenuItem("Draw Area Box...", "N", &drawActive)) {
-                scene.ToggleDrawAreaMode();
-            }
-            bool fillActive = scene.IsFillAreaMode();
-            if (ImGui::MenuItem("Fill Area / Room...", "F", &fillActive)) {
-                scene.ToggleFillAreaMode();
-            }
-            bool bridgeActive = scene.IsBridgeMode();
-            if (ImGui::MenuItem("Bridge Two Edges...", "B", &bridgeActive)) {
-                scene.ToggleBridgeMode();
-            }
-            if (ImGui::MenuItem("Split / Knife Tool", "K", scene.IsKnifeMode())) {
-                scene.ToggleKnifeMode();
-            }
-
-            ImGui::Separator();
-            ImGui::TextDisabled("Transformation & Alignment");
-            if (ImGui::MenuItem("Extrude Selected Edge", "E", false, sel != nullptr)) {
-                scene.ExtrudeSelectedEdge(cmdMgr);
-            }
-            if (ImGui::MenuItem("Split Selected Area", "Shift+X", false, sel != nullptr)) {
-                scene.SplitSelectedArea(cmdMgr);
-            }
-            if (ImGui::MenuItem("Quick Merge Areas", "M", false, hasSelection)) {
-                scene.MergeSelectedArea(cmdMgr);
-            }
-            if (ImGui::MenuItem("Snap Area to Floor", "Space", false, sel != nullptr && scene.HasBSP())) {
-                cmdMgr.ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(&scene, sel->GetID()));
-            }
-            if (ImGui::MenuItem("Snap to Neighbors (Close Gaps)", "Shift+S", false, sel != nullptr)) {
-                scene.SnapSelectedAreaToNeighbors(cmdMgr);
-            }
-
-            ImGui::Separator();
-            ImGui::TextDisabled("Snapping & Behavior Options");
-            bool snapEdgeOnMove = scene.GetSnapToEdgeOnMove();
-            if (ImGui::MenuItem("Snap Edges on Move", nullptr, &snapEdgeOnMove)) {
-                scene.SetSnapToEdgeOnMove(snapEdgeOnMove);
-                scene.GetPreferences().enableSnapToEdgeOnMove = snapEdgeOnMove;
-            }
-            bool autoConnect = scene.GetAutoConnectOnEdgeSnap();
-            if (ImGui::MenuItem("Auto-Connect Touching Edges", nullptr, &autoConnect)) {
-                scene.SetAutoConnectOnEdgeSnap(autoConnect);
-                scene.GetPreferences().autoConnectOnEdgeSnap = autoConnect;
-            }
-            bool extrudeCamFacing = scene.GetExtrudeCameraFacing();
-            if (ImGui::MenuItem("Extrude in Camera Facing Direction", nullptr, &extrudeCamFacing)) {
-                scene.SetExtrudeCameraFacing(extrudeCamFacing);
-                scene.GetPreferences().extrudeCameraFacing = extrudeCamFacing;
-            }
-            bool gridSnap = scene.GetGridSnap();
-            if (ImGui::MenuItem("Snap to Grid", "Shift+W", &gridSnap)) {
-                scene.SetGridSnap(gridSnap);
-            }
-            if (ImGui::BeginMenu("Grid Size")) {
-                float sizes[] = { 1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f, 64.0f, 128.0f, 256.0f, 512.0f };
-                for (float s : sizes) {
-                    char label[32];
-                    std::snprintf(label, sizeof(label), "%.0f units", s);
-                    if (ImGui::MenuItem(label, nullptr, std::abs(scene.GetGridSize() - s) < 0.1f)) {
-                        scene.SetGridSize(s);
-                    }
+            if (ImGui::BeginMenu("Creation & Geometry")) {
+                bool drawActive = scene.IsDrawAreaMode();
+                if (ImGui::MenuItem("Draw Area Box...", "N", &drawActive)) {
+                    scene.ToggleDrawAreaMode();
                 }
-                ImGui::Separator();
-                if (ImGui::MenuItem("Decrease Grid Size", "[")) {
-                    scene.DecreaseGridSize();
+                bool fillActive = scene.IsFillAreaMode();
+                if (ImGui::MenuItem("Fill Area / Room...", "F", &fillActive)) {
+                    scene.ToggleFillAreaMode();
                 }
-                if (ImGui::MenuItem("Increase Grid Size", "]")) {
-                    scene.IncreaseGridSize();
+                bool bridgeActive = scene.IsBridgeMode();
+                if (ImGui::MenuItem("Bridge Two Edges...", "B", &bridgeActive)) {
+                    scene.ToggleBridgeMode();
+                }
+                if (ImGui::MenuItem("Split / Knife Tool", "K", scene.IsKnifeMode())) {
+                    scene.ToggleKnifeMode();
                 }
                 ImGui::EndMenu();
             }
 
-            ImGui::Separator();
-            ImGui::TextDisabled("Quality & Diagnostics");
-            if (ImGui::MenuItem("Optimize Mesh (Merge Coplanar)...", nullptr, false, scene.HasNAV())) {
-                m_optimizeStats = scene.OptimizeMesh(cmdMgr, false);
-                m_showOptimizeModal = true;
-            }
-            if (ImGui::MenuItem("Auto-Crouch & Obstacle Flag Analyzer...", nullptr, false, scene.HasNAV())) {
-                m_analyzerStats = scene.AutoAnalyzeFlags(cmdMgr, false);
-                m_analyzerTargetWaypoints = false;
-                m_showAnalyzerModal = true;
-            }
-            if (ImGui::MenuItem("Disconnected Islands Finder...", nullptr, m_showIslandModal, scene.HasNAV())) {
-                m_showIslandModal = true;
-            }
-            if (ImGui::MenuItem("Mesh Diagnostics (\"Mesh Doctor\")...", nullptr, m_showDiagnosticsModal, scene.HasNAV())) {
-                scene.RunDiagnostics();
-                m_showDiagnosticsModal = true;
+            if (ImGui::BeginMenu("Transformation & Alignment")) {
+                if (ImGui::MenuItem("Extrude Selected Edge", "E", false, sel != nullptr)) {
+                    scene.ExtrudeSelectedEdge(cmdMgr);
+                }
+                if (ImGui::MenuItem("Split Selected Area", "Shift+X", false, sel != nullptr)) {
+                    scene.SplitSelectedArea(cmdMgr);
+                }
+                if (ImGui::MenuItem("Quick Merge Areas", "M", false, hasSelection)) {
+                    scene.MergeSelectedArea(cmdMgr);
+                }
+                if (ImGui::MenuItem("Snap Area to Floor", "Space", false, sel != nullptr && scene.HasBSP())) {
+                    cmdMgr.ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(&scene, sel->GetID()));
+                }
+                if (ImGui::MenuItem("Snap to Neighbors (Close Gaps)", "Shift+S", false, sel != nullptr)) {
+                    scene.SnapSelectedAreaToNeighbors(cmdMgr);
+                }
+                ImGui::EndMenu();
             }
 
-            ImGui::Separator();
-            ImGui::TextDisabled("Auto-Generation");
-            if (ImGui::MenuItem("Auto-Generate NavMesh...", "Ctrl+G", false, scene.HasBSP())) {
-                m_showGenerateModal = true;
-                m_generateStatusText.clear();
+            if (ImGui::BeginMenu("Snapping & Grid")) {
+                bool snapEdgeOnMove = scene.GetSnapToEdgeOnMove();
+                if (ImGui::MenuItem("Snap Edges on Move", nullptr, &snapEdgeOnMove)) {
+                    scene.SetSnapToEdgeOnMove(snapEdgeOnMove);
+                    scene.GetPreferences().enableSnapToEdgeOnMove = snapEdgeOnMove;
+                }
+                bool autoConnect = scene.GetAutoConnectOnEdgeSnap();
+                if (ImGui::MenuItem("Auto-Connect Touching Edges", nullptr, &autoConnect)) {
+                    scene.SetAutoConnectOnEdgeSnap(autoConnect);
+                    scene.GetPreferences().autoConnectOnEdgeSnap = autoConnect;
+                }
+                bool extrudeCamFacing = scene.GetExtrudeCameraFacing();
+                if (ImGui::MenuItem("Extrude in Camera Facing Direction", nullptr, &extrudeCamFacing)) {
+                    scene.SetExtrudeCameraFacing(extrudeCamFacing);
+                    scene.GetPreferences().extrudeCameraFacing = extrudeCamFacing;
+                }
+                bool gridSnap = scene.GetGridSnap();
+                if (ImGui::MenuItem("Snap to Grid", "Shift+W", &gridSnap)) {
+                    scene.SetGridSnap(gridSnap);
+                }
+                if (ImGui::BeginMenu("Grid Size")) {
+                    float sizes[] = { 1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f, 64.0f, 128.0f, 256.0f, 512.0f };
+                    for (float s : sizes) {
+                        char label[32];
+                        std::snprintf(label, sizeof(label), "%.0f units", s);
+                        if (ImGui::MenuItem(label, nullptr, std::abs(scene.GetGridSize() - s) < 0.1f)) {
+                            scene.SetGridSize(s);
+                        }
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Decrease Grid Size", "[")) {
+                        scene.DecreaseGridSize();
+                    }
+                    if (ImGui::MenuItem("Increase Grid Size", "]")) {
+                        scene.IncreaseGridSize();
+                    }
+                    ImGui::EndMenu();
+                }
+                ImGui::EndMenu();
             }
-            if (ImGui::MenuItem("Batch Generate NavMeshes...", nullptr)) {
-                m_showBatchGenerateModal = true;
+
+            if (ImGui::BeginMenu("Quality & Diagnostics")) {
+                if (ImGui::MenuItem("Optimize Mesh (Merge Coplanar)...", nullptr, false, scene.HasNAV())) {
+                    m_optimizeStats = scene.OptimizeMesh(cmdMgr, false);
+                    m_showOptimizeModal = true;
+                }
+                if (ImGui::MenuItem("Auto-Crouch & Obstacle Flag Analyzer...", nullptr, false, scene.HasNAV())) {
+                    m_analyzerStats = scene.AutoAnalyzeFlags(cmdMgr, false);
+                    m_analyzerTargetWaypoints = false;
+                    m_showAnalyzerModal = true;
+                }
+                if (ImGui::MenuItem("Disconnected Islands Finder...", nullptr, m_showIslandModal, scene.HasNAV())) {
+                    m_showIslandModal = true;
+                }
+                if (ImGui::MenuItem("Mesh Diagnostics (\"Mesh Doctor\")...", nullptr, m_showDiagnosticsModal, scene.HasNAV())) {
+                    scene.RunDiagnostics();
+                    m_showDiagnosticsModal = true;
+                }
+                ImGui::EndMenu();
+            }
+
+            if (ImGui::BeginMenu("Auto-Generation")) {
+                if (ImGui::MenuItem("Auto-Generate NavMesh...", "Ctrl+G", false, scene.HasBSP())) {
+                    m_showGenerateModal = true;
+                    m_generateStatusText.clear();
+                }
+                if (ImGui::MenuItem("Batch Generate NavMeshes...", nullptr)) {
+                    m_showBatchGenerateModal = true;
+                }
+                ImGui::EndMenu();
             }
 
             ImGui::EndMenu();
@@ -762,83 +768,189 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             if (ImGui::MenuItem("Show Bot Waypoints", "F6", &showWpts)) {
                 scene.SetShowWaypoints(showWpts);
             }
+            bool isWptMode = scene.IsWaypointMode();
+            if (ImGui::MenuItem("Waypoint Editing Mode", nullptr, &isWptMode)) {
+                scene.SetTargetMode(isWptMode ? EditorScene::TARGET_WAYPOINTS : EditorScene::TARGET_NAVMESH);
+            }
 
             ImGui::Separator();
-            ImGui::TextDisabled("File Operations");
-            if (ImGui::MenuItem("Open Bot Waypoints...")) {
-                std::string path = FileDialog::OpenFile(
-                    "Bot Waypoints (*.ewp;*.spt;*.pwf;*.wpt)\0*.ewp;*.spt;*.pwf;*.wpt\0"
-                    "CS-EBOT Waypoints (*.ewp)\0*.ewp\0"
-                    "SyPB Waypoints (*.spt;*.pwf)\0*.spt;*.pwf\0"
-                    "YaPB Waypoints (*.pwf)\0*.pwf\0"
-                    "POD-Bot Waypoints (*.wpt)\0*.wpt\0"
-                    "All Files (*.*)\0*.*\0",
-                    "Open Bot Waypoint Graph"
-                );
-                if (!path.empty()) {
-                    scene.LoadWaypoints(path);
+            if (ImGui::BeginMenu("File Operations")) {
+                if (ImGui::MenuItem("Open Bot Waypoints...")) {
+                    std::string path = FileDialog::OpenFile(
+                        "Bot Waypoints (*.ewp;*.spt;*.pwf;*.wpt)\0*.ewp;*.spt;*.pwf;*.wpt\0"
+                        "CS-EBOT Waypoints (*.ewp)\0*.ewp\0"
+                        "SyPB Waypoints (*.spt;*.pwf)\0*.spt;*.pwf\0"
+                        "YaPB Waypoints (*.pwf)\0*.pwf\0"
+                        "POD-Bot Waypoints (*.wpt)\0*.wpt\0"
+                        "All Files (*.*)\0*.*\0",
+                        "Open Bot Waypoint Graph"
+                    );
+                    if (!path.empty()) {
+                        scene.LoadWaypoints(path);
+                    }
                 }
-            }
-            if (ImGui::MenuItem("Save Bot Waypoints...", nullptr, false, scene.HasWaypoints())) {
-                OpenWaypointExportModal();
-            }
-            if (ImGui::MenuItem("Unload Bot Waypoints", nullptr, false, scene.HasWaypoints())) {
-                scene.UnloadWaypoints();
-            }
-
-            ImGui::Separator();
-            ImGui::TextDisabled("Auto-Generation");
-            if (ImGui::MenuItem("Generate CS-EBOT Waypoints (Auto)...", nullptr, false, scene.HasBSP())) {
-                m_showEBotGenModal = true;
+                if (ImGui::MenuItem("Save Bot Waypoints...", nullptr, false, scene.HasWaypoints())) {
+                    OpenWaypointExportModal();
+                }
+                if (ImGui::MenuItem("Unload Bot Waypoints", nullptr, false, scene.HasWaypoints())) {
+                    scene.UnloadWaypoints();
+                }
+                ImGui::EndMenu();
             }
 
-            ImGui::Separator();
-            ImGui::TextDisabled("Analysis & Linking");
-            if (ImGui::MenuItem("Auto-Analyze Bot Waypoints (CS-EBOT / YaPB)...", nullptr, false, scene.HasWaypoints())) {
-                m_waypointAnalyzerStats = scene.AutoAnalyzeWaypoints();
-                m_analyzerTargetWaypoints = true;
-                m_showAnalyzerModal = true;
-            }
-            if (ImGui::MenuItem("Auto-Link Nearby Waypoints", nullptr, false, scene.HasWaypoints())) {
-                size_t links = scene.GetWaypoints().AutoLinkNodes();
-                scene.ShowToast("Auto-linked " + std::to_string(links) + " waypoint connections!");
-                scene.RebuildWaypointRenderer();
-            }
-            if (ImGui::MenuItem("Clear All Waypoints", nullptr, false, scene.HasWaypoints())) {
-                scene.GetWaypoints().Clear();
-                scene.RebuildWaypointRenderer();
-                scene.ShowToast("Cleared all bot waypoints");
+            if (ImGui::BeginMenu("E-Bot Interactive Tools")) {
+                bool addWptActive = scene.IsAddWaypointMode();
+                if (ImGui::MenuItem("Add Waypoint Tool", "N", &addWptActive)) {
+                    scene.ToggleAddWaypointMode();
+                }
+                bool fillActive = scene.IsFillAreaMode() && scene.IsWaypointMode();
+                if (ImGui::MenuItem("Flood Fill Room Waypoints", "F", &fillActive)) {
+                    scene.SetTargetMode(EditorScene::TARGET_WAYPOINTS);
+                    scene.ToggleFillAreaMode();
+                }
+                uint32_t selWpt = scene.GetSelectedWaypointID();
+                if (ImGui::MenuItem("Connect Selected Waypoint", "C", false, selWpt != 0)) {
+                    scene.StartConnectMode();
+                }
+                if (ImGui::MenuItem("Snap Selected to Floor", "Space", false, selWpt != 0 && scene.HasBSP())) {
+                    scene.SnapSelectedWaypointToFloor();
+                }
+                if (ImGui::MenuItem("Delete Selected Waypoint", "Delete / X", false, selWpt != 0)) {
+                    scene.DeleteSelectedWaypoint();
+                }
+                ImGui::EndMenu();
             }
 
-            ImGui::Separator();
-            ImGui::TextDisabled("Format Conversion");
-            if (ImGui::MenuItem("Convert NAV to Bot Waypoints...", nullptr, false, scene.HasNAV())) {
-                OpenNavToWaypointModal();
+            if (ImGui::BeginMenu("CS-EBOT Cache & Linking")) {
+                uint32_t selWpt = scene.GetSelectedWaypointID();
+                uint32_t cachedWpt = scene.GetCachedWaypointID();
+                char cacheLbl[64];
+                if (cachedWpt != 0) {
+                    std::snprintf(cacheLbl, sizeof(cacheLbl), "Cache Selected (Current: #%u)", cachedWpt);
+                } else {
+                    std::snprintf(cacheLbl, sizeof(cacheLbl), "Cache Selected (None cached)");
+                }
+                if (ImGui::MenuItem(cacheLbl, nullptr, false, selWpt != 0)) {
+                    scene.CacheWaypoint(selWpt);
+                }
+
+                if (ImGui::BeginMenu("Create Link to Cached", cachedWpt != 0 && selWpt != 0 && cachedWpt != selWpt)) {
+                    if (ImGui::MenuItem("Bothways (2-Way)")) scene.CreateConnectionToCached(2);
+                    if (ImGui::MenuItem("Outgoing (Cached -> Selected)")) scene.CreateConnectionToCached(0);
+                    if (ImGui::MenuItem("Incoming (Selected -> Cached)")) scene.CreateConnectionToCached(1);
+                    if (ImGui::MenuItem("Jumping Link")) scene.CreateConnectionToCached(3);
+                    if (ImGui::MenuItem("Double-Jump Boost Link")) scene.CreateConnectionToCached(5);
+                    ImGui::EndMenu();
+                }
+                if (ImGui::MenuItem("Delete Link with Cached", nullptr, false, cachedWpt != 0 && selWpt != 0 && cachedWpt != selWpt)) {
+                    scene.DeleteConnectionToCached();
+                }
+                if (ImGui::MenuItem("Teleport Camera to Cached", nullptr, false, cachedWpt != 0)) {
+                    scene.TeleportCameraToWaypoint(cachedWpt, camera);
+                }
+                ImGui::EndMenu();
             }
-            if (ImGui::MenuItem("Convert Bot Waypoints to NAV", nullptr, false, scene.HasWaypoints())) {
-                scene.ConvertWaypointsToNav();
+
+            if (ImGui::BeginMenu("Wayzone Radius")) {
+                uint32_t selWpt = scene.GetSelectedWaypointID();
+                if (ImGui::MenuItem("Calculate Wayzone for Selected (Raycast)", nullptr, false, selWpt != 0 && scene.HasBSP())) {
+                    scene.GetWaypoints().CalculateWayzone(selWpt, &scene.GetBSP());
+                    scene.RebuildWaypointRenderer();
+                    scene.ShowToast("Calculated wayzone radius for Waypoint #" + std::to_string(selWpt));
+                }
+                if (ImGui::MenuItem("Calculate All Wayzones for Entire Map", nullptr, false, scene.HasWaypoints() && scene.HasBSP())) {
+                    size_t count = scene.GetWaypoints().CalculateAllWayzones(&scene.GetBSP());
+                    scene.RebuildWaypointRenderer();
+                    scene.ShowToast("Calculated wayzones for " + std::to_string(count) + " waypoints");
+                }
+                ImGui::Separator();
+                if (ImGui::BeginMenu("Set Radius Presets for Selected", selWpt != 0)) {
+                    float presets[] = { 0.0f, 8.0f, 16.0f, 32.0f, 48.0f, 64.0f, 80.0f, 96.0f, 128.0f };
+                    auto* node = scene.GetWaypoints().GetNode(selWpt);
+                    for (float r : presets) {
+                        char pLbl[32];
+                        std::snprintf(pLbl, sizeof(pLbl), "%.0f units", r);
+                        if (ImGui::MenuItem(pLbl, nullptr, node && std::abs(node->radius - r) < 0.1f)) {
+                            if (node) {
+                                node->radius = r;
+                                scene.RebuildWaypointRenderer();
+                            }
+                        }
+                    }
+                    ImGui::EndMenu();
+                }
+                ImGui::EndMenu();
             }
-            if (ImGui::MenuItem("Export Waypoints for AMXX Pawn...", nullptr, false, scene.HasWaypoints() || scene.HasNAV())) {
-                m_showPawnExportModal = true;
+
+            if (ImGui::BeginMenu("Fix & Optimize")) {
+                if (ImGui::MenuItem("Fix Waypoints (CS-EBOT: Prune Jumps & LOS)", nullptr, false, scene.HasWaypoints() && scene.HasBSP())) {
+                    size_t fixed = scene.GetWaypoints().FixWaypoints(&scene.GetBSP());
+                    scene.RebuildWaypointRenderer();
+                    scene.ShowToast("Fixed waypoints: pruned " + std::to_string(fixed) + " invalid links");
+                }
+                if (ImGui::MenuItem("Delete Orphan Nodes (0 Connections)", nullptr, false, scene.HasWaypoints())) {
+                    size_t removed = scene.GetWaypoints().DeleteOrphanNodes();
+                    scene.RebuildWaypointRenderer();
+                    scene.ShowToast("Deleted " + std::to_string(removed) + " orphan waypoints");
+                }
+                if (ImGui::MenuItem("Validate All Nodes", nullptr, false, scene.HasWaypoints())) {
+                    bool valid = scene.GetWaypoints().ValidateNodes();
+                    scene.ShowToast(valid ? "All waypoint connections are valid." : "Found and repaired invalid connections!");
+                    scene.RebuildWaypointRenderer();
+                }
+                if (ImGui::MenuItem("Auto-Link Nearby Waypoints", nullptr, false, scene.HasWaypoints())) {
+                    size_t links = scene.GetWaypoints().AutoLinkNodes();
+                    scene.ShowToast("Auto-linked " + std::to_string(links) + " waypoint connections!");
+                    scene.RebuildWaypointRenderer();
+                }
+                if (ImGui::MenuItem("Auto-Analyze Bot Waypoints (CS-EBOT / YaPB)...", nullptr, false, scene.HasWaypoints())) {
+                    m_waypointAnalyzerStats = scene.AutoAnalyzeWaypoints();
+                    m_analyzerTargetWaypoints = true;
+                    m_showAnalyzerModal = true;
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Clear All Waypoints", nullptr, false, scene.HasWaypoints())) {
+                    scene.GetWaypoints().Clear();
+                    scene.RebuildWaypointRenderer();
+                    scene.ShowToast("Cleared all bot waypoints");
+                }
+                ImGui::EndMenu();
+            }
+
+            if (ImGui::BeginMenu("Generation & Conversion")) {
+                if (ImGui::MenuItem("Generate CS-EBOT Waypoints (Auto)...", nullptr, false, scene.HasBSP())) {
+                    m_showEBotGenModal = true;
+                }
+                if (ImGui::MenuItem("Convert NAV to Bot Waypoints...", nullptr, false, scene.HasNAV())) {
+                    OpenNavToWaypointModal();
+                }
+                if (ImGui::MenuItem("Convert Bot Waypoints to NAV", nullptr, false, scene.HasWaypoints())) {
+                    scene.ConvertWaypointsToNav();
+                }
+                if (ImGui::MenuItem("Export Waypoints for AMXX Pawn...", nullptr, false, scene.HasWaypoints() || scene.HasNAV())) {
+                    m_showPawnExportModal = true;
+                }
+                ImGui::EndMenu();
             }
 
             ImGui::EndMenu();
         }
 
         if (ImGui::BeginMenu("Tools")) {
-            ImGui::TextDisabled("Simulation & Inspection");
-            if (ImGui::MenuItem("Interactive Path Simulator", "P", m_showPathPanel || scene.IsPathToolActive(), scene.HasNAV())) {
-                scene.TogglePathTool();
-                m_showPathPanel = scene.IsPathToolActive();
-            }
-            if (ImGui::MenuItem("Player Clearance Hull Visualizer", "H", scene.GetShowClearanceHull(), scene.HasNAV())) {
-                scene.ToggleClearanceHull();
-            }
-            if (ImGui::MenuItem("Marquee Box Selection", "Shift+B", scene.IsBoxSelectMode(), scene.HasNAV())) {
-                scene.ToggleBoxSelectMode();
+            if (ImGui::BeginMenu("Simulation & Hull")) {
+                if (ImGui::MenuItem("Interactive Path Simulator", "P", m_showPathPanel || scene.IsPathToolActive(), scene.HasNAV())) {
+                    scene.TogglePathTool();
+                    m_showPathPanel = scene.IsPathToolActive();
+                }
+                if (ImGui::MenuItem("Player Clearance Hull Visualizer", "H", scene.GetShowClearanceHull(), scene.HasNAV())) {
+                    scene.ToggleClearanceHull();
+                }
+                if (ImGui::MenuItem("Marquee Box Selection", "Shift+B", scene.IsBoxSelectMode(), scene.HasNAV())) {
+                    scene.ToggleBoxSelectMode();
+                }
+                ImGui::EndMenu();
             }
 
-            ImGui::Separator();
             if (ImGui::BeginMenu("Ladder Tools")) {
                 if (ImGui::MenuItem("Build Ladders from BSP (func_ladder)", nullptr, false, scene.HasBSP() && scene.HasNAV())) {
                     scene.BuildLaddersFromBSP();
@@ -852,22 +964,23 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                 ImGui::EndMenu();
             }
 
-            ImGui::Separator();
-            ImGui::TextDisabled("World Navigation");
-            if (ImGui::MenuItem("Teleport to Landmark...", "Ctrl+L", false, scene.HasBSP())) {
-                m_showLandmarksModal = true;
-            }
-            if (ImGui::MenuItem("Take Screenshot", "F12")) {
-                std::filesystem::create_directories("screenshots");
-                auto now = std::chrono::system_clock::now();
-                auto in_time_t = std::chrono::system_clock::to_time_t(now);
-                std::stringstream ss;
-                ss << "screenshots/navstudio_" << (scene.GetBSPName().empty() ? "map" : scene.GetBSPName()) << "_" << in_time_t << ".bmp";
-                std::string sPath = ss.str();
-                extern bool SaveScreenToBMP(const char* filepath);
-                if (SaveScreenToBMP(sPath.c_str())) {
-                    scene.ShowToast("Saved screenshot: " + sPath);
+            if (ImGui::BeginMenu("Navigation & Utilities")) {
+                if (ImGui::MenuItem("Teleport to Landmark / Spawn...", "Ctrl+L", false, scene.HasBSP())) {
+                    m_showLandmarksModal = true;
                 }
+                if (ImGui::MenuItem("Take Screenshot", "F12")) {
+                    std::filesystem::create_directories("screenshots");
+                    auto now = std::chrono::system_clock::now();
+                    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+                    std::stringstream ss;
+                    ss << "screenshots/navstudio_" << (scene.GetBSPName().empty() ? "map" : scene.GetBSPName()) << "_" << in_time_t << ".bmp";
+                    std::string sPath = ss.str();
+                    extern bool SaveScreenToBMP(const char* filepath);
+                    if (SaveScreenToBMP(sPath.c_str())) {
+                        scene.ShowToast("Saved screenshot: " + sPath);
+                    }
+                }
+                ImGui::EndMenu();
             }
 
             ImGui::EndMenu();
@@ -1074,8 +1187,234 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 }
 
 void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
-    ImGui::SetNextWindowSize(ImVec2(190, 420), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(210, 480), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Tool Palette")) {
+        // Mode Switcher: NavMesh Mode vs E-Bot Waypoints Mode
+        EditorScene::EditorTargetMode curTarget = scene.GetTargetMode();
+        float modeBtnW = (ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f;
+
+        bool isNavTarget = (curTarget == EditorScene::TARGET_NAVMESH);
+        if (isNavTarget) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.48f, 0.85f, 1.0f));
+        if (ImGui::Button("NavMesh Mode", ImVec2(modeBtnW, 26))) {
+            scene.SetTargetMode(EditorScene::TARGET_NAVMESH);
+        }
+        if (isNavTarget) ImGui::PopStyleColor();
+
+        ImGui::SameLine();
+        bool isWptTarget = (curTarget == EditorScene::TARGET_WAYPOINTS);
+        if (isWptTarget) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.50f, 0.15f, 1.0f));
+        if (ImGui::Button("Waypoints Mode", ImVec2(modeBtnW, 26))) {
+            scene.SetTargetMode(EditorScene::TARGET_WAYPOINTS);
+            scene.SetShowWaypoints(true);
+        }
+        if (isWptTarget) ImGui::PopStyleColor();
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (curTarget == EditorScene::TARGET_WAYPOINTS) {
+            ImGui::TextColored(ImVec4(0.9f, 0.65f, 0.2f, 1.0f), "E-Bot Waypoint Palette");
+
+            // Placement Tool
+            bool addWptActive = scene.IsAddWaypointMode();
+            if (addWptActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.45f, 0.15f, 1.0f));
+            if (ImGui::Button(addWptActive ? "Exit Add Mode [Esc]" : "Add Waypoint [N]", ImVec2(-1, 26))) {
+                scene.ToggleAddWaypointMode();
+            }
+            if (addWptActive) ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click on floor or geometry to drop a waypoint at cursor");
+
+            bool fillActive = scene.IsFillAreaMode();
+            if (fillActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.45f, 0.15f, 1.0f));
+            if (ImGui::Button(fillActive ? "Cancel Fill [Esc]" : "Fill Room / Area [F]", ImVec2(-1, 26))) {
+                scene.ToggleFillAreaMode();
+            }
+            if (fillActive) ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click on room floor to flood-fill connected waypoints across the room [F]");
+
+            bool autoCon = scene.GetAutoConnectWaypoints();
+            if (ImGui::Checkbox("Auto-Connect on Place", &autoCon)) {
+                scene.SetAutoConnectWaypoints(autoCon);
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Automatically link new waypoint to nearest visible waypoints within 300 units");
+
+            ImGui::Spacing();
+            ImGui::Text("Waypoint Type to Place:");
+            const char* wptTypeNames[] = {
+                "0: Normal / Crossing",
+                "1: Terrorist Only",
+                "2: CT Only",
+                "3: Avoid Danger",
+                "4: Rescue / Hostage",
+                "5: Camp / Ambush",
+                "6: Button / Use",
+                "100: Mission Goal",
+                "104: Zombie Camp",
+                "105: Human Camp Mesh"
+            };
+            uint32_t flagValues[] = {
+                WPT_FLAG_CROSSING,
+                WPT_FLAG_TERRORIST,
+                WPT_FLAG_COUNTER,
+                WPT_FLAG_FALLRISK,
+                WPT_FLAG_RESCUE,
+                WPT_FLAG_CAMP,
+                WPT_FLAG_USEBUTTON,
+                WPT_FLAG_GOAL,
+                WPT_FLAG_ZMHMCAMP,
+                WPT_FLAG_HMCAMPMESH
+            };
+            int curTypeIdx = 0;
+            uint32_t curFlags = scene.GetActiveWaypointAddFlags();
+            for (int i = 0; i < 10; ++i) {
+                if (curFlags == flagValues[i]) {
+                    curTypeIdx = i;
+                    break;
+                }
+            }
+            if (ImGui::Combo("##WptTypeCombo", &curTypeIdx, wptTypeNames, 10)) {
+                scene.SetActiveWaypointAddFlags(flagValues[curTypeIdx]);
+            }
+
+            ImGui::Spacing();
+            ImGui::Text("Wayzone Radius: %.0f u", scene.GetActiveWaypointAddRadius());
+            float curR = scene.GetActiveWaypointAddRadius();
+            const float rPresets[] = { 0.0f, 8.0f, 16.0f, 32.0f, 48.0f, 64.0f, 80.0f, 96.0f, 128.0f };
+            float rBtnW = (ImGui::GetContentRegionAvail().x - 16.0f) / 5.0f;
+            for (int i = 0; i < 5; ++i) {
+                if (i > 0) ImGui::SameLine(0.0f, 4.0f);
+                char lbl[16];
+                std::snprintf(lbl, sizeof(lbl), "%.0f##rad%d", rPresets[i], i);
+                if (std::abs(curR - rPresets[i]) < 0.1f) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.50f, 0.15f, 1.0f));
+                if (ImGui::Button(lbl, ImVec2(rBtnW, 20))) scene.SetActiveWaypointAddRadius(rPresets[i]);
+                if (std::abs(curR - rPresets[i]) < 0.1f) ImGui::PopStyleColor();
+            }
+            for (int i = 5; i < 9; ++i) {
+                if (i > 5) ImGui::SameLine(0.0f, 4.0f);
+                char lbl[16];
+                std::snprintf(lbl, sizeof(lbl), "%.0f##rad%d", rPresets[i], i);
+                if (std::abs(curR - rPresets[i]) < 0.1f) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.50f, 0.15f, 1.0f));
+                if (ImGui::Button(lbl, ImVec2(rBtnW, 20))) scene.SetActiveWaypointAddRadius(rPresets[i]);
+                if (std::abs(curR - rPresets[i]) < 0.1f) ImGui::PopStyleColor();
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            ImGui::Text("Path Connection Tool:");
+            const char* conTypeNames[] = {
+                "0: Outgoing (1-Way)",
+                "1: Incoming (1-Way)",
+                "2: Bothways (2-Way)",
+                "3: Jumping Link",
+                "4: Crouch Link",
+                "5: Boost Link"
+            };
+            int curCon = scene.GetWaypointConnectType();
+            if (ImGui::Combo("Link Type", &curCon, conTypeNames, 6)) {
+                scene.SetWaypointConnectType(curCon);
+            }
+
+            bool connectActive = (scene.GetTransformMode() == EditorScene::TRANSFORM_CONNECT && scene.GetSelectedWaypointID() != 0);
+            if (connectActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.45f, 0.15f, 1.0f));
+            if (ImGui::Button(connectActive ? "Cancel Connect [Esc]" : "Connect Tool [C]", ImVec2(-1, 26))) {
+                if (connectActive) scene.CancelTransform();
+                else scene.StartConnectMode();
+            }
+            if (connectActive) ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click from-waypoint then click to-waypoint to create connection [C]");
+
+            ImGui::Spacing();
+            ImGui::Text("CS-EBOT Cache Workflow:");
+            uint32_t selWpt = scene.GetSelectedWaypointID();
+            uint32_t cachedWpt = scene.GetCachedWaypointID();
+            if (cachedWpt != 0) {
+                ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1.0f), "Cached Node: #%u", cachedWpt);
+            } else {
+                ImGui::TextDisabled("No node cached");
+            }
+
+            float cBtnW = (ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f;
+            if (ImGui::Button("Cache Selected", ImVec2(cBtnW, 22))) {
+                scene.CacheWaypoint();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Link to Cached", ImVec2(cBtnW, 22))) {
+                scene.CreateConnectionToCached(scene.GetWaypointConnectType());
+            }
+
+            if (ImGui::Button("Delete Link with Cached", ImVec2(-1, 22))) {
+                scene.DeleteConnectionToCached();
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            ImGui::Text("Selected Node Actions:");
+            if (ImGui::Button("Snap to Floor [Space]", ImVec2(-1, 24))) {
+                scene.SnapSelectedWaypointToFloor();
+            }
+            if (ImGui::Button("Calculate Wayzone (Raycast)", ImVec2(-1, 24))) {
+                if (selWpt != 0 && scene.HasBSP()) {
+                    scene.GetWaypoints().CalculateWayzone(selWpt, &scene.GetBSP());
+                    scene.RebuildWaypointRenderer();
+                    scene.ShowToast("Calculated wayzone radius for Waypoint #" + std::to_string(selWpt));
+                }
+            }
+            if (ImGui::Button("Delete Node [Delete / X]", ImVec2(-1, 24))) {
+                scene.DeleteSelectedWaypoint();
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            ImGui::Text("Fix & Optimization Tools:");
+            if (ImGui::Button("Fix Waypoints", ImVec2(-1, 24))) {
+                if (scene.HasBSP() && scene.HasWaypoints()) {
+                    size_t fixed = scene.GetWaypoints().FixWaypoints(&scene.GetBSP());
+                    scene.RebuildWaypointRenderer();
+                    scene.ShowToast("Fixed waypoints: pruned " + std::to_string(fixed) + " invalid links");
+                }
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Prunes links through solid BSP walls and links with vertical gap > 72u");
+
+            if (ImGui::Button("Delete Orphan Nodes", ImVec2(-1, 24))) {
+                if (scene.HasWaypoints()) {
+                    size_t removed = scene.GetWaypoints().DeleteOrphanNodes();
+                    scene.RebuildWaypointRenderer();
+                    scene.ShowToast("Deleted " + std::to_string(removed) + " orphan waypoints");
+                }
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Removes isolated waypoints with 0 incoming or outgoing connections");
+
+            if (ImGui::Button("Calculate All Wayzones", ImVec2(-1, 24))) {
+                if (scene.HasBSP() && scene.HasWaypoints()) {
+                    size_t count = scene.GetWaypoints().CalculateAllWayzones(&scene.GetBSP());
+                    scene.RebuildWaypointRenderer();
+                    scene.ShowToast("Calculated wayzones for " + std::to_string(count) + " waypoints");
+                }
+            }
+
+            if (ImGui::Button("Auto-Link Nearby Nodes", ImVec2(-1, 24))) {
+                if (scene.HasWaypoints()) {
+                    size_t created = scene.GetWaypoints().AutoLinkNodes();
+                    scene.RebuildWaypointRenderer();
+                    scene.ShowToast("Auto-linked " + std::to_string(created) + " waypoint connections");
+                }
+            }
+
+            if (ImGui::Button("Generate CS-EBOT (Auto)...", ImVec2(-1, 24))) {
+                m_showEBotGenModal = true;
+            }
+
+            ImGui::End();
+            return;
+        }
+
         ImGui::Text("File Actions:");
         if (ImGui::Button("Open BSP Map...", ImVec2(-1, 26))) {
             std::string path = FileDialog::OpenFile(FileDialog::kBSPFilter, "Open GoldSrc BSP Map");
@@ -4983,6 +5322,38 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
         ImGui::SetTooltip("Navigation tolerance zone around node (0-255 units)");
     }
 
+    const float rPresets[] = { 0.0f, 8.0f, 16.0f, 32.0f, 48.0f, 64.0f, 80.0f, 96.0f, 128.0f };
+    float rBtnW = (ImGui::GetContentRegionAvail().x - 16.0f) / 5.0f;
+    for (int i = 0; i < 5; ++i) {
+        if (i > 0) ImGui::SameLine(0.0f, 4.0f);
+        char lbl[16];
+        std::snprintf(lbl, sizeof(lbl), "%.0f##insp_rad%d", rPresets[i], i);
+        if (std::abs(node->radius - rPresets[i]) < 0.1f) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.50f, 0.15f, 1.0f));
+        if (ImGui::Button(lbl, ImVec2(rBtnW, 20))) {
+            node->radius = rPresets[i];
+            scene.RebuildWaypointRenderer();
+        }
+        if (std::abs(node->radius - rPresets[i]) < 0.1f) ImGui::PopStyleColor();
+    }
+    for (int i = 5; i < 9; ++i) {
+        if (i > 5) ImGui::SameLine(0.0f, 4.0f);
+        char lbl[16];
+        std::snprintf(lbl, sizeof(lbl), "%.0f##insp_rad%d", rPresets[i], i);
+        if (std::abs(node->radius - rPresets[i]) < 0.1f) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.50f, 0.15f, 1.0f));
+        if (ImGui::Button(lbl, ImVec2(rBtnW, 20))) {
+            node->radius = rPresets[i];
+            scene.RebuildWaypointRenderer();
+        }
+        if (std::abs(node->radius - rPresets[i]) < 0.1f) ImGui::PopStyleColor();
+    }
+    if (ImGui::Button("Calculate Wayzone (Raycast)", ImVec2(-1, 22))) {
+        if (scene.HasBSP()) {
+            scene.GetWaypoints().CalculateWayzone(node->id, &scene.GetBSP());
+            scene.RebuildWaypointRenderer();
+            scene.ShowToast("Calculated wayzone radius for Waypoint #" + std::to_string(node->id));
+        }
+    }
+
     // Camp Pitch & Yaw
     ImGui::Spacing();
     ImGui::Text("Aim / Camp Orientation:");
@@ -5128,16 +5499,20 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
     ImGui::Separator();
     ImGui::Spacing();
 
-    if (ImGui::Button("Snap to Floor [Space]", ImVec2(-1, 24))) {
-        if (scene.HasBSP()) {
-            Vector3 start(node->origin.x, node->origin.y, node->origin.z + 32.0f);
-            Vector3 end(node->origin.x, node->origin.y, node->origin.z - 4096.0f);
-            BSPTraceResult tr;
-            if (scene.GetBSP().TraceWorld(start, end, HULL_POINT, &tr) && !tr.startsolid && !tr.allsolid) {
-                node->origin.z = tr.endpos.z + 18.0f;
-                scene.RebuildWaypointRenderer();
-            }
+    uint32_t cachedWpt = scene.GetCachedWaypointID();
+    if (ImGui::Button("Cache this Waypoint", ImVec2(-1, 22))) {
+        scene.CacheWaypoint(node->id);
+    }
+    if (cachedWpt != 0 && cachedWpt != node->id) {
+        char linkCachedLbl[64];
+        std::snprintf(linkCachedLbl, sizeof(linkCachedLbl), "Link with Cached (#%u)", cachedWpt);
+        if (ImGui::Button(linkCachedLbl, ImVec2(-1, 22))) {
+            scene.CreateConnectionToCached(scene.GetWaypointConnectType());
         }
+    }
+
+    if (ImGui::Button("Snap to Floor [Space]", ImVec2(-1, 24))) {
+        scene.SnapSelectedWaypointToFloor();
     }
 
     if (ImGui::Button("Deselect [Escape]", ImVec2(-1, 24))) {
@@ -5146,11 +5521,7 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
 
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.25f, 0.2f, 1.0f));
     if (ImGui::Button("Delete Waypoint [Delete]", ImVec2(-1, 24))) {
-        uint32_t toDel = node->id;
-        scene.SelectWaypoint(0);
-        scene.GetWaypoints().DeleteNode(toDel);
-        scene.RebuildWaypointRenderer();
-        scene.ShowToast("Waypoint #" + std::to_string(toDel) + " deleted.");
+        scene.DeleteSelectedWaypoint();
     }
     ImGui::PopStyleColor();
 }

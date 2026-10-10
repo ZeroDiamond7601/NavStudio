@@ -163,6 +163,10 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
 
     if (button == GLFW_MOUSE_BUTTON_RIGHT) {
         if (action == GLFW_PRESS) {
+            if (g_activeScene && g_activeScene->IsAddWaypointMode()) {
+                g_activeScene->SetAddWaypointMode(false);
+                return;
+            }
             if (g_activeScene && g_activeScene->IsBridgeMode()) {
                 g_activeScene->CancelBridgeMode();
                 return;
@@ -255,11 +259,27 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                 return;
             }
 
-            // Fill Area Mode Left Click: Click floor to generate room NavMesh
+            // Waypoint Quick Add Tool Left Click: Click floor to place waypoint
+            if (g_activeScene->IsAddWaypointMode()) {
+                uint32_t wid = g_activeScene->OnAddWaypointClick(ray);
+                if (wid != 0) {
+                    std::printf("[NavStudio] Added waypoint #%u\n", wid);
+                }
+                return;
+            }
+
+            // Fill Area / Waypoints Mode Left Click: Click floor to generate room NavMesh or Waypoints
             if (g_activeScene->IsFillAreaMode()) {
-                size_t created = g_activeScene->FloodFillAreaAt(ray, *g_cmdMgr);
-                if (created > 0) {
-                    std::printf("[NavStudio] Flood-fill generated %zu areas\n", created);
+                if (g_activeScene->IsWaypointMode()) {
+                    size_t created = g_activeScene->FloodFillWaypointsAt(ray);
+                    if (created > 0) {
+                        std::printf("[NavStudio] Flood-fill generated %zu waypoints\n", created);
+                    }
+                } else {
+                    size_t created = g_activeScene->FloodFillAreaAt(ray, *g_cmdMgr);
+                    if (created > 0) {
+                        std::printf("[NavStudio] Flood-fill generated %zu areas\n", created);
+                    }
                 }
                 return;
             }
@@ -295,10 +315,23 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                 // Left-click confirms active modal transform
                 g_activeScene->ConfirmTransform(*g_cmdMgr);
             } else if (mode == EditorScene::TRANSFORM_CONNECT) {
-                uint32_t hitArea = ScenePicker::PickNavArea(*g_activeScene, ray);
-                if (hitArea != 0 && hitArea != g_activeScene->GetSelectedAreaID()) {
-                    bool shiftPressed = (mods & GLFW_MOD_SHIFT) != 0;
-                    g_activeScene->ConnectSelectedTo(hitArea, !shiftPressed, *g_cmdMgr);
+                if (g_activeScene->GetSelectedWaypointID() != 0) {
+                    float wptDist = 0.0f;
+                    uint32_t hitWpt = ScenePicker::PickWaypoint(*g_activeScene, ray, &wptDist);
+                    if (hitWpt != 0 && hitWpt != g_activeScene->GetSelectedWaypointID()) {
+                        int conType = g_activeScene->GetWaypointConnectType();
+                        uint16_t flags = WPT_CONN_NONE;
+                        if (conType == 3) flags |= WPT_CONN_JUMP;
+                        else if (conType == 4) flags |= WPT_CONN_CROUCH;
+                        bool bidi = (conType == 2);
+                        g_activeScene->ConnectSelectedWaypointTo(hitWpt, flags, bidi);
+                    }
+                } else {
+                    uint32_t hitArea = ScenePicker::PickNavArea(*g_activeScene, ray);
+                    if (hitArea != 0 && hitArea != g_activeScene->GetSelectedAreaID()) {
+                        bool shiftPressed = (mods & GLFW_MOD_SHIFT) != 0;
+                        g_activeScene->ConnectSelectedTo(hitArea, !shiftPressed, *g_cmdMgr);
+                    }
                 }
             } else {
                 // Test area gizmo handles, edges, and corners first
@@ -454,8 +487,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
         return;
     }
 
-    // When in drawing mode or knife mode, WASD keys navigate the camera
-    if (g_activeScene && (g_activeScene->IsDrawAreaMode() || g_activeScene->IsKnifeMode())) {
+    // When in drawing mode, knife mode, or add waypoint mode, WASD keys navigate the camera
+    if (g_activeScene && (g_activeScene->IsDrawAreaMode() || g_activeScene->IsKnifeMode() || g_activeScene->IsAddWaypointMode())) {
         if (key == GLFW_KEY_W || key == GLFW_KEY_A || key == GLFW_KEY_S || key == GLFW_KEY_D) {
             return;
         }
@@ -513,15 +546,19 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 g_activeScene->ToggleBoxSelectMode();
             } else if (key == GLFW_KEY_B && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // B: Bridge Tool
                 g_activeScene->ToggleBridgeMode();
-            } else if (key == GLFW_KEY_N && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // N: Draw Area Tool
-                g_activeScene->ToggleDrawAreaMode();
+            } else if (key == GLFW_KEY_N && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // N: Draw Area Tool or Add Waypoint Tool
+                if (g_activeScene->IsWaypointMode()) {
+                    g_activeScene->ToggleAddWaypointMode();
+                } else {
+                    g_activeScene->ToggleDrawAreaMode();
+                }
             } else if (key == GLFW_KEY_K && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) { // K: Knife / Split Tool
                 g_activeScene->ToggleKnifeMode();
             } else if (key == GLFW_KEY_R && action == GLFW_PRESS && g_activeScene->IsKnifeMode()) { // R: Cycle knife angle
                 g_activeScene->CycleKnifeAngle();
             } else if (key == GLFW_KEY_F && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0 &&
                        g_activeScene->GetSelectedAreaID() == 0 && g_activeScene->GetSelectedAreaIDs().empty() &&
-                       g_activeScene->GetSelectedEntityIndex() < 0) { // F: Fill Area Tool (when nothing selected)
+                       g_activeScene->GetSelectedEntityIndex() < 0 && g_activeScene->GetSelectedWaypointID() == 0) { // F: Fill Tool (when nothing selected)
                 g_activeScene->ToggleFillAreaMode();
             } else if (key == GLFW_KEY_C && (mods & GLFW_MOD_ALT) != 0) { // Alt+C: Toggle Connection Selection Mode
                 g_activeScene->ToggleConnectionSelectionMode();
@@ -585,6 +622,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
             } else if (key == GLFW_KEY_ESCAPE) {
                 if (g_activeScene->IsBoxSelectMode()) {
                     g_activeScene->SetBoxSelectMode(false);
+                } else if (g_activeScene->IsAddWaypointMode()) {
+                    g_activeScene->SetAddWaypointMode(false);
                 } else if (g_activeScene->IsKnifeMode()) {
                     g_activeScene->ExitKnifeMode();
                 } else if (g_activeScene->IsDrawAreaMode()) {
@@ -708,20 +747,13 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                     WaypointNode* node = g_activeScene->GetWaypoints().GetNode(selWpt);
                     if (node) {
                         if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
-                            g_activeScene->SelectWaypoint(0);
-                            g_activeScene->GetWaypoints().DeleteNode(selWpt);
-                            g_activeScene->RebuildWaypointRenderer();
-                            g_activeScene->ShowToast("Waypoint #" + std::to_string(selWpt) + " deleted.");
+                            g_activeScene->DeleteSelectedWaypoint();
                         } else if (key == GLFW_KEY_F) {
                             g_camera.FocusOn(node->origin);
-                        } else if (key == GLFW_KEY_SPACE && g_activeScene->HasBSP()) {
-                            Vector3 start(node->origin.x, node->origin.y, node->origin.z + 32.0f);
-                            Vector3 end(node->origin.x, node->origin.y, node->origin.z - 4096.0f);
-                            BSPTraceResult tr;
-                            if (g_activeScene->GetBSP().TraceWorld(start, end, HULL_POINT, &tr) && !tr.startsolid && !tr.allsolid) {
-                                node->origin.z = tr.endpos.z + 18.0f;
-                                g_activeScene->RebuildWaypointRenderer();
-                            }
+                        } else if (key == GLFW_KEY_SPACE) {
+                            g_activeScene->SnapSelectedWaypointToFloor();
+                        } else if (key == GLFW_KEY_C && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) {
+                            g_activeScene->StartConnectMode();
                         }
                     }
                 } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {

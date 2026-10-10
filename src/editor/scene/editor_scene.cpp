@@ -2,6 +2,7 @@
 #include "editor/scene/scene_picker.h"
 #include "editor/commands/nav_commands.h"
 #include "waypoint/waypoint_nav_converter.h"
+#include "editor/camera/camera.h"
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -1327,6 +1328,12 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
         if (selEnt) {
             m_gizmoRenderer.Render(lineShader, mvp, selEnt->origin, camPos, m_gizmoMode, m_hoveredHandle, activeHandle);
         }
+    } else if (m_selectedWaypointId != 0 && m_showWaypoints) {
+        const WaypointNode* selWpt = m_waypoints.GetNodeByID(m_selectedWaypointId);
+        if (selWpt) {
+            Vector3 center = selWpt->origin + Vector3(0.0f, 0.0f, 12.0f);
+            m_gizmoRenderer.Render(lineShader, mvp, center, camPos, m_gizmoMode, m_hoveredHandle, activeHandle);
+        }
     }
 
     // Selected Connection Visual Highlight
@@ -1499,7 +1506,8 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
 void EditorScene::StartDragHandle(SelectedHandleType handle, float screenX, float screenY, const Ray& ray) {
     NavArea* area = GetSelectedArea();
     EditorEntity* ent = GetSelectedEntity();
-    if ((!area && !ent) || handle == HANDLE_NONE) return;
+    WaypointNode* wpt = GetSelectedWaypoint();
+    if ((!area && !ent && !wpt) || handle == HANDLE_NONE) return;
 
     m_isDraggingHandle = true;
     m_draggedHandle = handle;
@@ -1545,6 +1553,9 @@ void EditorScene::StartDragHandle(SelectedHandleType handle, float screenX, floa
         m_dragStartEntityAngles = ent->angles;
         m_dragStartEntityMins = ent->mins;
         m_dragStartEntityMaxs = ent->maxs;
+    } else if (wpt) {
+        m_dragStartCenter = wpt->origin + Vector3(0.0f, 0.0f, 12.0f);
+        m_dragStartEntityOrigin = wpt->origin;
     }
 
     // Ground plane hit for center or edge dragging
@@ -1636,7 +1647,8 @@ void EditorScene::StartDragHandle(SelectedHandleType handle, float screenX, floa
 void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray, float /*deltaY*/) {
     NavArea* area = GetSelectedArea();
     EditorEntity* ent = GetSelectedEntity();
-    if ((!area && !ent) || !m_isDraggingHandle) return;
+    WaypointNode* wpt = GetSelectedWaypoint();
+    if ((!area && !ent && !wpt) || !m_isDraggingHandle) return;
 
     Vector3 curGroundHit = m_dragStartGroundHit;
     float centerZ = m_dragStartCenter.z;
@@ -1681,6 +1693,9 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
                 ent->origin.x = targetX;
                 ent->worldMins.x = ent->origin.x + ent->mins.x;
                 ent->worldMaxs.x = ent->origin.x + ent->maxs.x;
+            } else if (wpt) {
+                wpt->origin.x = SnapValue(m_dragStartEntityOrigin.x + deltaX);
+                RebuildWaypointRenderer();
             }
         }
     } else if (m_draggedHandle == HANDLE_GIZMO_Y) {
@@ -1717,6 +1732,9 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
                 ent->origin.y = targetY;
                 ent->worldMins.y = ent->origin.y + ent->mins.y;
                 ent->worldMaxs.y = ent->origin.y + ent->maxs.y;
+            } else if (wpt) {
+                wpt->origin.y = SnapValue(m_dragStartEntityOrigin.y + deltaYAxis);
+                RebuildWaypointRenderer();
             }
         }
     } else if (m_draggedHandle == HANDLE_GIZMO_Z) {
@@ -1749,6 +1767,9 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
                 ent->origin.z = targetZ;
                 ent->worldMins.z = ent->origin.z + ent->mins.z;
                 ent->worldMaxs.z = ent->origin.z + ent->maxs.z;
+            } else if (wpt) {
+                wpt->origin.z = SnapValue(m_dragStartEntityOrigin.z + deltaZ);
+                RebuildWaypointRenderer();
             }
         }
     } else if (m_draggedHandle == HANDLE_GIZMO_CENTER) {
@@ -1789,6 +1810,10 @@ void EditorScene::UpdateDragHandle(float screenX, float screenY, const Ray& ray,
             ent->worldMaxs.x = ent->origin.x + ent->maxs.x;
             ent->worldMins.y = ent->origin.y + ent->mins.y;
             ent->worldMaxs.y = ent->origin.y + ent->maxs.y;
+        } else if (wpt) {
+            wpt->origin.x = SnapValue(m_dragStartEntityOrigin.x + groundDelta.x);
+            wpt->origin.y = SnapValue(m_dragStartEntityOrigin.y + groundDelta.y);
+            RebuildWaypointRenderer();
         }
     } else if (m_draggedHandle == HANDLE_PLANE_XY) {
         Vector3 curHit = m_dragStartPlaneHit;
@@ -4887,6 +4912,278 @@ void EditorScene::UpdateWaypointGeneration() {
         } else {
             ShowToast("Waypoint generation failed: " + m_waypointGenProgress.errorMessage);
         }
+    }
+}
+
+// --- Interactive Bot Waypoint Editing Tools ---
+
+size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
+    if (!HasBSP()) return 0;
+
+    Vector3 seedFloor;
+    if (!ScenePicker::PickBSPFloor(*this, ray, &seedFloor)) {
+        return 0;
+    }
+
+    float spacing = (m_gridSize >= 32.0f && m_gridSize <= 128.0f) ? m_gridSize : 40.0f; // CS-EBOT standard analyze distance
+    float snapDist = spacing;
+
+    // Snapped seed coordinate
+    float startX = std::round(seedFloor.x / snapDist) * snapDist;
+    float startY = std::round(seedFloor.y / snapDist) * snapDist;
+
+    struct GridCoord {
+        int gx, gy;
+        bool operator==(const GridCoord& o) const { return gx == o.gx && gy == o.gy; }
+    };
+    struct GridHash {
+        size_t operator()(const GridCoord& c) const {
+            return std::hash<int>()(c.gx) ^ (std::hash<int>()(c.gy) << 16);
+        }
+    };
+
+    std::unordered_set<GridCoord, GridHash> visited;
+    std::queue<GridCoord> queue;
+
+    GridCoord startCoord{ static_cast<int>(std::round(startX / snapDist)), static_cast<int>(std::round(startY / snapDist)) };
+    visited.insert(startCoord);
+    queue.push(startCoord);
+
+    std::vector<uint32_t> newWaypointIds;
+    const int maxPoints = 500; // room limit per flood click
+
+    while (!queue.empty() && newWaypointIds.size() < maxPoints) {
+        GridCoord cur = queue.front();
+        queue.pop();
+
+        float wx = cur.gx * snapDist;
+        float wy = cur.gy * snapDist;
+
+        // Trace down to floor
+        Vector3 traceTop(wx, wy, seedFloor.z + 45.0f);
+        Vector3 traceBottom(wx, wy, seedFloor.z - 256.0f);
+        BSPTraceResult floorTr;
+        if (!m_bsp->TraceWorld(traceTop, traceBottom, HULL_POINT, &floorTr) || floorTr.fraction >= 1.0f) {
+            continue;
+        }
+
+        Vector3 groundPos = floorTr.endpos;
+
+        // Check clearance: standing hull (32x32x72) vs crouch hull (32x32x36)
+        Vector3 standTop = groundPos + Vector3(0.0f, 0.0f, 72.0f);
+        BSPTraceResult standTr;
+        bool canStand = m_bsp->TraceWorld(groundPos + Vector3(0.0f, 0.0f, 1.0f), standTop, HULL_PLAYER, &standTr) && standTr.fraction >= 1.0f;
+
+        Vector3 crouchTop = groundPos + Vector3(0.0f, 0.0f, 36.0f);
+        BSPTraceResult crouchTr;
+        bool canCrouch = m_bsp->TraceWorld(groundPos + Vector3(0.0f, 0.0f, 1.0f), crouchTop, HULL_CROUCH, &crouchTr) && crouchTr.fraction >= 1.0f;
+
+        if (!canStand && !canCrouch) {
+            continue; // Not walkable
+        }
+
+        uint32_t flags = m_activeWaypointAddFlags;
+        if (!canStand && canCrouch) {
+            flags |= WPT_FLAG_CROUCH;
+        }
+
+        WaypointNode* node = m_waypoints.AddNode(groundPos + Vector3(0.0f, 0.0f, 18.0f), flags, m_activeWaypointAddRadius);
+        if (node) {
+            newWaypointIds.push_back(node->id);
+
+            // Connect to neighboring existing waypoints within link distance
+            for (uint32_t otherId : newWaypointIds) {
+                if (otherId == node->id) continue;
+                WaypointNode* other = m_waypoints.GetNodeByID(otherId);
+                if (!other) continue;
+
+                Vector3 diff = other->origin - node->origin;
+                float dsq = diff.Dot(diff);
+                if (dsq <= (snapDist * 1.55f) * (snapDist * 1.55f) && std::abs(diff.z) <= 45.0f) {
+                    // Check line of sight
+                    BSPTraceResult losTr;
+                    if (m_bsp->TraceWorld(node->origin + Vector3(0, 0, 10), other->origin + Vector3(0, 0, 10), HULL_POINT, &losTr) && losTr.fraction >= 0.98f) {
+                        uint16_t cflags = WPT_CONN_NONE;
+                        if (std::abs(diff.z) > 18.0f) cflags |= WPT_CONN_JUMP;
+                        m_waypoints.ConnectNodes(node->id, other->id, true, cflags);
+                    }
+                }
+            }
+
+            // Calculate optimal wayzone radius
+            m_waypoints.CalculateWayzone(node->id, m_bsp.get());
+        }
+
+        // Expand in 4 cardinal directions
+        const int dx[4] = { 1, -1, 0, 0 };
+        const int dy[4] = { 0, 0, 1, -1 };
+        for (int d = 0; d < 4; ++d) {
+            GridCoord nextCoord{ cur.gx + dx[d], cur.gy + dy[d] };
+            if (visited.find(nextCoord) == visited.end()) {
+                visited.insert(nextCoord);
+                float nwx = nextCoord.gx * snapDist;
+                float nwy = nextCoord.gy * snapDist;
+                float distFromSeed = std::hypot(nwx - seedFloor.x, nwy - seedFloor.y);
+                if (distFromSeed <= 2048.0f) {
+                    queue.push(nextCoord);
+                }
+            }
+        }
+    }
+
+    if (!newWaypointIds.empty()) {
+        m_showWaypoints = true;
+        m_waypointRenderer.SetShowWaypoints(true);
+        RebuildWaypointRenderer();
+        m_isModified = true;
+        ShowToast("Waypoint Flood-Fill created " + std::to_string(newWaypointIds.size()) + " waypoints!");
+    }
+
+    return newWaypointIds.size();
+}
+
+uint32_t EditorScene::OnAddWaypointClick(const Ray& ray) {
+    if (!HasBSP()) return 0;
+    Vector3 floorPos;
+    if (!ScenePicker::PickBSPFloor(*this, ray, &floorPos)) {
+        return 0;
+    }
+    return AddWaypointAt(floorPos + Vector3(0.0f, 0.0f, 18.0f));
+}
+
+uint32_t EditorScene::AddWaypointAt(const Vector3& pos) {
+    uint32_t prevId = m_selectedWaypointId;
+    WaypointNode* node = m_waypoints.AddNode(pos, m_activeWaypointAddFlags, m_activeWaypointAddRadius);
+    if (!node) return 0;
+
+    // If auto-connect is enabled, connect to previously selected or closest visible waypoint within 300u
+    if (m_autoConnectWaypoints) {
+        if (prevId != 0 && prevId != node->id) {
+            WaypointNode* prev = m_waypoints.GetNodeByID(prevId);
+            if (prev) {
+                float dist = (prev->origin - node->origin).Length();
+                if (dist <= 300.0f) {
+                    m_waypoints.ConnectNodes(node->id, prevId, true, WPT_CONN_NONE);
+                }
+            }
+        } else {
+            // Find closest visible node
+            int nearestIdx = m_waypoints.FindNearestNode(node->origin, 250.0f);
+            if (nearestIdx >= 0) {
+                const auto& nodes = m_waypoints.GetNodes();
+                if (static_cast<size_t>(nearestIdx) < nodes.size() && nodes[nearestIdx].id != node->id) {
+                    m_waypoints.ConnectNodes(node->id, nodes[nearestIdx].id, true, WPT_CONN_NONE);
+                }
+            }
+        }
+    }
+
+    if (HasBSP()) {
+        m_waypoints.CalculateWayzone(node->id, m_bsp.get());
+    }
+
+    SelectWaypoint(node->id);
+    m_showWaypoints = true;
+    m_waypointRenderer.SetShowWaypoints(true);
+    RebuildWaypointRenderer();
+    m_isModified = true;
+    ShowToast("Added Waypoint #" + std::to_string(node->id));
+    return node->id;
+}
+
+void EditorScene::SnapSelectedWaypointToFloor() {
+    if (m_selectedWaypointId == 0 || !HasBSP()) return;
+    WaypointNode* node = m_waypoints.GetNodeByID(m_selectedWaypointId);
+    if (!node) return;
+
+    Vector3 start(node->origin.x, node->origin.y, node->origin.z + 32.0f);
+    Vector3 end(node->origin.x, node->origin.y, node->origin.z - 2048.0f);
+    BSPTraceResult tr;
+    if (m_bsp->TraceWorld(start, end, HULL_POINT, &tr) && !tr.startsolid && !tr.allsolid) {
+        node->origin.z = tr.endpos.z + 18.0f;
+        m_waypoints.CalculateWayzone(node->id, m_bsp.get());
+        RebuildWaypointRenderer();
+        m_isModified = true;
+        ShowToast("Snapped Waypoint #" + std::to_string(node->id) + " to floor.");
+    }
+}
+
+bool EditorScene::ConnectSelectedWaypointTo(uint32_t targetId, uint16_t connFlags, bool bidirectional) {
+    if (m_selectedWaypointId == 0 || targetId == 0 || m_selectedWaypointId == targetId) return false;
+    bool ok = m_waypoints.ConnectNodes(m_selectedWaypointId, targetId, bidirectional, connFlags);
+    if (ok) {
+        RebuildWaypointRenderer();
+        m_isModified = true;
+        ShowToast("Connected Waypoint #" + std::to_string(m_selectedWaypointId) + " to #" + std::to_string(targetId));
+    }
+    return ok;
+}
+
+void EditorScene::DeleteSelectedWaypoint() {
+    if (m_selectedWaypointId == 0) return;
+    uint32_t id = m_selectedWaypointId;
+    SelectWaypoint(0);
+    m_waypoints.DeleteNode(id);
+    RebuildWaypointRenderer();
+    m_isModified = true;
+    ShowToast("Deleted Waypoint #" + std::to_string(id));
+}
+
+void EditorScene::CacheWaypoint(uint32_t id) {
+    if (id == 0) id = m_selectedWaypointId;
+    m_cachedWaypointId = id;
+    if (id != 0) {
+        ShowToast("Cached Waypoint #" + std::to_string(id));
+    }
+}
+
+bool EditorScene::CreateConnectionToCached(int conType) {
+    if (m_cachedWaypointId == 0 || m_selectedWaypointId == 0 || m_cachedWaypointId == m_selectedWaypointId) {
+        ShowToast("Select a waypoint to connect with cached #" + std::to_string(m_cachedWaypointId));
+        return false;
+    }
+
+    bool ok = false;
+    switch (conType) {
+        case 0: // Outgoing (Cached -> Selected)
+            ok = m_waypoints.ConnectNodes(m_cachedWaypointId, m_selectedWaypointId, false, WPT_CONN_NONE);
+            break;
+        case 1: // Incoming (Selected -> Cached)
+            ok = m_waypoints.ConnectNodes(m_selectedWaypointId, m_cachedWaypointId, false, WPT_CONN_NONE);
+            break;
+        case 2: // Bothways
+            ok = m_waypoints.ConnectNodes(m_cachedWaypointId, m_selectedWaypointId, true, WPT_CONN_NONE);
+            break;
+        case 3: // Jumping
+            ok = m_waypoints.ConnectNodes(m_cachedWaypointId, m_selectedWaypointId, true, WPT_CONN_JUMP);
+            break;
+        case 4: // Boosting / Double jump
+            ok = m_waypoints.ConnectNodes(m_cachedWaypointId, m_selectedWaypointId, true, WPT_CONN_DOUBLE);
+            break;
+    }
+
+    if (ok) {
+        RebuildWaypointRenderer();
+        m_isModified = true;
+        ShowToast("Connected cached #" + std::to_string(m_cachedWaypointId) + " to #" + std::to_string(m_selectedWaypointId));
+    }
+    return ok;
+}
+
+void EditorScene::DeleteConnectionToCached() {
+    if (m_cachedWaypointId != 0 && m_selectedWaypointId != 0) {
+        m_waypoints.DisconnectNodes(m_cachedWaypointId, m_selectedWaypointId, true);
+        RebuildWaypointRenderer();
+        m_isModified = true;
+        ShowToast("Deleted link between #" + std::to_string(m_cachedWaypointId) + " and #" + std::to_string(m_selectedWaypointId));
+    }
+}
+
+void EditorScene::TeleportCameraToWaypoint(uint32_t id, Camera& camera) {
+    WaypointNode* node = m_waypoints.GetNodeByID(id);
+    if (node) {
+        camera.SetPosition(node->origin + Vector3(0.0f, 0.0f, 40.0f));
+        ShowToast("Teleported camera to Waypoint #" + std::to_string(id));
     }
 }
 
