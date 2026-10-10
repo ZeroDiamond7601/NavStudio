@@ -4788,7 +4788,7 @@ size_t EditorScene::ConvertWaypointsToNav() {
     size_t created = WaypointNavConverter::WaypointsToNav(m_waypoints, *m_nav);
     if (created > 0) {
         m_isModified = true;
-        m_showNav = true;
+        m_showNAV = true;
         RebuildNavRenderer();
         ShowToast("Generated " + std::to_string(created) + " NavAreas from waypoints!");
     }
