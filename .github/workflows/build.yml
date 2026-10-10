@@ -25,7 +25,8 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_EDITOR=OFF -DBUILD_CLI=ON
 
       - name: Build Project
-        run: cmake --build build --config Release -j$(nproc)
+        run: |
+          cmake --build build --config Release -j$(nproc) || (echo "=== BUILD FAILED, RUNNING VERBOSE BUILD ===" && cmake --build build --verbose && exit 1)
 
       - name: Test CLI
         run: ./build/nav_cli --help

@@ -12,6 +12,21 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+namespace {
+struct SpatialKey3D {
+    int gx, gy, gz;
+    bool operator==(const SpatialKey3D& o) const { return gx == o.gx && gy == o.gy && gz == o.gz; }
+};
+
+struct SpatialHash3D {
+    size_t operator()(const SpatialKey3D& k) const {
+        return (static_cast<size_t>(k.gx) * 73856093u) ^
+               (static_cast<size_t>(k.gy) * 19349663u) ^
+               (static_cast<size_t>(k.gz) * 83492791u);
+    }
+};
+}
+
 EBotGenerateResult EBotGenerator::Generate(
     const BSPFile& bsp,
     WaypointGraph& outGraph,
@@ -107,20 +122,7 @@ EBotGenerateResult EBotGenerator::Generate(
     }
 
     // Fast 3D spatial hash grid for O(1) proximity queries (prevents multi-level floor grouping)
-    struct SpatialKey {
-        int gx, gy, gz;
-        bool operator==(const SpatialKey& o) const { return gx == o.gx && gy == o.gy && gz == o.gz; }
-    };
-    struct SpatialHash {
-        size_t operator()(const SpatialKey& k) const {
-            size_t h = std::hash<int>()(k.gx);
-            h ^= std::hash<int>()(k.gy) + 0x9e3779b9 + (h << 6) + (h >> 2);
-            h ^= std::hash<int>()(k.gz) + 0x9e3779b9 + (h << 6) + (h >> 2);
-            return h;
-        }
-    };
-
-    std::unordered_map<SpatialKey, std::vector<uint32_t>, SpatialHash> spatialGrid;
+    std::unordered_map<SpatialKey3D, std::vector<uint32_t>, SpatialHash3D> spatialGrid;
     float cellSize = options.nodeSpacing > 0.0f ? options.nodeSpacing : 60.0f;
     float cellZSize = 72.0f; // Multi-level floor vertical hull height
 
