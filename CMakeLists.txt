@@ -38,6 +38,7 @@ set(CORE_SOURCES
     src/nav/nav_file.cpp
     src/nav/nav_generator.cpp
     src/waypoint/waypoint_graph.cpp
+    src/waypoint/waypoint_codecs.cpp
     src/waypoint/waypoint_nav_converter.cpp
     src/waypoint/ebot_generator.cpp
 )
@@ -115,8 +116,10 @@ if(BUILD_EDITOR)
         src/editor/render/gizmo_renderer.cpp
         src/editor/render/entity_renderer.cpp
         src/editor/scene/editor_scene.cpp
+        src/editor/scene/editor_scene_waypoints.cpp
         src/editor/scene/scene_picker.cpp
         src/editor/ui/editor_ui.cpp
+        src/editor/ui/editor_ui_waypoints.cpp
         src/editor/ui/file_dialog.cpp
         src/editor/glad/src/glad.c
         ${IMGUI_SOURCES}
