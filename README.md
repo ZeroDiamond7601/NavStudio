@@ -3,7 +3,7 @@
 [![CI & Build](https://github.com/ZeroDiamond7601/NavStudio/actions/workflows/build.yml/badge.svg)](https://github.com/ZeroDiamond7601/NavStudio/actions)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20(x86)%20%7C%20Linux-brightgreen.svg)]()
-[![Release](https://img.shields.io/badge/Version-v1.6.8.2-orange.svg)](https://github.com/ZeroDiamond7601/NavStudio/releases)
+[![Release](https://img.shields.io/badge/Version-v1.6.8.3-orange.svg)](https://github.com/ZeroDiamond7601/NavStudio/releases)
 
 **NavStudio** is a standalone, hardware-accelerated 3D desktop visualizer, navigation mesh editor, and verification suite for **GoldSrc** (`.bsp` v30) maps and **Counter-Strike 1.6 / Condition Zero** (`.nav` v4 & v5) navigation meshes.
 
@@ -105,6 +105,14 @@ It provides real-time OpenGL 3.3 Core rendering with Dear ImGui docking, Valve H
   * Diamond nodes color-coded by bot type and team flags (CT Blue, T Red, Neutral White, Camp Green, Ladder Yellow).
   * Ground contact discs, directional link arrows, parabolic jump arcs, and camp aim vector rays.
   * Direct 3D ray-picking selection, manual node dropping, auto-linking within customizable radius, and inspector flag editing.
+
+### Productivity, User Guidance & Navigation Presets
+* **Context-Sensitive Viewport Bottom HUD:** Sleek floating HUD bar above the status bar rendering real-time shortcut badges for current transform modes, active tools, selection types, and idle flight navigation.
+* **Quick Start Interactive Tutorial Modal (`F1`):** 5-step guided interactive walkthrough with live sliders and test controls (Camera Flight, Precision Selection & Grid Nudge, 3D Universal Gizmo, Modeling Tools, and Bot Waypoints).
+* **Searchable In-App Shortcuts Cheatsheet (`Shift+F1`):** In-app reference modal with instant keyword search matching across all 7 categorized shortcut groups.
+* **Hardware Mouse Cursor Visual Feedback:** Dynamic OS-level hardware cursors adapting automatically to active tools and hovering states (crosshairs for placement/knife/box select, hand for grab/connect/links, resize arrows for edges and scaling).
+* **Navigation Presets Switcher:** Configurable navigation scheme in Preferences between FPS Flycam (GoldSrc default), Blender Turntable (MMB Orbit, Shift+MMB Pan, Wheel Zoom), and Valve Hammer Editor.
+* **Batch Generator with Bot & Mod Selector:** Concurrent mass-production supporting both Valve NavMeshes and Bot Waypoints with target Bot Type (CS-EBOT, SyPB, YaPB, POD-Bot mm), Game Mod selection, and conversion heuristics.
 
 ---
 
@@ -234,7 +242,8 @@ NavStudio/
 
 | Shortcut | Overlay | Description |
 | :--- | :--- | :--- |
-| **F1** | Help / Shortcuts | Display shortcuts cheatsheet and documentation |
+| **F1** | Interactive Tutorial | Open 5-step Quick Start interactive tutorial with live sliders |
+| **Shift + F1** | Shortcuts Cheatsheet | Open searchable in-app shortcuts reference modal with keyword filter |
 | **F2** | Wireframe Overlay | Toggle wireframe edges on GoldSrc BSP geometry |
 | **F3** | Entity Archetypes | Toggle 3D visualizers for spawns, lights, weapons, triggers, and targets |
 | **F4** | Shading Mode | Cycle rendering: Textured (WAD3), Clay shaded, Pure Wireframe, Translucent |

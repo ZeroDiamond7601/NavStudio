@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(NavStudio VERSION 1.6.8.2 LANGUAGES C CXX)
+project(NavStudio VERSION 1.6.8.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

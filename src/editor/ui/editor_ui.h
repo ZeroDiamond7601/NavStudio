@@ -49,6 +49,9 @@ public:
     void OpenPawnExportModal() { m_showPawnExportModal = true; }
     void OpenWaypointExportModal() { m_showWaypointExportModal = true; }
     void OpenNavToWaypointModal() { m_showNavToWaypointModal = true; }
+    void OpenTutorialModal() { m_showTutorialModal = true; m_tutorialCurrentStep = 0; }
+    void OpenHelpModal() { m_showHelpModal = true; }
+    void ToggleTutorialModal() { m_showTutorialModal = !m_showTutorialModal; }
     void SetMarqueeBox(bool active, float startX, float startY, float curX, float curY) {
         m_marqueeActive = active;
         m_marqueeStartX = startX;
@@ -103,6 +106,8 @@ private:
     void RenderLadderCreateModal(EditorScene& scene, Camera& camera);
     void RenderToastHUD(const EditorScene& scene);
     void RenderGizmoNudgeHUD(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
+    void RenderViewportBottomHUD(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
+    void RenderTutorialModal(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
 
     // Precision Nudge UI Helpers with on-screen increment/decrement arrows
     static bool DrawNudgeFloat(const char* label, float* v, float step = 16.0f, float minVal = -65536.0f, float maxVal = 65536.0f, const char* fmt = "%.1f");
@@ -227,6 +232,20 @@ private:
     float m_nudgeStepLinear{16.0f};
     float m_nudgeStepAngular{15.0f};
     bool m_showGizmoNudgeHUD{true};
+
+    // Quick Start Interactive Tutorial & Viewport HUD
+    bool m_showTutorialModal{false};
+    int m_tutorialCurrentStep{0};
+    bool m_showViewportBottomHUD{true};
+    char m_helpSearchFilter[128]{""};
+
+    // Batch Generation Options (NavMeshes & Bot Waypoints)
+    int m_batchTargetType{0}; // 0 = NavMesh (.nav), 1 = Bot Waypoints (.ewp/.spt/.pwf/.wpt)
+    int m_batchBotType{0};    // 0 = CS-EBOT (.ewp), 1 = SyPB (.spt), 2 = YaPB (.pwf), 3 = POD-Bot mm (.wpt)
+    int m_batchGameMod{0};    // 0 = Standard CS 1.6, 1 = Zombie Plague, 2 = Deathmatch
+    int m_batchSourceType{0}; // 0 = Direct BSP Geometry (E-Bot Engine), 1 = Convert from existing .nav
+    bool m_batchCalcWayzones{true};
+    EBotGenerateOptions m_batchEBotOptions;
 };
 
 #endif // EDITOR_UI_H

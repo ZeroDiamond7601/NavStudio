@@ -40,6 +40,85 @@ static double g_boxSelectStartY = 0.0;
 static double g_boxSelectCurrentX = 0.0;
 static double g_boxSelectCurrentY = 0.0;
 
+static GLFWcursor* g_cursorArrow = nullptr;
+static GLFWcursor* g_cursorCrosshair = nullptr;
+static GLFWcursor* g_cursorHand = nullptr;
+static GLFWcursor* g_cursorHResize = nullptr;
+static GLFWcursor* g_cursorVResize = nullptr;
+
+static void UpdateMouseCursor(GLFWwindow* window, EditorScene& scene, EditorUI& /*editorUI*/) {
+    ImGuiIO& io = ImGui::GetIO();
+    if (io.WantCaptureMouse) {
+        return; // ImGui is handling cursor
+    }
+    if (g_isRightMouseDown) {
+        return; // Disabled cursor during camera flight
+    }
+
+    GLFWcursor* targetCursor = g_cursorArrow;
+    ImGuiMouseCursor imCursor = ImGuiMouseCursor_Arrow;
+
+    if (g_isBoxSelecting || scene.IsBoxSelectMode() || scene.IsKnifeMode() ||
+        scene.IsDrawAreaMode() || scene.IsPenToolActive() || scene.IsAddWaypointMode() || scene.IsFillAreaMode()) {
+        targetCursor = g_cursorCrosshair;
+        imCursor = ImGuiMouseCursor_TextInput;
+    } else if (scene.GetTransformMode() == EditorScene::TRANSFORM_CONNECT || scene.IsWaypointConnectMode() || scene.IsBridgeMode()) {
+        targetCursor = g_cursorHand;
+        imCursor = ImGuiMouseCursor_Hand;
+    } else if (scene.GetTransformMode() == EditorScene::TRANSFORM_SCALE) {
+        targetCursor = g_cursorHResize;
+        imCursor = ImGuiMouseCursor_ResizeEW;
+    } else if (scene.GetTransformMode() == EditorScene::TRANSFORM_TRANSLATE) {
+        targetCursor = g_cursorHand;
+        imCursor = ImGuiMouseCursor_Hand;
+    } else if (scene.IsDraggingHandle()) {
+        SelectedHandleType h = scene.GetSelectedHandle();
+        if (h == HANDLE_EDGE_NORTH || h == HANDLE_EDGE_SOUTH) {
+            targetCursor = g_cursorVResize;
+            imCursor = ImGuiMouseCursor_ResizeNS;
+        } else if (h == HANDLE_EDGE_EAST || h == HANDLE_EDGE_WEST) {
+            targetCursor = g_cursorHResize;
+            imCursor = ImGuiMouseCursor_ResizeEW;
+        } else if (h >= HANDLE_CORNER_NW && h <= HANDLE_CORNER_SW) {
+            targetCursor = g_cursorHResize;
+            imCursor = ImGuiMouseCursor_ResizeAll;
+        } else {
+            targetCursor = g_cursorHand;
+            imCursor = ImGuiMouseCursor_Hand;
+        }
+    } else {
+        SelectedHandleType hovered = scene.GetHoveredHandle();
+        if (hovered != HANDLE_NONE) {
+            if (hovered == HANDLE_EDGE_NORTH || hovered == HANDLE_EDGE_SOUTH) {
+                targetCursor = g_cursorVResize;
+                imCursor = ImGuiMouseCursor_ResizeNS;
+            } else if (hovered == HANDLE_EDGE_EAST || hovered == HANDLE_EDGE_WEST) {
+                targetCursor = g_cursorHResize;
+                imCursor = ImGuiMouseCursor_ResizeEW;
+            } else if (hovered >= HANDLE_CORNER_NW && hovered <= HANDLE_CORNER_SW) {
+                targetCursor = g_cursorHResize;
+                imCursor = ImGuiMouseCursor_ResizeAll;
+            } else if (hovered >= HANDLE_GIZMO_SCALE_X && hovered <= HANDLE_GIZMO_SCALE_Z) {
+                targetCursor = g_cursorHResize;
+                imCursor = ImGuiMouseCursor_ResizeEW;
+            } else {
+                targetCursor = g_cursorHand;
+                imCursor = ImGuiMouseCursor_Hand;
+            }
+        } else if (g_isAltDown || scene.IsConnectionSelectionMode()) {
+            targetCursor = g_cursorHand;
+            imCursor = ImGuiMouseCursor_Hand;
+        }
+    }
+
+    static GLFWcursor* s_lastSetCursor = nullptr;
+    if (s_lastSetCursor != targetCursor) {
+        glfwSetCursor(window, targetCursor);
+        s_lastSetCursor = targetCursor;
+    }
+    ImGui::SetMouseCursor(imCursor);
+}
+
 bool SaveScreenToBMP(const char* filename, int width, int height) {
     if (width <= 0 || height <= 0) {
         GLint vp[4] = {0, 0, 0, 0};
@@ -171,16 +250,45 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         }
     } else if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
+        int navPreset = (g_activeScene) ? g_activeScene->GetPreferences().navigationPreset : 0;
+        bool altPressed = (mods & GLFW_MOD_ALT) != 0 ||
+                          glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
+                          glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
+        bool shiftPressed = (mods & GLFW_MOD_SHIFT) != 0 ||
+                            glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+                            glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+
         if (action == GLFW_PRESS) {
-            bool altPressed = (mods & GLFW_MOD_ALT) != 0 ||
-                              glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
-                              glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
             g_isMiddleMouseDown = true;
-            g_isAltPanning = altPressed;
             g_firstMouse = true;
+            if (navPreset == 1) { // Blender Turntable preset
+                if (shiftPressed || altPressed) {
+                    g_isAltPanning = true;
+                    g_isAltOrbiting = false;
+                } else {
+                    g_isAltOrbiting = true;
+                    g_isAltPanning = false;
+                    if (g_activeScene) {
+                        NavArea* sel = g_activeScene->GetSelectedArea();
+                        if (sel) {
+                            g_camera.SetTarget(sel->GetCenter());
+                        } else if (g_activeScene->GetSelectedWaypointID() != 0) {
+                            const auto* w = g_activeScene->GetWaypoints().GetNode(g_activeScene->GetSelectedWaypointID());
+                            if (w) g_camera.SetTarget(w->origin);
+                        } else {
+                            g_camera.SetTarget(g_camera.GetPosition() + g_camera.GetForward() * 400.0f);
+                        }
+                    }
+                }
+            } else {
+                g_isAltPanning = altPressed;
+            }
         } else if (action == GLFW_RELEASE) {
             g_isMiddleMouseDown = false;
             g_isAltPanning = false;
+            if (navPreset == 1) {
+                g_isAltOrbiting = false;
+            }
         }
     } else if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (!g_activeScene || !g_cmdMgr) return;
@@ -540,6 +648,12 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 g_activeScene->IncreaseGridSize();
             } else if (key == GLFW_KEY_W && (mods & GLFW_MOD_SHIFT) != 0) { // Shift+W: Toggle snap
                 g_activeScene->ToggleGridSnap();
+            } else if (key == GLFW_KEY_F1) { // F1: Quick Start Tutorial / Shift+F1: Shortcuts Cheatsheet
+                if ((mods & GLFW_MOD_SHIFT) != 0) {
+                    if (g_editorUI) g_editorUI->OpenHelpModal();
+                } else {
+                    if (g_editorUI) g_editorUI->OpenTutorialModal();
+                }
             } else if (key == GLFW_KEY_F3) { // F3: Toggle Entities
                 auto& entR = g_activeScene->GetEntityRenderer();
                 entR.SetShowEntities(!entR.GetShowEntities());
@@ -1007,7 +1121,11 @@ static void ScrollCallback(GLFWwindow* /*window*/, double /*xoffset*/, double yo
     ImGuiIO& io = ImGui::GetIO();
     if (io.WantCaptureMouse) return;
 
-    g_camera.ProcessMouseScroll(static_cast<float>(yoffset));
+    if (g_activeScene && g_activeScene->GetPreferences().navigationPreset == 1 && !g_isRightMouseDown) {
+        g_camera.SetPosition(g_camera.GetPosition() + g_camera.GetForward() * (static_cast<float>(yoffset) * 60.0f));
+    } else {
+        g_camera.ProcessMouseScroll(static_cast<float>(yoffset));
+    }
 }
 
 static void ProcessInput(GLFWwindow* window, float deltaTime) {
@@ -1023,7 +1141,7 @@ static void ProcessInput(GLFWwindow* window, float deltaTime) {
 
 static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
     static std::string lastTitle = "";
-    std::string title = "NavStudio v1.6.8.2";
+    std::string title = "NavStudio v1.6.8.3";
     if (scene.HasBSP() || scene.HasNAV() || scene.HasWaypoints()) {
         std::string map = "";
         if (scene.HasBSP()) {
@@ -1053,7 +1171,7 @@ static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
 
 int main(int argc, char* argv[]) {
     std::printf("====================================================\n");
-    std::printf("  NavStudio v1.6.8.2\n");
+    std::printf("  NavStudio v1.6.8.3\n");
     std::printf("====================================================\n");
 
     if (!glfwInit()) {
@@ -1129,7 +1247,7 @@ int main(int argc, char* argv[]) {
         initialHeight = 1080;
     }
 
-    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.6.8.2", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.6.8.3", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "[Error] Failed to create GLFW window\n");
         glfwTerminate();
@@ -1161,6 +1279,13 @@ int main(int argc, char* argv[]) {
     glfwSetScrollCallback(window, ScrollCallback);
     glfwSetKeyCallback(window, KeyCallback);
     glfwSetDropCallback(window, DropCallback);
+
+    // Initialize hardware window cursors
+    g_cursorArrow = glfwCreateStandardCursor(GLFW_ARROW_CURSOR);
+    g_cursorCrosshair = glfwCreateStandardCursor(GLFW_CROSSHAIR_CURSOR);
+    g_cursorHand = glfwCreateStandardCursor(GLFW_HAND_CURSOR);
+    g_cursorHResize = glfwCreateStandardCursor(GLFW_HRESIZE_CURSOR);
+    g_cursorVResize = glfwCreateStandardCursor(GLFW_VRESIZE_CURSOR);
 
     // Setup Dear ImGui context with docking
     IMGUI_CHECKVERSION();
@@ -1304,6 +1429,7 @@ int main(int argc, char* argv[]) {
             static_cast<float>(g_boxSelectCurrentX), static_cast<float>(g_boxSelectCurrentY)
         );
         editorUI.Render(scene, g_camera, cmdMgr, deltaTime);
+        UpdateMouseCursor(window, scene, editorUI);
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -1321,6 +1447,12 @@ int main(int argc, char* argv[]) {
     }
 
     // Cleanup
+    if (g_cursorArrow) glfwDestroyCursor(g_cursorArrow);
+    if (g_cursorCrosshair) glfwDestroyCursor(g_cursorCrosshair);
+    if (g_cursorHand) glfwDestroyCursor(g_cursorHand);
+    if (g_cursorHResize) glfwDestroyCursor(g_cursorHResize);
+    if (g_cursorVResize) glfwDestroyCursor(g_cursorVResize);
+
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();

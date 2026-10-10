@@ -2,6 +2,8 @@
 #include <imgui.h>
 #include "editor/commands/nav_commands.h"
 #include "editor/ui/file_dialog.h"
+#include "waypoint/ebot_generator.h"
+#include "waypoint/waypoint_nav_converter.h"
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
@@ -211,6 +213,14 @@ void EditorUI::ApplyPreferencesToRuntime(EditorScene& scene, Camera& camera, Com
     m_nudgeStepLinear = prefs.defaultLinearNudgeStep;
     m_nudgeStepAngular = prefs.defaultAngularNudgeStep;
     m_showGizmoNudgeHUD = prefs.showGizmoNudgeHUD;
+    m_showViewportBottomHUD = prefs.showViewportBottomHUD;
+    static bool s_hasCheckedStartupTutorial = false;
+    if (!s_hasCheckedStartupTutorial) {
+        s_hasCheckedStartupTutorial = true;
+        if (prefs.showTutorialOnStartup) {
+            m_showTutorialModal = true;
+        }
+    }
     ApplyTheme(prefs.themeIndex);
     scene.RebuildNavRenderer();
     scene.RebuildWaypointRenderer();
@@ -316,6 +326,9 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     if (m_showGizmoNudgeHUD) {
         RenderGizmoNudgeHUD(scene, camera, cmdMgr);
     }
+    if (m_showViewportBottomHUD) {
+        RenderViewportBottomHUD(scene, camera, cmdMgr);
+    }
 
     if (m_showStatsOverlay) {
         RenderStatsOverlay(scene, camera);
@@ -381,6 +394,10 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
 
     if (m_showHelpModal) {
         RenderHelpModal();
+    }
+
+    if (m_showTutorialModal) {
+        RenderTutorialModal(scene, camera, cmdMgr);
     }
 
     if (m_showAboutModal) {
@@ -1244,12 +1261,17 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             ImGui::MenuItem("Performance & FPS Overlay", nullptr, &m_showStatsOverlay);
             ImGui::MenuItem("Blender Viewport Compass", nullptr, &scene.GetPreferences().showCompass);
             ImGui::MenuItem("Precision Nudge HUD", nullptr, &m_showGizmoNudgeHUD);
+            ImGui::MenuItem("Viewport Context-Sensitive HUD", nullptr, &m_showViewportBottomHUD);
 
             ImGui::EndMenu();
         }
 
         if (ImGui::BeginMenu("Help")) {
-            if (ImGui::MenuItem("Controls & Shortcuts...", "F1")) {
+            if (ImGui::MenuItem("Quick Start Interactive Tutorial...", "F1")) {
+                m_showTutorialModal = true;
+                m_tutorialCurrentStep = 0;
+            }
+            if (ImGui::MenuItem("Controls & Shortcuts Cheatsheet...", "Shift+F1")) {
                 m_showHelpModal = true;
             }
             ImGui::Separator();
@@ -3512,70 +3534,424 @@ void EditorUI::RenderStatsOverlay(const EditorScene& scene, const Camera& camera
 }
 
 void EditorUI::RenderHelpModal() {
-    ImGui::OpenPopup("Controls and Shortcuts");
+    ImGui::OpenPopup("Controls and Shortcuts Cheatsheet##HelpModal");
 
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(500, 440));
+    ImGui::SetNextWindowSize(ImVec2(720, 540), ImGuiCond_Appearing);
 
-    if (ImGui::BeginPopupModal("Controls and Shortcuts", &m_showHelpModal, ImGuiWindowFlags_NoResize)) {
-        ImGui::Text("Camera Navigation:");
-        ImGui::BulletText("W / A / S / D: Fly forward / backward / left / right");
-        ImGui::BulletText("E / Q: Fly up / down");
-        ImGui::BulletText("Right-Click + Drag: First-person camera look");
-        ImGui::BulletText("Mouse Wheel (Hold Right-Click): Change camera speed");
-        ImGui::BulletText("Alt + Left-Click + Drag: Orbit camera around selection or pivot");
-        ImGui::BulletText("Alt + Middle-Click / Middle-Click + Drag: Pan camera in 3D");
-        ImGui::BulletText("F: Focus camera on selected area");
-        ImGui::BulletText("Home: Reset camera to origin");
+    if (ImGui::BeginPopupModal("Controls and Shortcuts Cheatsheet##HelpModal", &m_showHelpModal, ImGuiWindowFlags_None)) {
+        ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Controls and Shortcuts Cheatsheet");
+        ImGui::SameLine();
+        ImGui::TextDisabled("- Full Reference");
+
+        ImGui::Spacing();
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 220.0f);
+        ImGui::InputTextWithHint("##ShortcutSearchFilter", "Search shortcuts (e.g. fly, gizmo, connect, knife, nudge, ebot)...", m_helpSearchFilter, sizeof(m_helpSearchFilter));
+        ImGui::SameLine();
+        if (m_helpSearchFilter[0] != '\0') {
+            if (ImGui::Button("Clear##HelpSearch", ImVec2(48, 24))) {
+                m_helpSearchFilter[0] = '\0';
+            }
+            ImGui::SameLine();
+        }
+        if (ImGui::Button("Interactive Tutorial (F1)", ImVec2(160, 24))) {
+            m_showHelpModal = false;
+            m_showTutorialModal = true;
+            m_tutorialCurrentStep = 0;
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+            return;
+        }
 
         ImGui::Spacing();
         ImGui::Separator();
-        ImGui::Text("3D View & Hammer Shortcuts:");
-        ImGui::BulletText("Left-Click: Select area in 3D viewport / Drag Gizmo arrows or edges");
-        ImGui::BulletText("G: Move / Grab selected area (smoothly follows cursor in 3D)");
-        ImGui::BulletText("S: Scale selected area dimensions");
-        ImGui::BulletText("X / Y / Z: Constrain Move/Scale strictly along X, Y, or Z axis");
-        ImGui::BulletText("E: Extrude selected area edge (creates connected adjacent area)");
-        ImGui::BulletText("Shift + Left-Drag Edge: Extrude edge interactively");
-        ImGui::BulletText("Shift + X: Split selected area into two connected halves");
-        ImGui::BulletText("Shift + M: Merge selected area with adjacent collinear area");
-        ImGui::BulletText("Ctrl + C / Ctrl + V: Copy / Paste areas across maps and sessions");
-        ImGui::BulletText("K / R: Knife cutter tool (R cycles angle: 0°, 45°, 90°, 135°)");
-        ImGui::BulletText("[ / ]: Decrease / Increase grid snap size (1 to 512)");
-        ImGui::BulletText("Shift + W: Toggle Grid Snapping");
-        ImGui::BulletText("B: Bridge Mode (Click Edge 1 + Edge 2 to generate connecting area)");
-        ImGui::BulletText("Shift + S: Snap selected area flush to neighbors (close micro-gaps)");
-        ImGui::BulletText("R: Rotate area orientation 90 degrees");
-        ImGui::BulletText("C: Connect Mode (Left-Click target: 2-Way, Shift+Click: 1-Way)");
-        ImGui::BulletText("Alt + C: Toggle Connection Selection Mode (click connection links directly)");
-        ImGui::BulletText("Alt + Left-Click: Pick connection without interfering with nav areas");
-        ImGui::BulletText("Shift + D: Duplicate selected area");
-        ImGui::BulletText("X / Delete / Backspace: Delete selected area or connection");
-        ImGui::BulletText("Space: Snap selected area elevation to BSP floor");
-        ImGui::BulletText("Ctrl+Z / Ctrl+Y: Undo / Redo history");
-        ImGui::BulletText("Ctrl+S: Save current navigation mesh");
-        ImGui::BulletText("Ctrl + Shift + V: Toggle connection step (>18u) validity overlay");
-        ImGui::BulletText("Ctrl + ,: Open Preferences dialog");
-        ImGui::BulletText("F3: Toggle Entity 3D visualization");
-        ImGui::BulletText("F4: Cycle BSP Shading Mode (Textured / Solid / Wireframe / Ghost)");
-        ImGui::BulletText("N: Draw Area Marquee Tool (with magnetic corner snapping)");
-        ImGui::BulletText("Shift + Click / Ctrl + Click: Multi-select NavAreas");
-        ImGui::BulletText("Ctrl + A: Select All NavAreas");
-        ImGui::BulletText("M / Shift + M: Quick Merge selected areas or merge with adjacent neighbor");
-        ImGui::BulletText("Ctrl + P: Command Palette (search and trigger any tool or action)");
-        ImGui::BulletText("P: Interactive Path Simulator (click start and goal to test bot path)");
-        ImGui::BulletText("H: Player Clearance Hull Visualizer (standing 72u / crouch 36u collision test)");
-        ImGui::BulletText("Ctrl + 0..9: Save camera bookmark to slot 0..9");
-        ImGui::BulletText("Alt + 0..9 / Numpad 0..9: Teleport camera to saved bookmark");
-        ImGui::BulletText("Escape: Clear selection / Cancel modal tool");
+        ImGui::Spacing();
+
+        struct ShortcutItem {
+            const char* category;
+            const char* key;
+            const char* description;
+        };
+
+        static const std::vector<ShortcutItem> s_shortcuts = {
+            // Camera Navigation & View Presets
+            { "Camera Navigation & View Presets", "W / A / S / D", "Fly camera forward, backward, strafe left, and right" },
+            { "Camera Navigation & View Presets", "E / Q", "Fly camera vertically up / down" },
+            { "Camera Navigation & View Presets", "Right-Click + Drag", "Look around in first-person camera mode" },
+            { "Camera Navigation & View Presets", "Wheel (Right-Click)", "Dynamically adjust camera fly speed" },
+            { "Camera Navigation & View Presets", "Alt + Left-Drag / MMB", "Orbit turntable camera around selection or focus pivot" },
+            { "Camera Navigation & View Presets", "Alt + Middle-Drag / Shift+MMB", "Pan camera smoothly in 3D viewport space" },
+            { "Camera Navigation & View Presets", "Numpad 7 / 1 / 3", "Snap camera to Top-Down (2D Ortho), Front, or Side view" },
+            { "Camera Navigation & View Presets", "Numpad 5 / 0", "Toggle 2D Orthographic / 3D Perspective mode" },
+            { "Camera Navigation & View Presets", "F", "Center and focus camera on active selection" },
+            { "Camera Navigation & View Presets", "Home", "Reset camera position and look direction to origin" },
+            { "Camera Navigation & View Presets", "Ctrl + 0..9", "Save camera bookmark to slot 0..9" },
+            { "Camera Navigation & View Presets", "Alt + 0..9 / Numpad 0..9", "Teleport camera to saved bookmark" },
+
+            // 3D Universal Transform Gizmo
+            { "3D Universal Transform Gizmo", "1", "Activate Translation Gizmo (directional arrows + axis rings)" },
+            { "3D Universal Transform Gizmo", "2", "Activate Rotation Gizmo (camera-facing rotation arcs)" },
+            { "3D Universal Transform Gizmo", "3", "Activate Scale Gizmo (mid-axis scale cubes at 52% reach)" },
+            { "3D Universal Transform Gizmo", "4", "Activate Combined Universal Gizmo (all transform handles)" },
+            { "3D Universal Transform Gizmo", "Center Orange Dot", "Free plane translation along camera view plane" },
+            { "3D Universal Transform Gizmo", "Outer White Ring", "Screen-space view plane translation" },
+            { "3D Universal Transform Gizmo", "X / Y / Z", "Constrain Grab / Scale modal movement strictly to X, Y, or Z axis" },
+            { "3D Universal Transform Gizmo", "Enter / Left-Click", "Confirm modal transform operation" },
+            { "3D Universal Transform Gizmo", "Escape", "Cancel modal transform and revert to original transform" },
+
+            // Viewport Selection & Precision Nudge
+            { "Viewport Selection & Precision Nudge", "Left-Click", "Select NavArea, Waypoint node, Ladder, or Entity" },
+            { "Viewport Selection & Precision Nudge", "Shift + Click", "Add clicked item to active multi-selection" },
+            { "Viewport Selection & Precision Nudge", "Ctrl + Click", "Toggle selection state of clicked item" },
+            { "Viewport Selection & Precision Nudge", "Alt + Left-Click", "Pick connection link directly without selecting nodes/areas" },
+            { "Viewport Selection & Precision Nudge", "Shift + B", "Toggle Marquee Rectangle Drag Box Selection tool" },
+            { "Viewport Selection & Precision Nudge", "Ctrl + A", "Select all areas or waypoints in current active target mode" },
+            { "Viewport Selection & Precision Nudge", "Ctrl + I", "Invert active viewport selection" },
+            { "Viewport Selection & Precision Nudge", "Arrow Keys", "Precision Nudge: Move selection along X/Y by active Hammer grid step" },
+            { "Viewport Selection & Precision Nudge", "Shift + Up/Down", "Precision Nudge: Move selection along Z (vertical elevation)" },
+            { "Viewport Selection & Precision Nudge", "PageUp / PageDown", "Precision Nudge: Elevate or lower selection along Z axis" },
+            { "Viewport Selection & Precision Nudge", "[ / ]", "Decrease / Increase active Hammer grid snap size (1u to 512u)" },
+            { "Viewport Selection & Precision Nudge", "Shift + W", "Toggle grid snapping on or off" },
+
+            // NavMesh Modeling & Geometry Tools
+            { "NavMesh Modeling & Geometry Tools", "N", "Draw Area Tool: Click 2 diagonal corners on floor geometry" },
+            { "NavMesh Modeling & Geometry Tools", "K", "Knife Tool: Interactively split areas along guideline" },
+            { "NavMesh Modeling & Geometry Tools", "R (Knife Mode)", "Cycle knife cutting angle (0°, 45°, 90°, 135°)" },
+            { "NavMesh Modeling & Geometry Tools", "E", "Extrude selected area edge to create connected adjacent area" },
+            { "NavMesh Modeling & Geometry Tools", "Shift + Left-Drag Edge", "Interactively drag-extrude edge into new connected area" },
+            { "NavMesh Modeling & Geometry Tools", "Shift + X", "Split selected area into two connected equal halves" },
+            { "NavMesh Modeling & Geometry Tools", "M / Shift + M", "Merge selected area with adjacent collinear coplanar area" },
+            { "NavMesh Modeling & Geometry Tools", "B", "Bridge Tool: Click Edge 1 then Edge 2 to generate connecting area" },
+            { "NavMesh Modeling & Geometry Tools", "Shift + S", "Snap selected area flush to neighbors to seal micro-gaps" },
+            { "NavMesh Modeling & Geometry Tools", "R", "Rotate selected area orientation by 90 degrees" },
+            { "NavMesh Modeling & Geometry Tools", "C", "Connect Mode: Click target area to create 2-way link (Shift: 1-way)" },
+            { "NavMesh Modeling & Geometry Tools", "Alt + C", "Toggle Connection Selection Mode" },
+            { "NavMesh Modeling & Geometry Tools", "Space", "Snap selected area elevation flush to BSP floor geometry" },
+            { "NavMesh Modeling & Geometry Tools", "Shift + D", "Duplicate selected area or multiple areas" },
+            { "NavMesh Modeling & Geometry Tools", "X / Delete / Backspace", "Delete selected area, ladder, or connection" },
+
+            // Bot Waypoint System & Path Editing
+            { "Bot Waypoint System & Path Editing", "F6", "Toggle Bot Waypoint System mode (CS-EBOT, SyPB, YaPB, POD-Bot)" },
+            { "Bot Waypoint System & Path Editing", "N (Waypoint Mode)", "Add Waypoint Tool: Click floor geometry to drop node" },
+            { "Bot Waypoint System & Path Editing", "Pen Tool (Alt+P)", "Continuous Breadcrumb Tool: Walk and drop linked nodes" },
+            { "Bot Waypoint System & Path Editing", "C (Multi-Selected)", "Batch connect all selected waypoints in sequence" },
+            { "Bot Waypoint System & Path Editing", "C (Single Selected)", "Connect Tool: Click target waypoint to establish link" },
+            { "Bot Waypoint System & Path Editing", "Alt + Left-Click", "Pick waypoint path link directly in 3D viewport" },
+            { "Bot Waypoint System & Path Editing", "T / 2 (Link Selected)", "Toggle selected waypoint connection bidirectional / one-way" },
+            { "Bot Waypoint System & Path Editing", "R (Link Selected)", "Reverse selected waypoint connection direction" },
+            { "Bot Waypoint System & Path Editing", "Space (Waypoints)", "Snap selected waypoint(s) elevation flush to BSP floor" },
+            { "Bot Waypoint System & Path Editing", "Shift + D (Waypoints)", "Duplicate selected waypoint nodes with their links" },
+
+            // Overlays, Clearance & Diagnostics
+            { "Overlays, Clearance & Diagnostics", "F3", "Toggle Entity Models & Spawn Volumes 3D visualization" },
+            { "Overlays, Clearance & Diagnostics", "F4", "Cycle BSP Shading Mode (Textured / Solid / Wireframe / Ghost)" },
+            { "Overlays, Clearance & Diagnostics", "H", "Player Clearance Cylinder Hull Visualizer (72u stand / 36u crouch)" },
+            { "Overlays, Clearance & Diagnostics", "Ctrl + Shift + V", "Toggle connection step validity (> 18u elevation) overlay" },
+            { "Overlays, Clearance & Diagnostics", "P", "Interactive Path Simulation Panel (test A* path between 2 points)" },
+            { "Overlays, Clearance & Diagnostics", "F12", "Capture high-resolution viewport screenshot to BMP" },
+
+            // File, Session & History Management
+            { "File, Session & History Management", "Ctrl + S", "Save current navigation mesh or bot waypoint file" },
+            { "File, Session & History Management", "Ctrl + Z", "Undo last action history" },
+            { "File, Session & History Management", "Ctrl + Y / Ctrl+Shift+Z", "Redo previously undone action" },
+            { "File, Session & History Management", "Ctrl + C / Ctrl + V", "Copy / Paste areas across maps and editor sessions" },
+            { "File, Session & History Management", "Ctrl + P", "Command Palette: Fast search and trigger any command or tool" },
+            { "File, Session & History Management", "Ctrl + F", "Find Area or Waypoint by numeric ID modal" },
+            { "File, Session & History Management", "Ctrl + R", "Reload current BSP map and navigation data from disk" },
+            { "File, Session & History Management", "Ctrl + ,", "Open NavStudio Preferences dialog" },
+            { "File, Session & History Management", "F1", "Open Quick Start Interactive Tutorial" },
+            { "File, Session & History Management", "Shift + F1", "Open Controls & Shortcuts Cheatsheet" },
+            { "File, Session & History Management", "Escape", "Deselect / Cancel active tool / Return to flight navigation" }
+        };
+
+        std::string query = m_helpSearchFilter;
+        std::transform(query.begin(), query.end(), query.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+        ImGui::BeginChild("ShortcutsTableChild", ImVec2(-1, -40), true);
+
+        if (ImGui::BeginTable("ShortcutsCheatsheetTable", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollY)) {
+            ImGui::TableSetupColumn("Key / Shortcut", ImGuiTableColumnFlags_WidthFixed, 230.0f);
+            ImGui::TableSetupColumn("Action & Description", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableHeadersRow();
+
+            std::string lastCat = "";
+            size_t matchCount = 0;
+
+            for (const auto& item : s_shortcuts) {
+                if (!query.empty()) {
+                    std::string kLower = item.key;
+                    std::transform(kLower.begin(), kLower.end(), kLower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    std::string dLower = item.description;
+                    std::transform(dLower.begin(), dLower.end(), dLower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    std::string cLower = item.category;
+                    std::transform(cLower.begin(), cLower.end(), cLower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+                    if (kLower.find(query) == std::string::npos &&
+                        dLower.find(query) == std::string::npos &&
+                        cLower.find(query) == std::string::npos) {
+                        continue;
+                    }
+                }
+
+                ++matchCount;
+
+                if (item.category != lastCat) {
+                    lastCat = item.category;
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 0.85f, 1.0f, 1.0f));
+                    ImGui::Text("%s", lastCat.c_str());
+                    ImGui::PopStyleColor();
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::TextDisabled("---");
+                }
+
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.35f, 0.55f, 0.6f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.35f, 0.55f, 0.6f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.2f, 0.35f, 0.55f, 0.6f));
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3.0f);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5.0f, 2.0f));
+                ImGui::SmallButton(item.key);
+                ImGui::PopStyleVar(2);
+                ImGui::PopStyleColor(3);
+
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextUnformatted(item.description);
+            }
+
+            if (matchCount == 0 && !query.empty()) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextDisabled("No matches");
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "No shortcuts found matching '%s'.", query.c_str());
+            }
+
+            ImGui::EndTable();
+        }
+
+        ImGui::EndChild();
 
         ImGui::Spacing();
-        ImGui::Separator();
-        if (ImGui::Button("Close", ImVec2(-1, 28))) {
+        if (ImGui::Button("Close", ImVec2(-1, 26))) {
             m_showHelpModal = false;
             ImGui::CloseCurrentPopup();
         }
+
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderTutorialModal(EditorScene& scene, Camera& camera, CommandManager& /*cmdMgr*/) {
+    ImGui::OpenPopup("Quick Start Interactive Tutorial##TutorialModal");
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(720, 560), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("Quick Start Interactive Tutorial##TutorialModal", &m_showTutorialModal, ImGuiWindowFlags_None)) {
+        ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "NavStudio Quick Start Interactive Tutorial");
+        ImGui::TextDisabled("A fast 5-step walkthrough to master camera controls, modeling tools, gizmos, and waypoint editing.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        const char* stepLabels[] = {
+            "1. Camera Flight",
+            "2. Selection & Nudge",
+            "3. Universal Gizmo",
+            "4. NavMesh Tools",
+            "5. Bot Waypoints"
+        };
+
+        for (int i = 0; i < 5; ++i) {
+            bool active = (m_tutorialCurrentStep == i);
+            if (active) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.9f, 1.0f));
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.24f, 0.3f, 0.8f));
+            }
+            if (ImGui::Button(stepLabels[i], ImVec2(134, 26))) {
+                m_tutorialCurrentStep = i;
+            }
+            ImGui::PopStyleColor();
+            if (i < 4) ImGui::SameLine(0, 6.0f);
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::BeginChild("TutorialStepContentChild", ImVec2(-1, -78), true);
+
+        if (m_tutorialCurrentStep == 0) {
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "Step 1: First-Person Camera Flight & Navigation");
+            ImGui::Spacing();
+            ImGui::BulletText("Right-Click + Drag: Look around in full 3D first-person camera mode.");
+            ImGui::BulletText("W / A / S / D: Fly forward, backward, strafe left, and strafe right.");
+            ImGui::BulletText("E / Q: Elevate up / descend down.");
+            ImGui::BulletText("Mouse Wheel while holding Right-Click: Dynamically scale camera movement speed.");
+            ImGui::BulletText("Alt + Left-Drag: Orbit around the selection pivot in turntable mode.");
+            ImGui::BulletText("Alt + Middle-Drag / Shift+MMB: Pan the camera across the 3D plane.");
+            ImGui::BulletText("Numpad 7 / 1 / 3: Instant orthogonal snapping (Top-down 2D, Front, Side).");
+            ImGui::BulletText("Press F: Instantly focus and center the camera on the active selection.");
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Live Camera Tuning Controls:");
+            float speed = camera.GetSpeed();
+            if (ImGui::SliderFloat("Camera Speed", &speed, 100.0f, 3000.0f, "%.0f u/s")) {
+                camera.SetSpeed(speed);
+                scene.GetPreferences().cameraMoveSpeed = speed;
+            }
+            float sens = camera.GetSensitivity();
+            if (ImGui::SliderFloat("Mouse Sensitivity", &sens, 0.02f, 0.50f, "%.2f")) {
+                camera.SetSensitivity(sens);
+                scene.GetPreferences().mouseSensitivity = sens;
+            }
+            bool invY = camera.GetInvertY();
+            if (ImGui::Checkbox("Invert Y Look Axis", &invY)) {
+                camera.SetInvertY(invY);
+                scene.GetPreferences().invertY = invY;
+            }
+        } else if (m_tutorialCurrentStep == 1) {
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "Step 2: Selection & Precision Arrow Key Nudge");
+            ImGui::Spacing();
+            ImGui::BulletText("Left-Click: Directly select any NavArea, Waypoint node, Ladder, or Entity.");
+            ImGui::BulletText("Shift + Click / Ctrl + Click: Add or toggle multiple items in a multi-selection.");
+            ImGui::BulletText("Shift + B: Toggle Marquee Rectangle Box Selection; click & drag across viewport.");
+            ImGui::BulletText("Alt + Left-Click: Pick connection lines directly without interfering with areas or waypoints.");
+            ImGui::BulletText("Arrow Keys (Left, Right, Up, Down): Precision Nudge selection by active grid size.");
+            ImGui::BulletText("Shift + Up / Down: Precision Nudge selection vertically along the Z axis.");
+            ImGui::BulletText("[ / ]: Decrease or increase active Hammer grid step size (1u to 512u).");
+            ImGui::BulletText("Space: Snap selection elevation flush to the underlying BSP map floor.");
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Live Grid Testing Controls:");
+            float curGrid = scene.GetGridSize();
+            ImGui::Text("Active Grid Step: %.0f units", curGrid);
+            if (ImGui::Button("8u##TutGrid")) scene.SetGridSize(8.0f);
+            ImGui::SameLine();
+            if (ImGui::Button("16u##TutGrid")) scene.SetGridSize(16.0f);
+            ImGui::SameLine();
+            if (ImGui::Button("32u##TutGrid")) scene.SetGridSize(32.0f);
+            ImGui::SameLine();
+            if (ImGui::Button("64u##TutGrid")) scene.SetGridSize(64.0f);
+            ImGui::SameLine();
+            if (ImGui::Button("128u##TutGrid")) scene.SetGridSize(128.0f);
+            bool gSnap = scene.GetGridSnap();
+            if (ImGui::Checkbox("Enable Grid Snapping", &gSnap)) {
+                if (gSnap != scene.GetGridSnap()) scene.ToggleGridSnap();
+            }
+        } else if (m_tutorialCurrentStep == 2) {
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "Step 3: Blender-Style 3D Universal Transform Gizmo");
+            ImGui::Spacing();
+            ImGui::BulletText("Blender Color Palette: Red (#EA324C) for X, Green (#70B926) for Y, Blue (#2882E6) for Z.");
+            ImGui::BulletText("Press 1: Translate Mode (Solid directional arrows + colored axis rings).");
+            ImGui::BulletText("Press 2: Rotate Mode (Camera-facing rotation arcs).");
+            ImGui::BulletText("Press 3: Scale Mode (Mid-axis scale cubes placed at 52% axis reach).");
+            ImGui::BulletText("Press 4: Combined Universal Gizmo (All translation, rotation, and scale handles).");
+            ImGui::BulletText("Center Orange Pivot Dot: Free camera-plane translation.");
+            ImGui::BulletText("Outer White Screen Ring: View-plane translation relative to screen camera.");
+            ImGui::BulletText("Press X, Y, or Z during transform: Constrain movement strictly along that single axis.");
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Live Gizmo Mode Switcher:");
+            auto curGiz = scene.GetGizmoMode();
+            if (ImGui::RadioButton("1: Translate##TutGiz", curGiz == GIZMO_MODE_TRANSLATE)) scene.SetGizmoMode(GIZMO_MODE_TRANSLATE);
+            ImGui::SameLine();
+            if (ImGui::RadioButton("2: Rotate##TutGiz", curGiz == GIZMO_MODE_ROTATE)) scene.SetGizmoMode(GIZMO_MODE_ROTATE);
+            ImGui::SameLine();
+            if (ImGui::RadioButton("3: Scale##TutGiz", curGiz == GIZMO_MODE_SCALE)) scene.SetGizmoMode(GIZMO_MODE_SCALE);
+            ImGui::SameLine();
+            if (ImGui::RadioButton("4: Combined Universal##TutGiz", curGiz == GIZMO_MODE_COMBINED)) scene.SetGizmoMode(GIZMO_MODE_COMBINED);
+        } else if (m_tutorialCurrentStep == 3) {
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "Step 4: NavMesh Modeling & Fast Geometry Tools");
+            ImGui::Spacing();
+            ImGui::BulletText("N (Draw Area): Click 1st corner, then 2nd corner on floor to create new rectangular NavArea.");
+            ImGui::BulletText("K (Knife Tool): Interactively slice any NavArea; press R to cycle cut angle (0, 45, 90, 135 deg).");
+            ImGui::BulletText("E / Shift+Drag Edge: Hammer-style edge extrusion into new adjacent connected areas.");
+            ImGui::BulletText("B (Bridge Tool): Click Edge 1 then Edge 2 to generate a connecting corridor.");
+            ImGui::BulletText("M / Shift + M: Quick Merge coplanar adjacent NavAreas to simplify pathfinding.");
+            ImGui::BulletText("C (Connect Tool): Click target area to establish 2-way link (Hold Shift for 1-way link).");
+            ImGui::BulletText("Shift + S (Snap to Neighbors): Flushes selected area against adjacent neighbors to seal gaps.");
+            ImGui::BulletText("Ctrl + G: Open NavMesh Generator modal to auto-generate mesh for entire BSP map.");
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Tool Activation:");
+            if (ImGui::Button(scene.IsDrawAreaMode() ? "Exit Draw Mode##Tut" : "Test Draw Area (N)##Tut")) scene.ToggleDrawAreaMode();
+            ImGui::SameLine();
+            if (ImGui::Button(scene.IsKnifeMode() ? "Exit Knife Mode##Tut" : "Test Knife Tool (K)##Tut")) scene.ToggleKnifeMode();
+            ImGui::SameLine();
+            if (ImGui::Button(scene.IsBridgeMode() ? "Exit Bridge Mode##Tut" : "Test Bridge Tool (B)##Tut")) scene.ToggleBridgeMode();
+        } else if (m_tutorialCurrentStep == 4) {
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "Step 5: Bot Waypoint System (CS-EBOT, SyPB, YaPB, POD-Bot)");
+            ImGui::Spacing();
+            ImGui::BulletText("Press F6: Toggle Bot Waypoint editing mode and 3D visualization.");
+            ImGui::BulletText("Placing Nodes (N): Left-click on floor geometry to drop waypoint nodes with ground snapping.");
+            ImGui::BulletText("Continuous Pen Tool: Walk through map and left-click to drop chain-connected nodes.");
+            ImGui::BulletText("Connect Multi (C): Select 2 or more waypoints and press C to connect them in sequence!");
+            ImGui::BulletText("Connect Single (C): Select 1 waypoint, press C, then left-click target waypoint.");
+            ImGui::BulletText("Alt + Left-Click: Pick path connection directly; press T/2 to toggle two-way, R to reverse.");
+            ImGui::BulletText("Connection Arrows: Directional arrows visualize bot travel direction along every link.");
+            ImGui::BulletText("Batch Waypoint Generator: Mass-produce waypoints for whole map directories with bot/mod choice!");
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Live Waypoint Display Controls:");
+            bool showWpt = scene.IsShowWaypoints();
+            if (ImGui::Checkbox("Show Bot Waypoints (F6)", &showWpt)) scene.ToggleShowWaypoints();
+            ImGui::SameLine();
+            bool showConn = scene.IsShowWaypointConnections();
+            if (ImGui::Checkbox("Show Connection Lines", &showConn)) scene.SetShowWaypointConnections(showConn);
+        }
+
+        ImGui::EndChild();
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        bool showStart = scene.GetPreferences().showTutorialOnStartup;
+        if (ImGui::Checkbox("Show this tutorial on startup", &showStart)) {
+            scene.GetPreferences().showTutorialOnStartup = showStart;
+            scene.GetPreferences().Save();
+        }
+
+        ImGui::SameLine(ImGui::GetContentRegionAvail().x - 220.0f);
+        if (m_tutorialCurrentStep > 0) {
+            if (ImGui::Button("< Back", ImVec2(80, 26))) {
+                m_tutorialCurrentStep--;
+            }
+            ImGui::SameLine();
+        } else {
+            ImGui::Dummy(ImVec2(80, 26));
+            ImGui::SameLine();
+        }
+
+        if (m_tutorialCurrentStep < 4) {
+            if (ImGui::Button("Next >", ImVec2(80, 26))) {
+                m_tutorialCurrentStep++;
+            }
+            ImGui::SameLine();
+        }
+
+        if (ImGui::Button("Close", ImVec2(60, 26))) {
+            m_showTutorialModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+
         ImGui::EndPopup();
     }
 }
@@ -3589,7 +3965,7 @@ void EditorUI::RenderAboutModal() {
 
     if (ImGui::BeginPopupModal("About NavStudio##AboutModal", &m_showAboutModal, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "NavStudio - GoldSrc BSP & NavMesh / Waypoint Editor");
-        ImGui::TextDisabled("Version 1.6.8.2 (Win32 / Linux)");
+        ImGui::TextDisabled("Version 1.6.8.3 (Win32 / Linux)");
         ImGui::Separator();
         ImGui::Spacing();
 
@@ -3855,6 +4231,18 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
                 }
                 ImGui::SliderFloat("Mouse Wheel Speed Step", &prefs.cameraSpeedScrollStep, 10.0f, 200.0f, "%.0f u");
 
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Navigation Preset:");
+                const char* navPresets[] = {
+                    "FPS Flycam (Default: Right-Click Look + WASD Flight)",
+                    "Blender Turntable (MMB Orbit, Shift+MMB Pan, Wheel Zoom)",
+                    "Valve Hammer Editor (Right-Click Flycam, Space+LMB Pan)"
+                };
+                ImGui::Combo("Navigation Preset", &prefs.navigationPreset, navPresets, 3);
+                ImGui::TextDisabled("Controls viewport rotation, panning, and flight scheme.");
+
                 ImGui::EndChild();
                 ImGui::EndTabItem();
             }
@@ -3872,6 +4260,10 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
                 }
                 ImGui::Checkbox("Show Blender Navigation Compass", &prefs.showCompass);
                 ImGui::Checkbox("Show Player Clearance Cylinder Hull by Default", &prefs.showClearanceHullDefault);
+                if (ImGui::Checkbox("Show Viewport Bottom Context HUD", &prefs.showViewportBottomHUD)) {
+                    m_showViewportBottomHUD = prefs.showViewportBottomHUD;
+                }
+                ImGui::Checkbox("Show Quick Start Tutorial on Startup", &prefs.showTutorialOnStartup);
                 ImGui::Checkbox("Show Bounding Box Around Selection", &prefs.showSelectedAABB);
                 ImGui::Checkbox("Render Entity Icons & Spawn Volumes", &prefs.showEntityModels);
 
@@ -4604,6 +4996,130 @@ void EditorUI::RenderGizmoNudgeHUD(EditorScene& scene, Camera& /*camera*/, Comma
     ImGui::End();
 }
 
+void EditorUI::RenderViewportBottomHUD(EditorScene& scene, Camera& /*camera*/, CommandManager& /*cmdMgr*/) {
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    if (!vp) return;
+
+    ImVec2 hudPos(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y - 36.0f);
+    ImGui::SetNextWindowPos(hudPos, ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+    ImGui::SetNextWindowBgAlpha(0.88f);
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                             ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.25f, 0.55f, 0.95f, 0.50f));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.10f, 0.13f, 0.92f));
+
+    if (ImGui::Begin("##ViewportBottomHUD", nullptr, flags)) {
+        auto DrawKeyBadge = [](const char* key, const char* action, const ImVec4& keyCol = ImVec4(0.18f, 0.38f, 0.70f, 1.0f)) {
+            ImGui::PushStyleColor(ImGuiCol_Button, keyCol);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, keyCol);
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, keyCol);
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5.0f, 1.5f));
+            ImGui::SmallButton(key);
+            ImGui::PopStyleVar(2);
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine(0, 4.0f);
+            ImGui::TextUnformatted(action);
+            ImGui::SameLine(0, 10.0f);
+        };
+
+        auto mode = scene.GetTransformMode();
+
+        if (mode == EditorScene::TRANSFORM_TRANSLATE || mode == EditorScene::TRANSFORM_SCALE) {
+            DrawKeyBadge("L-Click / Enter", "Confirm", ImVec4(0.2f, 0.65f, 0.3f, 1.0f));
+            DrawKeyBadge("X / Y / Z", "Lock Axis", ImVec4(0.8f, 0.45f, 0.1f, 1.0f));
+            DrawKeyBadge("Escape", "Cancel", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+        } else if (scene.IsPenToolActive()) {
+            DrawKeyBadge("L-Click", "Place & Link Node", ImVec4(0.2f, 0.65f, 0.3f, 1.0f));
+            DrawKeyBadge("Escape", "Exit Pen Tool", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+        } else if (scene.IsDrawAreaMode()) {
+            DrawKeyBadge("L-Click", "Set Corner 1 / 2", ImVec4(0.2f, 0.65f, 0.3f, 1.0f));
+            DrawKeyBadge("Escape", "Cancel Draw", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+        } else if (scene.IsKnifeMode()) {
+            DrawKeyBadge("R", "Cycle Angle (0/45/90/135)", ImVec4(0.8f, 0.45f, 0.1f, 1.0f));
+            DrawKeyBadge("L-Click", "Slice Area", ImVec4(0.2f, 0.65f, 0.3f, 1.0f));
+            DrawKeyBadge("Escape", "Exit Knife", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+        } else if (scene.IsBridgeMode()) {
+            DrawKeyBadge("L-Click", "Click Edge 1 then Edge 2 to Bridge", ImVec4(0.2f, 0.65f, 0.3f, 1.0f));
+            DrawKeyBadge("Escape", "Cancel Bridge", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+        } else if (scene.IsBoxSelectMode()) {
+            DrawKeyBadge("L-Drag", "Marquee Select", ImVec4(0.2f, 0.65f, 0.3f, 1.0f));
+            DrawKeyBadge("Shift", "Add", ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
+            DrawKeyBadge("Alt", "Subtract", ImVec4(0.8f, 0.4f, 0.1f, 1.0f));
+            DrawKeyBadge("Escape", "Exit Box Select", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+        } else if (scene.HasWaypointMultiSelection()) {
+            DrawKeyBadge("C", "Connect Multi", ImVec4(0.2f, 0.7f, 0.4f, 1.0f));
+            DrawKeyBadge("Space", "Floor Snap");
+            DrawKeyBadge("Shift+D", "Duplicate");
+            DrawKeyBadge("Delete", "Delete", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+            DrawKeyBadge("Arrows", "Nudge", ImVec4(0.8f, 0.5f, 0.1f, 1.0f));
+            DrawKeyBadge("F", "Focus");
+            DrawKeyBadge("Esc", "Deselect", ImVec4(0.4f, 0.4f, 0.4f, 1.0f));
+        } else if (scene.GetSelectedWaypointID() != 0) {
+            DrawKeyBadge("C", "Connect Link", ImVec4(0.2f, 0.7f, 0.4f, 1.0f));
+            DrawKeyBadge("Space", "Floor Snap");
+            DrawKeyBadge("1/2/3/4", "Gizmo");
+            DrawKeyBadge("Delete", "Delete", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+            DrawKeyBadge("Arrows", "Nudge", ImVec4(0.8f, 0.5f, 0.1f, 1.0f));
+            DrawKeyBadge("F", "Focus");
+            DrawKeyBadge("Esc", "Deselect", ImVec4(0.4f, 0.4f, 0.4f, 1.0f));
+        } else if (scene.HasSelectedWaypointConnection()) {
+            DrawKeyBadge("T / 2", "Two-Way Link", ImVec4(0.2f, 0.7f, 0.4f, 1.0f));
+            DrawKeyBadge("R", "Reverse", ImVec4(0.8f, 0.5f, 0.1f, 1.0f));
+            DrawKeyBadge("Delete", "Remove Link", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+            DrawKeyBadge("F", "Focus");
+            DrawKeyBadge("Esc", "Deselect", ImVec4(0.4f, 0.4f, 0.4f, 1.0f));
+        } else if (scene.GetSelectedAreaID() != 0 || !scene.GetSelectedAreaIDs().empty()) {
+            DrawKeyBadge("G", "Grab", ImVec4(0.2f, 0.6f, 0.9f, 1.0f));
+            DrawKeyBadge("S", "Scale");
+            DrawKeyBadge("E", "Extrude", ImVec4(0.2f, 0.7f, 0.4f, 1.0f));
+            DrawKeyBadge("Shift+X", "Split");
+            DrawKeyBadge("M", "Merge");
+            DrawKeyBadge("C", "Connect");
+            DrawKeyBadge("Space", "Floor");
+            DrawKeyBadge("Arrows", "Nudge", ImVec4(0.8f, 0.5f, 0.1f, 1.0f));
+            DrawKeyBadge("F", "Focus");
+        } else if (scene.HasSelectedConnection()) {
+            DrawKeyBadge("T", "Two-Way Link", ImVec4(0.2f, 0.7f, 0.4f, 1.0f));
+            DrawKeyBadge("R", "Reverse", ImVec4(0.8f, 0.5f, 0.1f, 1.0f));
+            DrawKeyBadge("Delete", "Disconnect", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+            DrawKeyBadge("Esc", "Deselect", ImVec4(0.4f, 0.4f, 0.4f, 1.0f));
+        } else if (scene.GetSelectedLadderID() != 0) {
+            DrawKeyBadge("F", "Focus");
+            DrawKeyBadge("Delete", "Remove Ladder", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+            DrawKeyBadge("Esc", "Deselect", ImVec4(0.4f, 0.4f, 0.4f, 1.0f));
+        } else {
+            DrawKeyBadge("R-Click+WASD", "Fly Camera");
+            DrawKeyBadge("Alt+Click", "Pick Link", ImVec4(0.8f, 0.45f, 0.1f, 1.0f));
+            DrawKeyBadge("N", "Draw Area / Waypoint");
+            DrawKeyBadge("K", "Knife Tool");
+            DrawKeyBadge("Shift+B", "Box Select");
+            DrawKeyBadge("Ctrl+P", "Palette");
+        }
+
+        // Quick Tutorial Button on right edge
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.55f, 0.85f, 0.9f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.65f, 0.95f, 1.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 2.0f));
+        if (ImGui::SmallButton("F1 Guide")) {
+            m_showTutorialModal = true;
+            m_tutorialCurrentStep = 0;
+        }
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor(2);
+    }
+    ImGui::End();
+
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(2);
+}
+
 void EditorUI::RenderGenerateModal(EditorScene& scene) {
     ImGui::OpenPopup("Auto-Generate NavMesh");
 
@@ -4663,19 +5179,31 @@ void EditorUI::RenderGenerateModal(EditorScene& scene) {
 }
 
 void EditorUI::RenderBatchGenerateModal(EditorScene& /*scene*/) {
-    ImGui::OpenPopup("Batch Mass-Produce NavMeshes");
+    ImGui::OpenPopup("Batch Mass-Produce Navigation");
 
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(680, 520), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(720, 560), ImGuiCond_Appearing);
 
-    if (ImGui::BeginPopupModal("Batch Mass-Produce NavMeshes", &m_showBatchGenerateModal, ImGuiWindowFlags_None)) {
-        ImGui::Text("Batch NavMesh Mass-Production");
-        ImGui::TextDisabled("Generate navigation meshes for multiple GoldSrc BSP maps concurrently.");
+    if (ImGui::BeginPopupModal("Batch Mass-Produce Navigation", &m_showBatchGenerateModal, ImGuiWindowFlags_None)) {
+        ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Batch Navigation Mass-Production");
+        ImGui::TextDisabled("Generate navigation meshes or bot waypoint graphs for multiple GoldSrc BSP maps concurrently.");
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
 
+        // Mode Selector: NavMesh vs Bot Waypoints
+        ImGui::Text("Batch Output Mode:");
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Valve NavMeshes (.nav)", &m_batchTargetType, 0)) {
+            m_batchItems.clear();
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Bot Waypoints (.ewp / .spt / .pwf / .wpt)", &m_batchTargetType, 1)) {
+            m_batchItems.clear();
+        }
+
+        ImGui::Spacing();
         ImGui::Text("Maps Directory (containing .bsp files):");
         ImGui::SetNextItemWidth(-90);
         ImGui::InputText("##BatchMapsDir", m_batchMapDirBuffer, sizeof(m_batchMapDirBuffer));
@@ -4701,13 +5229,58 @@ void EditorUI::RenderBatchGenerateModal(EditorScene& /*scene*/) {
         }
 
         ImGui::Spacing();
-        ImGui::Columns(2, "BatchOptionsColumns", false);
-        ImGui::SliderFloat("Step Size", &m_genOptions.stepSize, 15.0f, 40.0f, "%.1f");
-        ImGui::SliderInt("Threads", &m_batchThreads, 1, 32);
-        ImGui::NextColumn();
-        ImGui::Checkbox("Overwrite Existing .nav", &m_batchOverwrite);
-        ImGui::Checkbox("Recursive Directory Scan", &m_batchRecursive);
-        ImGui::Columns(1);
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (m_batchTargetType == 0) {
+            // NavMesh Options
+            ImGui::Columns(2, "BatchNavOptionsColumns", false);
+            ImGui::SliderFloat("Step Size", &m_genOptions.stepSize, 15.0f, 40.0f, "%.1f");
+            ImGui::SliderInt("Threads", &m_batchThreads, 1, 32);
+            ImGui::NextColumn();
+            ImGui::Checkbox("Overwrite Existing .nav", &m_batchOverwrite);
+            ImGui::Checkbox("Recursive Directory Scan", &m_batchRecursive);
+            ImGui::Columns(1);
+        } else {
+            // Bot Waypoint Options
+            const char* botTypes[] = {
+                "CS-EBOT (.ewp) - v127 LZSS / v126",
+                "SyPB (.spt) - Zombie & Tactical Bot",
+                "YaPB (.pwf) - Modern POD-Bot evolution",
+                "POD-Bot mm (.wpt) - Classic GoldSrc Bot"
+            };
+            const char* gameMods[] = {
+                "Standard CS 1.6 (Bomb, Hostage, VIP)",
+                "Zombie Plague / Biohazard / Zombie Escape",
+                "Deathmatch / CSDM / GunGame"
+            };
+            const char* sourceStrategies[] = {
+                "Direct BSP Geometry (E-Bot Engine)",
+                "Convert Existing .nav (fallback to BSP if .nav missing)"
+            };
+
+            ImGui::Columns(2, "BatchWptOptionsCols", false);
+            ImGui::Combo("Target Bot", &m_batchBotType, botTypes, 4);
+            ImGui::Combo("Target Game Mod", &m_batchGameMod, gameMods, 3);
+            ImGui::Combo("Source Strategy", &m_batchSourceType, sourceStrategies, 2);
+
+            ImGui::NextColumn();
+            ImGui::SliderFloat("Node Spacing", &m_batchEBotOptions.nodeSpacing, 100.0f, 250.0f, "%.0f u");
+            ImGui::SliderFloat("Connect Radius", &m_batchEBotOptions.connectRadius, 120.0f, 300.0f, "%.0f u");
+            ImGui::SliderInt("Threads", &m_batchThreads, 1, 32);
+            ImGui::Columns(1);
+
+            ImGui::Spacing();
+            ImGui::Columns(2, "BatchWptFlagsCols", false);
+            ImGui::Checkbox("Overwrite Existing Waypoints", &m_batchOverwrite);
+            ImGui::Checkbox("Recursive Directory Scan", &m_batchRecursive);
+            ImGui::Checkbox("Calculate Wayzone Radii", &m_batchCalcWayzones);
+            ImGui::NextColumn();
+            ImGui::Checkbox("Prune Crossing Links", &m_batchEBotOptions.pruneCrossingLinks);
+            ImGui::Checkbox("Generate Ladders", &m_batchEBotOptions.generateLadders);
+            ImGui::Checkbox("Generate Camp / Sniper Perches", &m_batchEBotOptions.generateCamps);
+            ImGui::Columns(1);
+        }
 
         ImGui::Spacing();
         if (ImGui::Button("Scan Maps", ImVec2(120, 24)) && !m_batchRunning) {
@@ -4715,13 +5288,21 @@ void EditorUI::RenderBatchGenerateModal(EditorScene& /*scene*/) {
             std::string dir = m_batchMapDirBuffer;
             if (!dir.empty() && fs::exists(dir)) {
                 try {
+                    std::string targetExt = ".nav";
+                    if (m_batchTargetType == 1) {
+                        if (m_batchBotType == 0) targetExt = ".ewp";
+                        else if (m_batchBotType == 1) targetExt = ".spt";
+                        else if (m_batchBotType == 2) targetExt = ".pwf";
+                        else if (m_batchBotType == 3) targetExt = ".wpt";
+                    }
+
                     auto scanDir = [&](const fs::path& p) {
                         if (fs::is_regular_file(p) && p.extension() == ".bsp") {
                             NavGenerator::BatchItem item;
                             item.bspPath = p.string();
                             fs::path outP = (m_batchOutDirBuffer[0] != '\0')
-                                ? fs::path(m_batchOutDirBuffer) / (p.stem().string() + ".nav")
-                                : p.parent_path() / (p.stem().string() + ".nav");
+                                ? fs::path(m_batchOutDirBuffer) / (p.stem().string() + targetExt)
+                                : p.parent_path() / (p.stem().string() + targetExt);
                             item.navPath = outP.string();
                             m_batchItems.push_back(item);
                         }
@@ -4747,7 +5328,7 @@ void EditorUI::RenderBatchGenerateModal(EditorScene& /*scene*/) {
 
         // Progress bar
         if (m_batchTotalCount > 0) {
-            float frac = static_cast<float>(m_batchCompletedCount) / m_batchTotalCount;
+            float frac = static_cast<float>(m_batchCompletedCount) / static_cast<float>(m_batchTotalCount);
             char progressBuf[64];
             std::snprintf(progressBuf, sizeof(progressBuf), "%zu / %zu Maps (%.0f%%)",
                           m_batchCompletedCount, m_batchTotalCount, frac * 100.0f);
@@ -4755,10 +5336,10 @@ void EditorUI::RenderBatchGenerateModal(EditorScene& /*scene*/) {
         }
 
         // Map list table
-        ImGui::BeginChild("BatchItemsTableChild", ImVec2(-1, 180), true);
+        ImGui::BeginChild("BatchItemsTableChild", ImVec2(-1, 160), true);
         if (ImGui::BeginTable("BatchMapTable", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollY)) {
             ImGui::TableSetupColumn("Map", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("Target NAV", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn(m_batchTargetType == 0 ? "Target NAV" : "Target Waypoints", ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, 150.0f);
             ImGui::TableHeadersRow();
 
@@ -4774,7 +5355,11 @@ void EditorUI::RenderBatchGenerateModal(EditorScene& /*scene*/) {
 
                 ImGui::TableSetColumnIndex(2);
                 if (item.result.success) {
-                    ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "Done (%zu areas)", item.result.areasGenerated);
+                    if (m_batchTargetType == 0) {
+                        ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "Done (%zu areas)", item.result.areasGenerated);
+                    } else {
+                        ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "Done (%zu nodes)", item.result.areasGenerated);
+                    }
                 } else if (!item.result.errorMessage.empty()) {
                     ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", item.result.errorMessage.c_str());
                 } else {
@@ -4789,34 +5374,121 @@ void EditorUI::RenderBatchGenerateModal(EditorScene& /*scene*/) {
         ImGui::Separator();
         ImGui::Spacing();
 
-        if (ImGui::Button("Start Batch Generation", ImVec2(180, 30)) && !m_batchRunning && !m_batchItems.empty()) {
+        if (ImGui::Button("Start Batch Generation", ImVec2(190, 30)) && !m_batchRunning && !m_batchItems.empty()) {
             m_batchRunning = true;
             m_batchCompletedCount = 0;
             m_batchTotalCount = m_batchItems.size();
 
-            std::vector<std::string> bspList;
-            for (const auto& it : m_batchItems) bspList.push_back(it.bspPath);
-            std::string outDir = m_batchOutDirBuffer;
-            NavGenerateOptions opts = m_genOptions;
-            opts.maxThreads = m_batchThreads;
-            bool overwrite = m_batchOverwrite;
+            if (m_batchTargetType == 0) {
+                // Valve NavMeshes Batch
+                std::vector<std::string> bspList;
+                for (const auto& it : m_batchItems) bspList.push_back(it.bspPath);
+                std::string outDir = m_batchOutDirBuffer;
+                NavGenerateOptions opts = m_genOptions;
+                opts.maxThreads = m_batchThreads;
+                bool overwrite = m_batchOverwrite;
 
-            std::thread([this, bspList, outDir, opts, overwrite]() {
-                auto res = NavGenerator::GenerateBatch(
-                    bspList, outDir, opts, overwrite,
-                    [this](size_t done, size_t /*total*/, const NavGenerator::BatchItem& item) {
-                        m_batchCompletedCount = done;
-                        for (auto& bi : m_batchItems) {
-                            if (bi.bspPath == item.bspPath) {
-                                bi.result = item.result;
-                                break;
+                std::thread([this, bspList, outDir, opts, overwrite]() {
+                    auto res = NavGenerator::GenerateBatch(
+                        bspList, outDir, opts, overwrite,
+                        [this](size_t done, size_t /*total*/, const NavGenerator::BatchItem& item) {
+                            m_batchCompletedCount = done;
+                            for (auto& bi : m_batchItems) {
+                                if (bi.bspPath == item.bspPath) {
+                                    bi.result = item.result;
+                                    break;
+                                }
                             }
                         }
+                    );
+                    (void)res;
+                    m_batchRunning = false;
+                }).detach();
+            } else {
+                // Bot Waypoints Batch
+                int bot = m_batchBotType;
+                int mod = m_batchGameMod;
+                int srcType = m_batchSourceType;
+                bool overwrite = m_batchOverwrite;
+                bool calcWayzones = m_batchCalcWayzones;
+                EBotGenerateOptions ebotOpts = m_batchEBotOptions;
+
+                std::thread([this, bot, mod, srcType, overwrite, calcWayzones, ebotOpts]() {
+                    BotType bType = static_cast<BotType>(bot);
+                    GameMod gMod = static_cast<GameMod>(mod);
+
+                    for (size_t i = 0; i < m_batchItems.size(); ++i) {
+                        auto& item = m_batchItems[i];
+                        if (fs::exists(item.navPath) && !overwrite) {
+                            item.result.success = true;
+                            item.result.errorMessage = "Skipped (exists)";
+                            m_batchCompletedCount = i + 1;
+                            continue;
+                        }
+
+                        bool handled = false;
+
+                        // Try converting from existing .nav first if strategy requested
+                        if (srcType == 1) {
+                            fs::path pBsp(item.bspPath);
+                            fs::path navP = pBsp.parent_path() / (pBsp.stem().string() + ".nav");
+                            if (fs::exists(navP)) {
+                                NavMesh nav;
+                                if (nav.Load(navP.string())) {
+                                    WaypointGraph graph;
+                                    WaypointNavConverter::NavToWaypoints(nav, graph, bType, gMod);
+                                    if (calcWayzones) {
+                                        BSPFile bsp;
+                                        if (bsp.Load(item.bspPath)) {
+                                            graph.CalculateAllWayzones(&bsp);
+                                        }
+                                    }
+                                    if (graph.Save(item.navPath, bType, gMod)) {
+                                        item.result.success = true;
+                                        item.result.areasGenerated = graph.GetNodeCount();
+                                        handled = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Generate from BSP Geometry
+                        if (!handled) {
+                            BSPFile bsp;
+                            if (bsp.Load(item.bspPath)) {
+                                WaypointGraph graph;
+                                EBotGenerateOptions opts = ebotOpts;
+                                opts.botType = bType;
+                                opts.mod = gMod;
+                                auto res = EBotGenerator::Generate(bsp, graph, opts);
+                                if (res.success) {
+                                    if (calcWayzones) {
+                                        graph.CalculateAllWayzones(&bsp);
+                                    }
+                                    if (graph.Save(item.navPath, bType, gMod)) {
+                                        item.result.success = true;
+                                        item.result.areasGenerated = graph.GetNodeCount();
+                                        handled = true;
+                                    } else {
+                                        item.result.success = false;
+                                        item.result.errorMessage = "Save failed";
+                                    }
+                                } else {
+                                    item.result.success = false;
+                                    item.result.errorMessage = res.errorMessage.empty() ? "Gen failed" : res.errorMessage;
+                                }
+                            } else {
+                                item.result.success = false;
+                                item.result.errorMessage = "Failed to load BSP";
+                            }
+                        }
+
+                        m_batchCompletedCount = i + 1;
                     }
-                );
-                (void)res;
-                m_batchRunning = false;
-            }).detach();
+
+                    m_batchRunning = false;
+                }).detach();
+            }
         }
 
         ImGui::SameLine();
@@ -5558,8 +6230,9 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
             { "Edit", "Align Selected Areas: Center Y", "", [&]() { scene.AlignSelectedAreas(EditorScene::ALIGN_CENTER_Y, cmdMgr); } },
             { "Edit", "Align Selected Areas: Flatten Floor Z", "", [&]() { scene.AlignSelectedAreas(EditorScene::ALIGN_FLOOR_Z, cmdMgr); } },
             { "Preferences", "Open Preferences", "Ctrl+,", [&]() { OpenPreferences(); } },
-            { "Help", "Documentation & Shortcuts", "F1", [&]() { m_showHelpModal = true; } },
-            { "Help", "About NavStudio (Credits, Discord, GitHub)", "", [&]() { m_showAboutModal = true; } }
+            { "Help", "Quick Start Interactive Tutorial", "F1", [&]() { OpenTutorialModal(); } },
+            { "Help", "Controls & Shortcuts Cheatsheet", "Shift+F1", [&]() { OpenHelpModal(); } },
+            { "Help", "About NavStudio (Author & GitHub)", "", [&]() { m_showAboutModal = true; } }
         };
 
         if (m_commandPaletteFocus) {

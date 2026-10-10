@@ -85,6 +85,7 @@ struct EditorPreferences {
     float cameraSmoothFactor{12.0f};
     float cameraSpeedScrollStep{50.0f};
     int viewportBkgColor{0}; // 0: Modern Slate, 1: Deep Navy, 2: Warm Grey, 3: Hammer Classic
+    int navigationPreset{0}; // 0: FPS Flycam (Default), 1: Blender Turntable, 2: Valve Hammer
 
     // Visuals & Overlays
     bool showConnectionValidity{true};
@@ -92,6 +93,8 @@ struct EditorPreferences {
     bool showFps{true};
     bool showCompass{true};
     bool showClearanceHullDefault{false};
+    bool showViewportBottomHUD{true};
+    bool showTutorialOnStartup{false};
     int bspWireframeColor{0}; // 0: Cyan Blue, 1: Clean White, 2: GoldSrc Amber, 3: Matrix Green
     float bspGhostAlpha{0.25f};
     bool showSelectedAABB{true};
@@ -185,12 +188,15 @@ struct EditorPreferences {
         cameraSmoothFactor = 12.0f;
         cameraSpeedScrollStep = 50.0f;
         viewportBkgColor = 0;
+        navigationPreset = 0;
 
         showConnectionValidity = true;
         show3DSkybox = true;
         showFps = true;
         showCompass = true;
         showClearanceHullDefault = false;
+        showViewportBottomHUD = true;
+        showTutorialOnStartup = false;
         bspWireframeColor = 0;
         bspGhostAlpha = 0.25f;
         showSelectedAABB = true;
@@ -285,11 +291,14 @@ struct EditorPreferences {
                 else if (key == "cameraSmoothFactor") cameraSmoothFactor = std::stof(val);
                 else if (key == "cameraSpeedScrollStep") cameraSpeedScrollStep = std::stof(val);
                 else if (key == "viewportBkgColor") viewportBkgColor = std::stoi(val);
+                else if (key == "navigationPreset") navigationPreset = std::stoi(val);
                 else if (key == "showConnectionValidity") showConnectionValidity = (val == "1" || val == "true");
                 else if (key == "show3DSkybox") show3DSkybox = (val == "1" || val == "true");
                 else if (key == "showFps") showFps = (val == "1" || val == "true");
                 else if (key == "showCompass") showCompass = (val == "1" || val == "true");
                 else if (key == "showClearanceHullDefault") showClearanceHullDefault = (val == "1" || val == "true");
+                else if (key == "showViewportBottomHUD") showViewportBottomHUD = (val == "1" || val == "true");
+                else if (key == "showTutorialOnStartup") showTutorialOnStartup = (val == "1" || val == "true");
                 else if (key == "bspWireframeColor") bspWireframeColor = std::stoi(val);
                 else if (key == "bspGhostAlpha") bspGhostAlpha = std::stof(val);
                 else if (key == "showSelectedAABB") showSelectedAABB = (val == "1" || val == "true");
@@ -381,11 +390,14 @@ struct EditorPreferences {
         file << "cameraSmoothFactor=" << cameraSmoothFactor << "\n";
         file << "cameraSpeedScrollStep=" << cameraSpeedScrollStep << "\n";
         file << "viewportBkgColor=" << viewportBkgColor << "\n";
+        file << "navigationPreset=" << navigationPreset << "\n";
         file << "showConnectionValidity=" << (showConnectionValidity ? "1" : "0") << "\n";
         file << "show3DSkybox=" << (show3DSkybox ? "1" : "0") << "\n";
         file << "showFps=" << (showFps ? "1" : "0") << "\n";
         file << "showCompass=" << (showCompass ? "1" : "0") << "\n";
         file << "showClearanceHullDefault=" << (showClearanceHullDefault ? "1" : "0") << "\n";
+        file << "showViewportBottomHUD=" << (showViewportBottomHUD ? "1" : "0") << "\n";
+        file << "showTutorialOnStartup=" << (showTutorialOnStartup ? "1" : "0") << "\n";
         file << "bspWireframeColor=" << bspWireframeColor << "\n";
         file << "bspGhostAlpha=" << bspGhostAlpha << "\n";
         file << "showSelectedAABB=" << (showSelectedAABB ? "1" : "0") << "\n";
