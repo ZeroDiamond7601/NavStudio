@@ -1187,7 +1187,8 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 }
 
 void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
-    ImGui::SetNextWindowSize(ImVec2(210, 480), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(10.0f, 32.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(220.0f, 620.0f), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Tool Palette")) {
         // Mode Switcher: NavMesh Mode vs E-Bot Waypoints Mode
         EditorScene::EditorTargetMode curTarget = scene.GetTargetMode();
@@ -1790,7 +1791,10 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
 
 
 void EditorUI::RenderHierarchy(EditorScene& scene, Camera& camera) {
-    ImGui::SetNextWindowSize(ImVec2(270, 420), ImGuiCond_FirstUseEver);
+    ImVec2 dispSize = ImGui::GetIO().DisplaySize;
+    float rightX = std::max(240.0f, dispSize.x - 330.0f);
+    ImGui::SetNextWindowPos(ImVec2(rightX, 32.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(320.0f, 260.0f), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Explorer")) {
         if (ImGui::BeginTabBar("ExplorerTabs")) {
             char navTabTitle[64];
@@ -2236,7 +2240,10 @@ void EditorUI::RenderEntityInspector(EditorScene& scene, Camera& camera) {
 }
 
 void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
-    ImGui::SetNextWindowSize(ImVec2(290, 460), ImGuiCond_FirstUseEver);
+    ImVec2 dispSize = ImGui::GetIO().DisplaySize;
+    float rightX = std::max(240.0f, dispSize.x - 330.0f);
+    ImGui::SetNextWindowPos(ImVec2(rightX, 302.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(320.0f, 450.0f), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Property Inspector")) {
         if (scene.GetSelectedEntityIndex() >= 0) {
             RenderEntityInspector(scene, camera);

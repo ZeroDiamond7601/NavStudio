@@ -83,6 +83,26 @@ EBotGenerateResult EBotGenerator::Generate(
         }
     }
 
+    // Also sample flat walkable BSP brush faces to guarantee seeds across all rooms
+    for (int i = 0; i < bsp.GetFaceCount(); ++i) {
+        const dface_t* face = bsp.GetFace(i);
+        if (!face || face->planenum < 0 || face->planenum >= bsp.GetPlaneCount()) continue;
+        const dplane_t* plane = bsp.GetPlane(face->planenum);
+        if (plane && plane->normal.z >= 0.7071f) {
+            Vector3 poly[32];
+            int vcount = bsp.GetFacePolygon(i, poly, 32);
+            if (vcount >= 3) {
+                Vector3 centroid(0.0f, 0.0f, 0.0f);
+                for (int v = 0; v < vcount; ++v) {
+                    centroid = centroid + poly[v];
+                }
+                centroid = centroid * (1.0f / static_cast<float>(vcount));
+                seedOrigins.push_back(centroid + Vector3(0.0f, 0.0f, 16.0f));
+                seedFlags.push_back(WPT_FLAG_CROSSING);
+            }
+        }
+    }
+
     // Fast 2D spatial hash grid for O(1) proximity queries
     struct SpatialKey {
         int gx, gy;
@@ -182,6 +202,7 @@ EBotGenerateResult EBotGenerator::Generate(
         WaypointNode* currNode = outGraph.GetNodeByID(currId);
         if (!currNode) continue;
         Vector3 currOrigin = currNode->origin;
+        float currFloorZ = currOrigin.z - 18.0f;
 
         if (progress && (processedCount % 100 == 0)) {
             float p = 0.15f + std::min(0.60f, static_cast<float>(outGraph.GetNodeCount()) / 4000.0f);
@@ -192,9 +213,9 @@ EBotGenerateResult EBotGenerator::Generate(
             Vector3 dir(std::cos(kAngles[d]), std::sin(kAngles[d]), 0.0f);
             Vector3 candPos = currOrigin + dir * options.nodeSpacing;
 
-            // Trace downward from jump height to safe drop limit
-            Vector3 trStart = Vector3(candPos.x, candPos.y, currOrigin.z + options.maxJumpHeight + 8.0f);
-            Vector3 trEnd   = Vector3(candPos.x, candPos.y, currOrigin.z - options.maxDropHeight);
+            // Trace downward from jump elevation relative to floor
+            Vector3 trStart = Vector3(candPos.x, candPos.y, currFloorZ + options.maxJumpHeight + 4.0f);
+            Vector3 trEnd   = Vector3(candPos.x, candPos.y, currFloorZ - options.maxDropHeight);
             BSPTraceResult trGround;
             if (!bsp.TraceWorld(trStart, trEnd, HULL_POINT, &trGround) || trGround.fraction >= 1.0f || trGround.startsolid || trGround.allsolid) {
                 continue;
@@ -206,7 +227,7 @@ EBotGenerateResult EBotGenerator::Generate(
             }
 
             Vector3 floorPos = trGround.endpos;
-            float zDiff = floorPos.z - (currOrigin.z - 18.0f);
+            float zDiff = floorPos.z - currFloorZ;
 
             // Elevation limits
             if (zDiff > options.maxJumpHeight || zDiff < -options.maxDropHeight) {
@@ -226,20 +247,20 @@ EBotGenerateResult EBotGenerator::Generate(
             bool needCrouch = (headroom < 68.0f);
 
             // Path obstacle ray trace at feet and waist
-            float stepZ = std::max(currOrigin.z - 18.0f, floorPos.z);
+            float stepZ = std::max(currFloorZ, floorPos.z);
             BSPTraceResult trFeet, trWaist;
-            if (!bsp.TraceWorld(Vector3(currOrigin.x, currOrigin.y, stepZ + 18.0f),
-                                Vector3(floorPos.x, floorPos.y, stepZ + 18.0f),
-                                HULL_POINT, &trFeet) ||
-                trFeet.fraction < 0.95f || trFeet.startsolid || trFeet.allsolid) {
+            bsp.TraceWorld(Vector3(currOrigin.x, currOrigin.y, stepZ + 18.0f),
+                           Vector3(floorPos.x, floorPos.y, stepZ + 18.0f),
+                           HULL_POINT, &trFeet);
+            if (trFeet.fraction < 0.95f || trFeet.startsolid || trFeet.allsolid) {
                 continue; // Foot obstacle / step wall
             }
 
             if (!needCrouch) {
-                if (!bsp.TraceWorld(Vector3(currOrigin.x, currOrigin.y, stepZ + 45.0f),
-                                    Vector3(floorPos.x, floorPos.y, stepZ + 45.0f),
-                                    HULL_POINT, &trWaist) ||
-                    trWaist.fraction < 0.95f || trWaist.startsolid || trWaist.allsolid) {
+                bsp.TraceWorld(Vector3(currOrigin.x, currOrigin.y, stepZ + 45.0f),
+                               Vector3(floorPos.x, floorPos.y, stepZ + 45.0f),
+                               HULL_POINT, &trWaist);
+                if (trWaist.fraction < 0.95f || trWaist.startsolid || trWaist.allsolid) {
                     continue; // Waist / doorway obstacle
                 }
             }

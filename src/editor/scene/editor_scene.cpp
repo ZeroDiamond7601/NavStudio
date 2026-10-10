@@ -5000,9 +5000,10 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
         if (!newWaypointIds.empty()) {
             float stepZ = std::max(cur.floorZ, groundPos.z);
             BSPTraceResult stepTr;
-            if (!m_bsp->TraceWorld(Vector3(cur.srcX, cur.srcY, stepZ + 18.0f),
-                                   Vector3(wx, wy, stepZ + 18.0f),
-                                   HULL_POINT, &stepTr) || stepTr.fraction < 0.95f || stepTr.startsolid || stepTr.allsolid) {
+            m_bsp->TraceWorld(Vector3(cur.srcX, cur.srcY, stepZ + 18.0f),
+                              Vector3(wx, wy, stepZ + 18.0f),
+                              HULL_POINT, &stepTr);
+            if (stepTr.fraction < 0.95f || stepTr.startsolid || stepTr.allsolid) {
                 continue; // Blocked by wall, column, or door frame
             }
         }
@@ -5027,8 +5028,10 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
                 if (dsq <= (snapDist * 1.55f) * (snapDist * 1.55f) && std::abs(diff.z) <= 45.0f) {
                     // Check line of sight
                     BSPTraceResult losTr;
-                    if (m_bsp->TraceWorld(node->origin + Vector3(0.0f, 0.0f, 10.0f), other->origin + Vector3(0.0f, 0.0f, 10.0f), HULL_POINT, &losTr) &&
-                        losTr.fraction >= 0.95f && !losTr.startsolid && !losTr.allsolid) {
+                    m_bsp->TraceWorld(node->origin + Vector3(0.0f, 0.0f, 10.0f),
+                                      other->origin + Vector3(0.0f, 0.0f, 10.0f),
+                                      HULL_POINT, &losTr);
+                    if (losTr.fraction >= 0.95f && !losTr.startsolid && !losTr.allsolid) {
                         uint16_t cflags = WPT_CONN_NONE;
                         if (std::abs(diff.z) > 18.0f) cflags |= WPT_CONN_JUMP;
                         m_waypoints.ConnectNodes(node->id, other->id, true, cflags);
