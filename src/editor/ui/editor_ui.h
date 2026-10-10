@@ -66,6 +66,7 @@ private:
     void RenderConnectionInspector(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
     void RenderStatusBar(const EditorScene& scene, const Camera& camera);
     void RenderHelpModal();
+    void RenderAboutModal();
     void RenderPreferencesModal(EditorScene& scene, Camera& camera, CommandManager& cmdMgr);
     void RenderWelcomeOverlay(EditorScene& scene);
     void RenderOpenPathModal(EditorScene& scene);
@@ -132,7 +133,8 @@ private:
 
     bool m_mouseOverUI;
     bool m_requestQuit;
-    bool m_showHelpModal;
+    bool m_showHelpModal{false};
+    bool m_showAboutModal{false};
     bool m_showOpenPathModal;
     bool m_showGenerateModal{false};
     bool m_showBatchGenerateModal{false};

@@ -187,7 +187,6 @@ struct EditorPreferences {
         viewportBkgColor = 0;
 
         showConnectionValidity = true;
-        show3DSSkybox(true); // helper will map below
         show3DSkybox = true;
         showFps = true;
         showCompass = true;

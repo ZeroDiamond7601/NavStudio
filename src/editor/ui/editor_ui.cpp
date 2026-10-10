@@ -383,6 +383,10 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
         RenderHelpModal();
     }
 
+    if (m_showAboutModal) {
+        RenderAboutModal();
+    }
+
     if (m_showPreferencesModal) {
         RenderPreferencesModal(scene, camera, cmdMgr);
     }
@@ -1245,8 +1249,12 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
         }
 
         if (ImGui::BeginMenu("Help")) {
-            if (ImGui::MenuItem("Controls & Shortcuts...")) {
+            if (ImGui::MenuItem("Controls & Shortcuts...", "F1")) {
                 m_showHelpModal = true;
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("About NavStudio...")) {
+                m_showAboutModal = true;
             }
             ImGui::EndMenu();
         }
@@ -3566,6 +3574,70 @@ void EditorUI::RenderHelpModal() {
     }
 }
 
+void EditorUI::RenderAboutModal() {
+    ImGui::OpenPopup("About NavStudio##AboutModal");
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(560, 480), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("About NavStudio##AboutModal", &m_showAboutModal, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "NavStudio - GoldSrc BSP & NavMesh / Waypoint Editor");
+        ImGui::TextDisabled("Version 1.6.8 (Win32 / Linux)");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "Developer & Community:");
+        ImGui::BulletText("Author: Zero (ZeroDiamond7601 / zerodiamond.)");
+        ImGui::BulletText("Community: Born2Kill (B2K Community Founder)");
+        ImGui::BulletText("Discord: https://discord.born2kill.eu/");
+        ImGui::BulletText("CS 1.6 Zombie Plague Server: 145.239.138.236:27015");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Official Source & Distribution:");
+        ImGui::Text("GitHub Repository:");
+        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "https://github.com/ZeroDiamond7601/NavStudio");
+        if (ImGui::Button("Copy GitHub URL", ImVec2(160, 24))) {
+            ImGui::SetClipboardText("https://github.com/ZeroDiamond7601/NavStudio");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Copy Discord Invite", ImVec2(160, 24))) {
+            ImGui::SetClipboardText("https://discord.born2kill.eu/");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Copy Server IP", ImVec2(140, 24))) {
+            ImGui::SetClipboardText("145.239.138.236:27015");
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.3f, 1.0f), "Credits, Frameworks & Acknowledgments:");
+        ImGui::BulletText("Valve Corporation: Half-Life, GoldSrc engine, Counter-Strike, and BSP formats");
+        ImGui::BulletText("Michael S. Booth: Original CS Bot navigation mesh (.nav) architecture & heuristics");
+        ImGui::BulletText("ReGameDLL_CS: Reverse-engineered Counter-Strike engine definitions & structures");
+        ImGui::BulletText("CS-EBOT, SyPB, YaPB, and POD-Bot developers: Waypoint codecs (.ewp, .spt, .pwf, .wpt)");
+        ImGui::BulletText("Dear ImGui: Immediate mode graphical user interface library (Omar Cornut)");
+        ImGui::BulletText("GLFW & glad: Multi-platform OpenGL windowing, context and core loader");
+        ImGui::BulletText("Spatial Graph Algorithms: Gabriel Graph & Relative Neighborhood Graph sparsification");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Close", ImVec2(100, 26))) {
+            m_showAboutModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
 void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, CommandManager& cmdMgr) {
     ImGui::OpenPopup("Preferences##NavStudioPrefs");
 
@@ -4193,7 +4265,7 @@ bool EditorUI::DrawNudgeFloat2(const char* label, float v[2], float step, float 
     return changed;
 }
 
-bool EditorUI::DrawNudgeFloat3(const char* label, float v[3], float step, float minVal, float maxVal) {
+bool EditorUI::DrawNudgeFloat3(const char* label, float v[3], float step, float minVal, float maxVal, const char* fmt) {
     if (!v) return false;
     bool changed = false;
     ImGui::PushID(label);
@@ -4222,7 +4294,7 @@ bool EditorUI::DrawNudgeFloat3(const char* label, float v[3], float step, float 
         ImGui::SameLine(0.0f, 2.0f);
         float inputW = std::max(40.0f, colW - btnW * 2.0f - 24.0f);
         ImGui::SetNextItemWidth(inputW);
-        if (ImGui::DragFloat("##val", &v[i], step * 0.1f, minVal, maxVal, "%.1f")) {
+        if (ImGui::DragFloat("##val", &v[i], step * 0.1f, minVal, maxVal, fmt)) {
             changed = true;
         }
         ImGui::SameLine(0.0f, 2.0f);
@@ -4403,12 +4475,11 @@ void EditorUI::RenderGizmoNudgeHUD(EditorScene& scene, Camera& /*camera*/, Comma
         };
 
         auto NudgeEntity = [&](float dx, float dy, float dz) {
-            if (!scene.HasBSP()) return;
-            auto& ents = scene.GetEntities();
-            if (selEntIdx >= 0 && selEntIdx < static_cast<int>(ents.size())) {
-                ents[selEntIdx].origin.x += dx;
-                ents[selEntIdx].origin.y += dy;
-                ents[selEntIdx].origin.z += dz;
+            EditorEntity* ent = scene.GetSelectedEntity();
+            if (ent) {
+                ent->origin.x += dx;
+                ent->origin.y += dy;
+                ent->origin.z += dz;
             }
         };
 
@@ -5492,7 +5563,8 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
             { "Edit", "Align Selected Areas: Center Y", "", [&]() { scene.AlignSelectedAreas(EditorScene::ALIGN_CENTER_Y, cmdMgr); } },
             { "Edit", "Align Selected Areas: Flatten Floor Z", "", [&]() { scene.AlignSelectedAreas(EditorScene::ALIGN_FLOOR_Z, cmdMgr); } },
             { "Preferences", "Open Preferences", "Ctrl+,", [&]() { OpenPreferences(); } },
-            { "Help", "Documentation & Shortcuts", "F1", [&]() { m_showHelpModal = true; } }
+            { "Help", "Documentation & Shortcuts", "F1", [&]() { m_showHelpModal = true; } },
+            { "Help", "About NavStudio (Credits, Discord, GitHub)", "", [&]() { m_showAboutModal = true; } }
         };
 
         if (m_commandPaletteFocus) {
