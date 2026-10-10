@@ -34,15 +34,15 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
     float camDist = (camPos - center).Length();
     float gLen = std::max(48.0f, std::min(450.0f, camDist * 0.105f));
 
-    float coneH = gLen * 0.22f;
-    float coneR = gLen * 0.08f;
-    float cubeDist = gLen * 0.72f;
-    float cubeH = gLen * 0.065f;
-    float rotR = gLen * 0.58f;
+    float coneH = gLen * 0.20f;
+    float coneR = gLen * 0.075f;
+    float cubeDist = gLen * 0.52f;
+    float cubeH = gLen * 0.055f;
+    float rotR = gLen * 0.70f;
     float screenR = gLen * 0.88f;
 
-    float planeDist = gLen * 0.35f;
-    float planeSize = gLen * 0.18f;
+    float planeDist = gLen * 0.26f;
+    float planeSize = gLen * 0.12f;
 
     auto AddLine = [&](const Vector3& p0, const Vector3& p1, float r, float g, float b, float a) {
         uint32_t baseIdx = static_cast<uint32_t>(vertices.size());
@@ -62,10 +62,8 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
         Vector3 m23 = (p2 + p3) * 0.5f;
         Vector3 m12 = (p1 + p2) * 0.5f;
         Vector3 m30 = (p3 + p0) * 0.5f;
-        AddLine(m01, m23, r, g, b, a * 0.75f);
-        AddLine(m12, m30, r, g, b, a * 0.75f);
-        AddLine(p0, p2, r, g, b, a * 0.40f);
-        AddLine(p1, p3, r, g, b, a * 0.40f);
+        AddLine(m01, m23, r, g, b, a * 0.65f);
+        AddLine(m12, m30, r, g, b, a * 0.65f);
     };
 
     auto AddBox = [&](const Vector3& bCenter, float hSize, float r, float g, float b, float a) {
@@ -87,11 +85,14 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
         // Vertical pillars
         AddLine(c0, c4, r, g, b, a); AddLine(c1, c5, r, g, b, a);
         AddLine(c2, c6, r, g, b, a); AddLine(c3, c7, r, g, b, a);
+        // Diagonal cross braces for solid 3D cube appearance
+        AddLine(c0, c2, r, g, b, a * 0.45f);
+        AddLine(c4, c6, r, g, b, a * 0.45f);
     };
 
     auto AddCone = [&](const Vector3& baseP, const Vector3& tipP, const Vector3& uDir, const Vector3& vDir,
                        float r, float g, float b, float a) {
-        const int kSides = 8;
+        const int kSides = 12;
         Vector3 basePts[kSides];
         for (int k = 0; k < kSides; ++k) {
             float ang = 2.0f * kPi * static_cast<float>(k) / static_cast<float>(kSides);
@@ -101,18 +102,42 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
             int nextK = (k + 1) % kSides;
             AddLine(basePts[k], basePts[nextK], r, g, b, a);
             AddLine(basePts[k], tipP, r, g, b, a);
+            AddLine(baseP, basePts[k], r, g, b, a * 0.60f);
         }
     };
 
     auto AddCircle = [&](const Vector3& orig, const Vector3& uDir, const Vector3& vDir, float radius,
                          float r, float g, float b, float a) {
-        const int kSegs = 36;
+        const int kSegs = 48;
         Vector3 prevP = orig + uDir * radius;
         for (int k = 1; k <= kSegs; ++k) {
             float ang = 2.0f * kPi * static_cast<float>(k) / static_cast<float>(kSegs);
             Vector3 curP = orig + uDir * (radius * std::cos(ang)) + vDir * (radius * std::sin(ang));
             AddLine(prevP, curP, r, g, b, a);
             prevP = curP;
+        }
+    };
+
+    auto AddArcOrCircle = [&](const Vector3& orig, const Vector3& uDir, const Vector3& vDir, float radius,
+                              float r, float g, float b, float a, bool frontOnly) {
+        const int kSegs = 64;
+        Vector3 camDir = (camPos - orig).Normalized();
+        for (int k = 0; k < kSegs; ++k) {
+            float ang0 = 2.0f * kPi * static_cast<float>(k) / static_cast<float>(kSegs);
+            float ang1 = 2.0f * kPi * static_cast<float>(k + 1) / static_cast<float>(kSegs);
+            Vector3 p0 = orig + uDir * (radius * std::cos(ang0)) + vDir * (radius * std::sin(ang0));
+            Vector3 p1 = orig + uDir * (radius * std::cos(ang1)) + vDir * (radius * std::sin(ang1));
+            Vector3 midP = (p0 + p1) * 0.5f;
+            float facing = (midP - orig).Normalized().Dot(camDir);
+            if (frontOnly) {
+                if (facing >= -0.05f) {
+                    AddLine(p0, p1, r, g, b, a);
+                } else {
+                    AddLine(p0, p1, r, g, b, a * 0.15f);
+                }
+            } else {
+                AddLine(p0, p1, r, g, b, a);
+            }
         }
     };
 
@@ -123,66 +148,72 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
     Vector3 right = fwd.Cross(upGuide).Normalized();
     Vector3 up = right.Cross(fwd).Normalized();
 
-    // 1. Center Translation Diamond / Sphere (View / Free Move)
+    // 1. Center Translation Widget (Blender style: orange pivot dot, inner dashed ring, outer solid ring)
     {
         bool isCenterActive = (hoveredHandle == HANDLE_GIZMO_CENTER || selectedHandle == HANDLE_GIZMO_CENTER);
-        float cr = isCenterActive ? 1.0f : 0.85f;
-        float cg = isCenterActive ? 0.95f : 0.85f;
-        float cb = isCenterActive ? 0.20f : 0.85f;
-        float cSize = isCenterActive ? (gLen * 0.11f) : (gLen * 0.08f);
+        float cr = isCenterActive ? 1.0f : 0.92f;
+        float cg = isCenterActive ? 0.90f : 0.94f;
+        float cb = isCenterActive ? 0.20f : 0.96f;
+        float cOuter = isCenterActive ? (gLen * 0.13f) : (gLen * 0.11f);
+        float cInner = cOuter * 0.65f;
+        float pR = gLen * 0.025f;
 
-        Vector3 d0(center.x - cSize, center.y, center.z);
-        Vector3 d1(center.x, center.y + cSize, center.z);
-        Vector3 d2(center.x + cSize, center.y, center.z);
-        Vector3 d3(center.x, center.y - cSize, center.z);
-        AddLine(d0, d1, cr, cg, cb, 1.0f);
-        AddLine(d1, d2, cr, cg, cb, 1.0f);
-        AddLine(d2, d3, cr, cg, cb, 1.0f);
-        AddLine(d3, d0, cr, cg, cb, 1.0f);
+        // Orange center pivot point & crosshair
+        float dotR = isCenterActive ? 1.0f : 1.0f;
+        float dotG = isCenterActive ? 0.85f : 0.55f;
+        float dotB = isCenterActive ? 0.20f : 0.10f;
+        AddCircle(center, right, up, pR, dotR, dotG, dotB, 1.0f);
+        AddLine(center - right * pR * 1.4f, center + right * pR * 1.4f, dotR, dotG, dotB, 1.0f);
+        AddLine(center - up * pR * 1.4f, center + up * pR * 1.4f, dotR, dotG, dotB, 1.0f);
 
-        Vector3 dz0(center.x, center.y, center.z - cSize);
-        Vector3 dz1(center.x, center.y, center.z + cSize);
-        AddLine(d0, dz0, cr, cg, cb, 0.7f); AddLine(d0, dz1, cr, cg, cb, 0.7f);
-        AddLine(d1, dz0, cr, cg, cb, 0.7f); AddLine(d1, dz1, cr, cg, cb, 0.7f);
-        AddLine(d2, dz0, cr, cg, cb, 0.7f); AddLine(d2, dz1, cr, cg, cb, 0.7f);
-        AddLine(d3, dz0, cr, cg, cb, 0.7f); AddLine(d3, dz1, cr, cg, cb, 0.7f);
+        // Inner dashed trackball circle (alternating dashes like Blender)
+        const int kDashSegs = 24;
+        for (int k = 0; k < kDashSegs; ++k) {
+            if (k % 2 == 0) {
+                float a0 = 2.0f * kPi * static_cast<float>(k) / static_cast<float>(kDashSegs);
+                float a1 = 2.0f * kPi * static_cast<float>(k + 1) / static_cast<float>(kDashSegs);
+                Vector3 p0 = center + right * (cInner * std::cos(a0)) + up * (cInner * std::sin(a0));
+                Vector3 p1 = center + right * (cInner * std::cos(a1)) + up * (cInner * std::sin(a1));
+                AddLine(p0, p1, cr, cg, cb, 0.90f);
+            }
+        }
 
-        // Center view circle
-        AddCircle(center, right, up, cSize * 1.35f, cr, cg, cb, 0.65f);
+        // Outer solid white trackball circle
+        AddCircle(center, right, up, cOuter, cr, cg, cb, isCenterActive ? 1.0f : 0.85f);
     }
 
-    // 2. Translate Arrows (+X East, +Y North, +Z Up/Elevation)
+    // 2. Translate Arrows & Axis Lines (+X Blender Red, +Y Blender Green, +Z Blender Blue)
     if (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_TRANSLATE) {
-        // X-Axis (Red)
+        // X-Axis (Red: 0.93, 0.22, 0.32)
         {
             bool isXActive = (hoveredHandle == HANDLE_GIZMO_X || selectedHandle == HANDLE_GIZMO_X);
-            float r = isXActive ? 1.0f : 0.95f;
-            float g = isXActive ? 0.95f : 0.22f;
-            float b = isXActive ? 0.20f : 0.22f;
+            float r = isXActive ? 1.0f : 0.93f;
+            float g = isXActive ? 0.90f : 0.22f;
+            float b = isXActive ? 0.20f : 0.32f;
             Vector3 baseP = center + Vector3(gLen, 0.0f, 0.0f);
             Vector3 tipP = center + Vector3(gLen + coneH, 0.0f, 0.0f);
             AddLine(center, baseP, r, g, b, 1.0f);
             AddCone(baseP, tipP, Vector3(0.0f, 1.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), r, g, b, 1.0f);
         }
 
-        // Y-Axis (Green)
+        // Y-Axis (Green: 0.42, 0.75, 0.18)
         {
             bool isYActive = (hoveredHandle == HANDLE_GIZMO_Y || selectedHandle == HANDLE_GIZMO_Y);
-            float r = isYActive ? 1.0f : 0.22f;
-            float g = isYActive ? 0.95f : 0.92f;
-            float b = isYActive ? 0.20f : 0.32f;
+            float r = isYActive ? 1.0f : 0.42f;
+            float g = isYActive ? 0.90f : 0.75f;
+            float b = isYActive ? 0.20f : 0.18f;
             Vector3 baseP = center + Vector3(0.0f, gLen, 0.0f);
             Vector3 tipP = center + Vector3(0.0f, gLen + coneH, 0.0f);
             AddLine(center, baseP, r, g, b, 1.0f);
             AddCone(baseP, tipP, Vector3(1.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), r, g, b, 1.0f);
         }
 
-        // Z-Axis (Blue - Up/Down Elevation)
+        // Z-Axis (Blue: 0.18, 0.52, 0.92)
         {
             bool isZActive = (hoveredHandle == HANDLE_GIZMO_Z || selectedHandle == HANDLE_GIZMO_Z);
-            float r = isZActive ? 1.0f : 0.25f;
-            float g = isZActive ? 0.95f : 0.58f;
-            float b = isZActive ? 0.20f : 1.0f;
+            float r = isZActive ? 1.0f : 0.18f;
+            float g = isZActive ? 0.90f : 0.52f;
+            float b = isZActive ? 0.20f : 0.92f;
             Vector3 baseP = center + Vector3(0.0f, 0.0f, gLen);
             Vector3 tipP = center + Vector3(0.0f, 0.0f, gLen + coneH);
             AddLine(center, baseP, r, g, b, 1.0f);
@@ -193,9 +224,9 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
         {
             // XY Plane (Blue)
             bool isXYActive = (hoveredHandle == HANDLE_PLANE_XY || selectedHandle == HANDLE_PLANE_XY);
-            float r = isXYActive ? 1.0f : 0.25f;
-            float g = isXYActive ? 0.95f : 0.58f;
-            float b = isXYActive ? 0.20f : 1.0f;
+            float r = isXYActive ? 1.0f : 0.18f;
+            float g = isXYActive ? 0.90f : 0.52f;
+            float b = isXYActive ? 0.20f : 0.92f;
             float a = isXYActive ? 1.0f : 0.85f;
             Vector3 xy0 = center + Vector3(planeDist, planeDist, 0.0f);
             Vector3 xy1 = center + Vector3(planeDist + planeSize, planeDist, 0.0f);
@@ -206,9 +237,9 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
         {
             // XZ Plane (Green)
             bool isXZActive = (hoveredHandle == HANDLE_PLANE_XZ || selectedHandle == HANDLE_PLANE_XZ);
-            float r = isXZActive ? 1.0f : 0.22f;
-            float g = isXZActive ? 0.95f : 0.92f;
-            float b = isXZActive ? 0.20f : 0.32f;
+            float r = isXZActive ? 1.0f : 0.42f;
+            float g = isXZActive ? 0.90f : 0.75f;
+            float b = isXZActive ? 0.20f : 0.18f;
             float a = isXZActive ? 1.0f : 0.85f;
             Vector3 xz0 = center + Vector3(planeDist, 0.0f, planeDist);
             Vector3 xz1 = center + Vector3(planeDist + planeSize, 0.0f, planeDist);
@@ -219,9 +250,9 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
         {
             // YZ Plane (Red)
             bool isYZActive = (hoveredHandle == HANDLE_PLANE_YZ || selectedHandle == HANDLE_PLANE_YZ);
-            float r = isYZActive ? 1.0f : 0.95f;
-            float g = isYZActive ? 0.95f : 0.22f;
-            float b = isYZActive ? 0.20f : 0.22f;
+            float r = isYZActive ? 1.0f : 0.93f;
+            float g = isYZActive ? 0.90f : 0.22f;
+            float b = isYZActive ? 0.20f : 0.32f;
             float a = isYZActive ? 1.0f : 0.85f;
             Vector3 yz0 = center + Vector3(0.0f, planeDist, planeDist);
             Vector3 yz1 = center + Vector3(0.0f, planeDist + planeSize, planeDist);
@@ -231,21 +262,20 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
         }
     }
 
-    // 3. Scale Handles (3D Cube Boxes on +X, +Y, +Z axes and Planar Scale Quads)
+    // 3. Scale Handles (3D Cube Boxes at cubeDist)
     if (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_SCALE) {
-        // In Scale mode, draw axis lines connecting center to boxes
         if (mode == GIZMO_MODE_SCALE) {
-            AddLine(center, center + Vector3(cubeDist, 0.0f, 0.0f), 0.95f, 0.25f, 0.25f, 0.85f);
-            AddLine(center, center + Vector3(0.0f, cubeDist, 0.0f), 0.25f, 0.92f, 0.35f, 0.85f);
-            AddLine(center, center + Vector3(0.0f, 0.0f, cubeDist), 0.25f, 0.58f, 1.0f, 0.85f);
+            AddLine(center, center + Vector3(cubeDist, 0.0f, 0.0f), 0.93f, 0.22f, 0.32f, 0.85f);
+            AddLine(center, center + Vector3(0.0f, cubeDist, 0.0f), 0.42f, 0.75f, 0.18f, 0.85f);
+            AddLine(center, center + Vector3(0.0f, 0.0f, cubeDist), 0.18f, 0.52f, 0.92f, 0.85f);
         }
 
         // Scale X Cube
         {
             bool isScXActive = (hoveredHandle == HANDLE_SCALE_X || selectedHandle == HANDLE_SCALE_X);
-            float r = isScXActive ? 1.0f : 0.95f;
-            float g = isScXActive ? 0.95f : 0.28f;
-            float b = isScXActive ? 0.20f : 0.28f;
+            float r = isScXActive ? 1.0f : 0.93f;
+            float g = isScXActive ? 0.90f : 0.22f;
+            float b = isScXActive ? 0.20f : 0.32f;
             Vector3 bCenter = center + Vector3(cubeDist, 0.0f, 0.0f);
             AddBox(bCenter, isScXActive ? (cubeH * 1.3f) : cubeH, r, g, b, 1.0f);
         }
@@ -253,9 +283,9 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
         // Scale Y Cube
         {
             bool isScYActive = (hoveredHandle == HANDLE_SCALE_Y || selectedHandle == HANDLE_SCALE_Y);
-            float r = isScYActive ? 1.0f : 0.28f;
-            float g = isScYActive ? 0.95f : 0.92f;
-            float b = isScYActive ? 0.20f : 0.35f;
+            float r = isScYActive ? 1.0f : 0.42f;
+            float g = isScYActive ? 0.90f : 0.75f;
+            float b = isScYActive ? 0.20f : 0.18f;
             Vector3 bCenter = center + Vector3(0.0f, cubeDist, 0.0f);
             AddBox(bCenter, isScYActive ? (cubeH * 1.3f) : cubeH, r, g, b, 1.0f);
         }
@@ -263,9 +293,9 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
         // Scale Z Cube
         {
             bool isScZActive = (hoveredHandle == HANDLE_SCALE_Z || selectedHandle == HANDLE_SCALE_Z);
-            float r = isScZActive ? 1.0f : 0.30f;
-            float g = isScZActive ? 0.95f : 0.60f;
-            float b = isScZActive ? 0.20f : 1.0f;
+            float r = isScZActive ? 1.0f : 0.18f;
+            float g = isScZActive ? 0.90f : 0.52f;
+            float b = isScZActive ? 0.20f : 0.92f;
             Vector3 bCenter = center + Vector3(0.0f, 0.0f, cubeDist);
             AddBox(bCenter, isScZActive ? (cubeH * 1.3f) : cubeH, r, g, b, 1.0f);
         }
@@ -275,9 +305,9 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
             {
                 // XY Plane Scale (Blue)
                 bool isXYActive = (hoveredHandle == HANDLE_SCALE_PLANE_XY || selectedHandle == HANDLE_SCALE_PLANE_XY);
-                float r = isXYActive ? 1.0f : 0.25f;
-                float g = isXYActive ? 0.95f : 0.58f;
-                float b = isXYActive ? 0.20f : 1.0f;
+                float r = isXYActive ? 1.0f : 0.18f;
+                float g = isXYActive ? 0.90f : 0.52f;
+                float b = isXYActive ? 0.20f : 0.92f;
                 float a = isXYActive ? 1.0f : 0.85f;
                 Vector3 xy0 = center + Vector3(planeDist, planeDist, 0.0f);
                 Vector3 xy1 = center + Vector3(planeDist + planeSize, planeDist, 0.0f);
@@ -288,9 +318,9 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
             {
                 // XZ Plane Scale (Green)
                 bool isXZActive = (hoveredHandle == HANDLE_SCALE_PLANE_XZ || selectedHandle == HANDLE_SCALE_PLANE_XZ);
-                float r = isXZActive ? 1.0f : 0.22f;
-                float g = isXZActive ? 0.95f : 0.92f;
-                float b = isXZActive ? 0.20f : 0.32f;
+                float r = isXZActive ? 1.0f : 0.42f;
+                float g = isXZActive ? 0.90f : 0.75f;
+                float b = isXZActive ? 0.20f : 0.18f;
                 float a = isXZActive ? 1.0f : 0.85f;
                 Vector3 xz0 = center + Vector3(planeDist, 0.0f, planeDist);
                 Vector3 xz1 = center + Vector3(planeDist + planeSize, 0.0f, planeDist);
@@ -301,9 +331,9 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
             {
                 // YZ Plane Scale (Red)
                 bool isYZActive = (hoveredHandle == HANDLE_SCALE_PLANE_YZ || selectedHandle == HANDLE_SCALE_PLANE_YZ);
-                float r = isYZActive ? 1.0f : 0.95f;
-                float g = isYZActive ? 0.95f : 0.22f;
-                float b = isYZActive ? 0.20f : 0.22f;
+                float r = isYZActive ? 1.0f : 0.93f;
+                float g = isYZActive ? 0.90f : 0.22f;
+                float b = isYZActive ? 0.20f : 0.32f;
                 float a = isYZActive ? 1.0f : 0.85f;
                 Vector3 yz0 = center + Vector3(0.0f, planeDist, planeDist);
                 Vector3 yz1 = center + Vector3(0.0f, planeDist + planeSize, planeDist);
@@ -316,53 +346,53 @@ void GizmoRenderer::BuildBuffers(const Vector3& center, const Vector3& camPos,
             {
                 bool isUniActive = (hoveredHandle == HANDLE_SCALE_UNIFORM || selectedHandle == HANDLE_SCALE_UNIFORM);
                 float ur = isUniActive ? 1.0f : 0.88f;
-                float ug = isUniActive ? 0.95f : 0.88f;
-                float ub = isUniActive ? 0.20f : 0.90f;
+                float ug = isUniActive ? 0.90f : 0.88f;
+                float ub = isUniActive ? 0.20f : 0.92f;
                 float ua = isUniActive ? 1.0f : 0.60f;
                 AddCircle(center, right, up, screenR * 1.05f, ur, ug, ub, ua);
             }
         }
     }
 
-    // 4. Rotate Rings (Circles in XY, YZ, XZ planes and screen trackball)
+    // 4. Rotate Rings (Camera-facing front arcs in XY, YZ, XZ planes and outer screen ring)
     if (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_ROTATE) {
         // Blue Ring: Yaw / Z-Axis (in XY plane, normal = +Z)
         {
             bool isRotZActive = (hoveredHandle == HANDLE_ROTATE_Z || selectedHandle == HANDLE_ROTATE_Z);
-            float r = isRotZActive ? 1.0f : 0.28f;
-            float g = isRotZActive ? 0.95f : 0.60f;
-            float b = isRotZActive ? 0.20f : 1.0f;
-            float a = isRotZActive ? 1.0f : 0.85f;
-            AddCircle(center, Vector3(1.0f, 0.0f, 0.0f), Vector3(0.0f, 1.0f, 0.0f), rotR, r, g, b, a);
+            float r = isRotZActive ? 1.0f : 0.18f;
+            float g = isRotZActive ? 0.90f : 0.52f;
+            float b = isRotZActive ? 0.20f : 0.92f;
+            float a = isRotZActive ? 1.0f : 0.90f;
+            AddArcOrCircle(center, Vector3(1.0f, 0.0f, 0.0f), Vector3(0.0f, 1.0f, 0.0f), rotR, r, g, b, a, true);
         }
 
         // Red Ring: Pitch / X-Axis (in YZ plane, normal = +X)
         {
             bool isRotXActive = (hoveredHandle == HANDLE_ROTATE_X || selectedHandle == HANDLE_ROTATE_X);
-            float r = isRotXActive ? 1.0f : 0.92f;
-            float g = isRotXActive ? 0.95f : 0.25f;
-            float b = isRotXActive ? 0.20f : 0.25f;
-            float a = isRotXActive ? 1.0f : 0.85f;
-            AddCircle(center, Vector3(0.0f, 1.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), rotR, r, g, b, a);
+            float r = isRotXActive ? 1.0f : 0.93f;
+            float g = isRotXActive ? 0.90f : 0.22f;
+            float b = isRotXActive ? 0.20f : 0.32f;
+            float a = isRotXActive ? 1.0f : 0.90f;
+            AddArcOrCircle(center, Vector3(0.0f, 1.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), rotR, r, g, b, a, true);
         }
 
         // Green Ring: Roll / Y-Axis (in XZ plane, normal = +Y)
         {
             bool isRotYActive = (hoveredHandle == HANDLE_ROTATE_Y || selectedHandle == HANDLE_ROTATE_Y);
-            float r = isRotYActive ? 1.0f : 0.25f;
-            float g = isRotYActive ? 0.95f : 0.88f;
-            float b = isRotYActive ? 0.20f : 0.35f;
-            float a = isRotYActive ? 1.0f : 0.85f;
-            AddCircle(center, Vector3(1.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), rotR, r, g, b, a);
+            float r = isRotYActive ? 1.0f : 0.42f;
+            float g = isRotYActive ? 0.90f : 0.75f;
+            float b = isRotYActive ? 0.20f : 0.18f;
+            float a = isRotYActive ? 1.0f : 0.90f;
+            AddArcOrCircle(center, Vector3(1.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), rotR, r, g, b, a, true);
         }
 
-        // White Outer Trackball Screen Ring
+        // White Outer Trackball Screen Ring (Blender style enclosing circle)
         {
             bool isRotScreenActive = (hoveredHandle == HANDLE_ROTATE_SCREEN || selectedHandle == HANDLE_ROTATE_SCREEN);
-            float r = isRotScreenActive ? 1.0f : 0.85f;
-            float g = isRotScreenActive ? 0.95f : 0.85f;
-            float b = isRotScreenActive ? 0.20f : 0.88f;
-            float a = isRotScreenActive ? 1.0f : 0.50f;
+            float r = isRotScreenActive ? 1.0f : 0.88f;
+            float g = isRotScreenActive ? 0.90f : 0.90f;
+            float b = isRotScreenActive ? 0.20f : 0.94f;
+            float a = isRotScreenActive ? 1.0f : 0.80f;
             AddCircle(center, right, up, screenR, r, g, b, a);
         }
     }

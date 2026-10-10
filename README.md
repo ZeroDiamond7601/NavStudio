@@ -150,34 +150,110 @@ NavStudio/
 
 ---
 
-## Keyboard Shortcuts
+## Controls & Keyboard Shortcuts
 
-| Shortcut | Action |
-| :--- | :--- |
-| **Right-Click Drag** | FPS Freelook / Flycam rotation |
-| **W, A, S, D** | Move camera (Flycam) |
-| **Shift** | Fast camera move speed multiplier |
-| **F4** | Cycle Shading Mode (Textured, Clay, Wireframe, Translucent) |
-| **F3** | Toggle Entity Archetypes display |
-| **F6** | Toggle Bot Waypoint rendering & overlays |
-| **G** | Move / Grab selected areas (tracks ground plane) |
-| **S** | Radial Scale tool (when area selected) |
-| **E** | Extrude camera-facing edge |
-| **K / Shift+X** | Knife cut tool (press **R** to cycle angles: 0°, 45°, 90°, 135°) |
-| **B** | Bridge tool (2-click edge bridge) |
-| **N** | Draw area marquee tool (2-click floor rect) |
-| **F** | Flood fill area tool (when nothing selected) / Focus camera (when area/connection selected) |
-| **R** | Rotate selected area 90° / Reverse selected connection direction |
-| **2** | Toggle selected connection bidirectional / Set Gizmo to Rotate |
-| **Shift+D** | Duplicate selected area |
-| **Delete / Backspace / X** | Delete selected connection or area |
-| **Ctrl+Z / Ctrl+Y** | Undo / Redo |
-| **Ctrl+A** | Select All areas |
-| **Shift+B** | Toggle Marquee Box Select tool |
-| **[ / ]** | Decrease / Increase reference grid size |
-| **Shift+W** | Toggle grid snapping |
-| **Ctrl+,** | Preferences window |
-| **Esc** | Cancel current tool mode / Deselect connection / Clear area selection |
+### Viewport Navigation & Camera Controls
+
+| Control | Action | Description |
+| :--- | :--- | :--- |
+| **Right-Click Drag** | FPS Freelook / Flycam | Rotate camera in 3D (remains active during modal tools) |
+| **W, A, S, D** | Camera Movement | Move flycam forward, left, backward, right |
+| **Q / E** | Camera Elevation | Fly vertically downward / upward |
+| **Shift** | Speed Boost | Hold while moving for high-speed camera traverse |
+| **Middle-Click Drag** | Pan Camera | Pan viewport parallel to screen view plane |
+| **Mouse Wheel** | Zoom Camera | Step dolly zoom forward / backward |
+| **Alt + Left-Click Drag** | Orbit Camera | Orbit turntable around active focus point |
+| **F** | Focus View | Center camera on active selection (Area, Waypoint, Entity, or Link) |
+
+### 3D Universal Transform Gizmo & Precision Nudge
+
+| Shortcut / Control | Action | Description |
+| :--- | :--- | :--- |
+| **1** | Translate Gizmo | Switch to Translate arrows (+X Red, +Y Green, +Z Blue) and planar quads |
+| **2** | Rotate Gizmo | Switch to camera-facing rotation arcs and outer trackball ring |
+| **3** | Scale Gizmo | Switch to scale cubes and uniform scale ring |
+| **4** | Combined Universal Gizmo | Blender-style unified widget: arrows, rotation arcs, scale cubes, and trackball |
+| **G** | Grab / Translate | Interactive modal ground translation following mouse cursor |
+| **S** | Radial Scale | Interactive screen-space scale with numeric ratio display |
+| **R** | Rotate 90° | Rotate selected NavArea 90 degrees clockwise |
+| **Arrow Left / Right** | Precision Nudge X | Nudge selected element along X axis by active Hammer grid step |
+| **Arrow Up / Down** | Precision Nudge Y | Nudge selected element along Y axis by active Hammer grid step |
+| **Shift + Arrow Up / Down** | Precision Nudge Z | Elevate / lower selected element along Z axis by active grid step |
+| **Page Up / Page Down** | Nudge Elevation Z | Direct vertical nudge by active grid step |
+| **[ / ]** | Grid Size Step | Decrease / increase active reference grid snap (1, 2, 4, 8, 16, 32, 64, 128 units) |
+| **Shift + W** | Toggle Grid Snapping | Enable or disable coordinate grid snapping during transforms |
+
+### NavMesh Modeling Tools
+
+| Shortcut | Tool | Description |
+| :--- | :--- | :--- |
+| **Left-Click (LMB)** | Select Area | Select navigation area and display its transform gizmo |
+| **Shift + Click** | Add to Selection | Multi-select additional areas |
+| **Ctrl + Click** | Toggle Selection | Toggle individual area in/out of selection |
+| **Shift + B** | Box Select Marquee | 2D viewport marquee box selection for batch-selecting areas |
+| **Ctrl + A** | Select All Areas | Select all navigation areas in the mesh |
+| **Ctrl + I** | Invert Selection | Invert area selection |
+| **E** | Edge Extrude | Extrude camera-facing edge outward into a new adjacent area |
+| **K / Shift + X** | Knife Cut Tool | Bisect selected area along split plane (press **R** to cycle 0°, 45°, 90°, 135°) |
+| **M** | Quick Merge | Merge selected adjacent area into closest neighbor |
+| **B** | Bridge Tool | Connect two areas with an automatically generated bridge quad |
+| **N** | Create Area Marquee | Draw a new ground navigation area from corner to corner |
+| **F** *(nothing selected)* | Flood Fill Area | Flood-fill generate new area under cursor from BSP floor geometry |
+| **Space** | Snap Floor | Snap selected area vertices down onto GoldSrc BSP world geometry |
+| **Shift + S** | Snap to Neighbors | Align boundary vertices flush against adjacent neighboring areas |
+| **Shift + D** | Duplicate Area | Clone selected area(s) and offset slightly |
+| **Delete / Backspace / X** | Delete Area | Remove selected area(s) from navigation mesh |
+
+### Bot Waypoint & Graph Editing (`F6`)
+
+| Shortcut / Control | Action | Description |
+| :--- | :--- | :--- |
+| **Left-Click (LMB)** | Select Waypoint | Select waypoint node; displays ground radius/wayzone only for selected nodes |
+| **Shift + Click** | Multi-Select Waypoints | Select multiple waypoints for batch operations |
+| **Shift + B** | Box Select Waypoints | Marquee box select waypoint clusters |
+| **C** | Connect Waypoints | With ≥2 waypoints selected: instantly connects all pairs. With 1: enters connect mode |
+| **Alt + Left-Click** | Select Connection Link | Dedicated path selector; opens Link Inspector without deselecting nodes |
+| **Shift + D** | Duplicate Waypoints | Duplicate selected waypoint(s) with offset |
+| **B** | Bridge Waypoints | Insert mid-point bridging node between two selected waypoints |
+| **Space** | Snap Waypoint to Floor | Trace downward onto BSP geometry and set ground contact height |
+| **Delete / Backspace / X** | Delete Waypoint(s) | Delete selected node(s) with full Undo/Redo history |
+| **Ctrl + A** *(Waypoint Mode)* | Select All Waypoints | Select every node in the active waypoint graph |
+| **F6** | Toggle Waypoint Mode | Switch viewport between NavMesh editing and Bot Waypoint editing |
+
+### Connection & Link Management
+
+| Shortcut / Control | Action | Description |
+| :--- | :--- | :--- |
+| **Alt + Click on Link** | Select Connection Link | Select directional link path; shows 3D flow arrows and highlights in cyan |
+| **C** *(Area selected)* | Start Connect Mode | Click another area to establish directional link (Hold Shift for one-way) |
+| **R** *(Link selected)* | Reverse Direction | Invert link travel direction (From <-> To) |
+| **2 / Double-Click** | Toggle Bidirectional | Switch link between one-way traversal and two-way bidirectional pathing |
+| **Delete / Backspace / X** | Disconnect Link | Remove link connection between the two nodes or areas |
+
+### View Overlays & Shading Modes
+
+| Shortcut | Overlay | Description |
+| :--- | :--- | :--- |
+| **F1** | Help / Shortcuts | Display shortcuts cheatsheet and documentation |
+| **F2** | Wireframe Overlay | Toggle wireframe edges on GoldSrc BSP geometry |
+| **F3** | Entity Archetypes | Toggle 3D visualizers for spawns, lights, weapons, triggers, and targets |
+| **F4** | Shading Mode | Cycle rendering: Textured (WAD3), Clay shaded, Pure Wireframe, Translucent |
+| **F5** | Ladders Overlay | Toggle 3D ladder bounding boxes and rung vectors |
+| **F6** | Waypoint Graph | Toggle bot waypoint diamonds, wayzones, and connection paths |
+| **F7** | Navigation Mesh | Toggle CS 1.6 / CZ navigation mesh polygons and height markers |
+| **F8** | Skybox Backdrop | Toggle 3D GoldSrc skybox environment cube |
+| **F9** | Connection Flow | Toggle directional arrow flow lines between navigation areas |
+
+### Project & History Commands
+
+| Shortcut | Command | Description |
+| :--- | :--- | :--- |
+| **Ctrl + Z** | Undo | Undo last edit action (areas, waypoints, connections, nudges) |
+| **Ctrl + Y / Ctrl+Shift+Z** | Redo | Redo previously undone action |
+| **Ctrl + S** | Save Mesh / Waypoints | Quick save active navigation file to disk |
+| **Ctrl + O** | Open Map / Mesh | Open file dialog to load `.bsp`, `.nav`, `.ewp`, or `.pwf` |
+| **Ctrl + ,** | Preferences | Open settings modal (grid, colors, skybox, camera sensitivity) |
+| **Esc** | Cancel / Deselect | Exit current tool mode, clear selection, or dismiss modal |
 
 ---
 

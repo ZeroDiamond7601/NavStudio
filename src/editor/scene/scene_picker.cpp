@@ -386,25 +386,25 @@ SelectedHandleType ScenePicker::PickAreaHandles(
 
     float camDist = (camPos - c).Length();
     float gLen = std::max(48.0f, std::min(450.0f, camDist * 0.105f));
-    float coneH = gLen * 0.22f;
-    float cubeDist = gLen * 0.72f;
-    float rotR = gLen * 0.58f;
+    float coneH = gLen * 0.20f;
+    float cubeDist = gLen * 0.52f;
+    float rotR = gLen * 0.70f;
     float screenR = gLen * 0.88f;
 
     GizmoMode mode = scene.GetGizmoMode();
     ScreenPoint2D sCenter = ProjectToScreen(c, viewProj, viewportWidth, viewportHeight);
 
-    // 1. Center Translation Diamond (Priority: center)
+    // 1. Center Translation Widget (Blender style trackball)
     if (sCenter.valid && (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_TRANSLATE)) {
         float dCenter = std::hypot(screenX - sCenter.x, screenY - sCenter.y);
-        if (dCenter <= 14.0f) {
+        if (dCenter <= 16.0f) {
             return HANDLE_GIZMO_CENTER;
         }
     }
 
     // 2. Planar Quads (XY Ground, XZ East-West Vert, YZ North-South Vert)
-    float planeDist = gLen * 0.35f;
-    float planeSize = gLen * 0.18f;
+    float planeDist = gLen * 0.26f;
+    float planeSize = gLen * 0.12f;
     float planeMid = planeDist + planeSize * 0.5f;
 
     if (mode == GIZMO_MODE_COMBINED || mode == GIZMO_MODE_TRANSLATE) {
