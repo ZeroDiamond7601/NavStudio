@@ -115,6 +115,22 @@ struct WaypointNode {
         }
         return found;
     }
+
+    int GetConnectionCount() const {
+        int count = 0;
+        for (int i = 0; i < WPT_MAX_CONNECTIONS; ++i) {
+            if (connections[i] >= 0) ++count;
+        }
+        return count;
+    }
+
+    int GetFreeSlotCount() const {
+        int freeSlots = 0;
+        for (int i = 0; i < WPT_MAX_CONNECTIONS; ++i) {
+            if (connections[i] < 0) ++freeSlots;
+        }
+        return freeSlots;
+    }
 };
 
 // Generic binary header for POD-Bot / SyPB / YaPB / EBot
