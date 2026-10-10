@@ -1,6 +1,6 @@
 #include "editor/ui/editor_ui.h"
 #include "editor/scene/editor_scene.h"
-#include "editor/commands/command_manager.h"
+#include "editor/commands/command.h"
 #include "editor/ui/file_dialog.h"
 #include "waypoint/waypoint_types.h"
 #include <imgui.h>
