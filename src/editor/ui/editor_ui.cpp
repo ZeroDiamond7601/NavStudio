@@ -899,7 +899,7 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                     scene.RebuildWaypointRenderer();
                 }
                 if (ImGui::MenuItem("Auto-Link Nearby Waypoints", nullptr, false, scene.HasWaypoints())) {
-                    size_t links = scene.GetWaypoints().AutoLinkNodes();
+                    size_t links = scene.GetWaypoints().AutoLinkNodes(150.0f, scene.HasBSP() ? &scene.GetBSP() : nullptr);
                     scene.ShowToast("Auto-linked " + std::to_string(links) + " waypoint connections!");
                     scene.RebuildWaypointRenderer();
                 }
@@ -1217,6 +1217,17 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         if (curTarget == EditorScene::TARGET_WAYPOINTS) {
             ImGui::TextColored(ImVec4(0.9f, 0.65f, 0.2f, 1.0f), "E-Bot Waypoint Palette");
 
+            bool showWpt = scene.GetShowWaypoints();
+            if (ImGui::Checkbox("Waypoints##WptVisible", &showWpt)) {
+                scene.SetShowWaypoints(showWpt);
+            }
+            ImGui::SameLine();
+            bool showNav = scene.GetShowNAV();
+            if (ImGui::Checkbox("NavMesh##NavVisible", &showNav)) {
+                scene.SetShowNAV(showNav);
+            }
+            ImGui::Separator();
+
             // Placement Tool
             bool addWptActive = scene.IsAddWaypointMode();
             if (addWptActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.45f, 0.15f, 1.0f));
@@ -1423,7 +1434,7 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
 
             if (ImGui::Button("Auto-Link Nearby Nodes", ImVec2(-1, 24))) {
                 if (scene.HasWaypoints()) {
-                    size_t created = scene.GetWaypoints().AutoLinkNodes();
+                    size_t created = scene.GetWaypoints().AutoLinkNodes(150.0f, scene.HasBSP() ? &scene.GetBSP() : nullptr);
                     scene.RebuildWaypointRenderer();
                     scene.ShowToast("Auto-linked " + std::to_string(created) + " waypoint connections");
                 }
@@ -1796,12 +1807,22 @@ void EditorUI::RenderHierarchy(EditorScene& scene, Camera& camera) {
     ImGui::SetNextWindowPos(ImVec2(rightX, 32.0f), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(320.0f, 260.0f), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Explorer")) {
+        static int lastTargetMode = -1;
+        bool switchTabToWpt = false;
+        bool switchTabToNav = false;
+        int curTargetMode = static_cast<int>(scene.GetTargetMode());
+        if (lastTargetMode != curTargetMode) {
+            if (curTargetMode == EditorScene::TARGET_WAYPOINTS) switchTabToWpt = true;
+            else if (lastTargetMode != -1) switchTabToNav = true;
+            lastTargetMode = curTargetMode;
+        }
+
         if (ImGui::BeginTabBar("ExplorerTabs")) {
             char navTabTitle[64];
             size_t areaCount = scene.HasNAV() ? scene.GetNAV().GetAreaCount() : 0;
             std::snprintf(navTabTitle, sizeof(navTabTitle), "NavAreas (%zu)", areaCount);
 
-            if (ImGui::BeginTabItem(navTabTitle)) {
+            if (ImGui::BeginTabItem(navTabTitle, nullptr, switchTabToNav ? ImGuiTabItemFlags_SetSelected : 0)) {
                 if (!scene.HasNAV()) {
                     ImGui::TextDisabled("No NAV mesh loaded.");
                 } else {
@@ -1909,7 +1930,7 @@ void EditorUI::RenderHierarchy(EditorScene& scene, Camera& camera) {
             size_t wptCount = scene.GetWaypoints().GetNodeCount();
             std::snprintf(wptTabTitle, sizeof(wptTabTitle), "Waypoints (%zu)", wptCount);
 
-            if (ImGui::BeginTabItem(wptTabTitle)) {
+            if (ImGui::BeginTabItem(wptTabTitle, nullptr, switchTabToWpt ? ImGuiTabItemFlags_SetSelected : 0)) {
                 if (wptCount == 0) {
                     ImGui::TextDisabled("No waypoints loaded.");
                     if (ImGui::Button("+ Drop Waypoint at Camera", ImVec2(-1, 24))) {
@@ -1954,7 +1975,7 @@ void EditorUI::RenderHierarchy(EditorScene& scene, Camera& camera) {
                     }
                     ImGui::SameLine();
                     if (ImGui::Button("Auto-Link", ImVec2(btnW, 22))) {
-                        size_t created = scene.GetWaypoints().AutoLinkNodes();
+                        size_t created = scene.GetWaypoints().AutoLinkNodes(150.0f, scene.HasBSP() ? &scene.GetBSP() : nullptr);
                         scene.ShowToast("Auto-linked " + std::to_string(created) + " connections!");
                         scene.RebuildWaypointRenderer();
                     }
@@ -2452,12 +2473,14 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
         } else if (area) {
             RenderAreaInspector(scene, camera, cmdMgr, area);
         } else {
-            if (scene.HasNAV()) {
+            if (scene.IsWaypointMode() && scene.HasWaypoints()) {
+                RenderWaypointGlobalInspector(scene, cmdMgr);
+            } else if (scene.HasNAV()) {
                 RenderNavMeshGlobalInspector(scene, cmdMgr);
             } else if (scene.HasBSP()) {
                 RenderBSPGlobalInspector(scene);
             } else {
-                ImGui::TextDisabled("No object or area selected.\nClick a NavArea or Entity in the 3D viewport or explorer.");
+                ImGui::TextDisabled("No object or area selected.\nClick a NavArea, Waypoint, or Entity in the 3D viewport or explorer.");
             }
         }
     }
@@ -5549,6 +5572,79 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
         scene.DeleteSelectedWaypoint();
     }
     ImGui::PopStyleColor();
+}
+
+void EditorUI::RenderWaypointGlobalInspector(EditorScene& scene, CommandManager& /*cmdMgr*/) {
+    ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.2f, 1.0f), "Bot Waypoints Overview");
+    ImGui::Separator();
+
+    const auto& graph = scene.GetWaypoints();
+    std::string path = scene.GetWaypointPath();
+    if (path.empty()) path = "(New / Unsaved Graph)";
+    size_t slash = path.find_last_of("/\\");
+    std::string filename = (slash != std::string::npos) ? path.substr(slash + 1) : path;
+
+    ImGui::Text("File: %s", filename.c_str());
+    ImGui::Text("Format: %s", graph.GetActiveBot() == BotType::EBot ? "E-Bot (.ewp)" :
+                              graph.GetActiveBot() == BotType::SyPB ? "SyPB (.spt)" :
+                              graph.GetActiveBot() == BotType::YaPB ? "YaPB (.pwf)" : "POD-Bot (.wpt)");
+    ImGui::Text("Game Mod: %s", graph.GetActiveMod() == GameMod::ZombiePlague ? "Zombie Plague" :
+                                graph.GetActiveMod() == GameMod::Deathmatch ? "Deathmatch" : "Standard CS");
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    size_t totalNodes = graph.GetNodeCount();
+    size_t totalLinks = 0;
+    size_t campCount = 0, sniperCount = 0, ladderCount = 0, crouchCount = 0, jumpCount = 0, zmCampCount = 0;
+    for (const auto& n : graph.GetNodes()) {
+        for (int c = 0; c < 8; ++c) {
+            if (n.connections[c] > 0) totalLinks++;
+        }
+        if (n.flags & WPT_FLAG_CAMP) campCount++;
+        if (n.flags & WPT_FLAG_SNIPER) sniperCount++;
+        if (n.flags & WPT_FLAG_LADDER) ladderCount++;
+        if (n.flags & WPT_FLAG_CROUCH) crouchCount++;
+        if (n.flags & WPT_FLAG_JUMP) jumpCount++;
+        if (n.flags & (WPT_FLAG_ZMHMCAMP | WPT_FLAG_HMCAMPMESH)) zmCampCount++;
+    }
+
+    ImGui::Text("Total Waypoints: %zu", totalNodes);
+    ImGui::Text("Total Connections: %zu", totalLinks);
+
+    ImGui::TextDisabled("  - Normal Walk: %zu", totalNodes - campCount - sniperCount - ladderCount);
+    if (crouchCount > 0) ImGui::TextDisabled("  - Crouch: %zu", crouchCount);
+    if (jumpCount > 0) ImGui::TextDisabled("  - Jump: %zu", jumpCount);
+    if (ladderCount > 0) ImGui::TextDisabled("  - Ladders: %zu", ladderCount);
+    if (campCount > 0) ImGui::TextDisabled("  - Camp Perches: %zu", campCount);
+    if (sniperCount > 0) ImGui::TextDisabled("  - Snipers: %zu", sniperCount);
+    if (zmCampCount > 0) ImGui::TextDisabled("  - Zombie Camps: %zu", zmCampCount);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Text("Global Actions:");
+
+    if (ImGui::Button("Auto-Analyze Flags & Crouch...", ImVec2(-1, 24))) {
+        m_waypointAnalyzerStats = scene.AutoAnalyzeWaypoints();
+        m_analyzerTargetWaypoints = true;
+        m_showAnalyzerModal = true;
+    }
+    if (ImGui::Button("Calculate All Wayzone Radii", ImVec2(-1, 24))) {
+        size_t done = scene.GetWaypoints().CalculateAllWayzones(scene.HasBSP() ? &scene.GetBSP() : nullptr);
+        scene.ShowToast("Calculated wayzone radii for " + std::to_string(done) + " waypoints!");
+    }
+    if (ImGui::Button("Auto-Link Unconnected Nodes", ImVec2(-1, 24))) {
+        size_t created = scene.GetWaypoints().AutoLinkNodes(150.0f, scene.HasBSP() ? &scene.GetBSP() : nullptr);
+        scene.ShowToast("Created " + std::to_string(created) + " connections!");
+        scene.RebuildWaypointRenderer();
+    }
+    if (ImGui::Button("Fix & Prune Blocked Links", ImVec2(-1, 24))) {
+        size_t fixed = scene.GetWaypoints().FixWaypoints(scene.HasBSP() ? &scene.GetBSP() : nullptr);
+        scene.ShowToast("Pruned / fixed " + std::to_string(fixed) + " invalid links!");
+        scene.RebuildWaypointRenderer();
+    }
+    if (ImGui::Button("Export Bot Waypoints...", ImVec2(-1, 24))) {
+        m_showWaypointExportModal = true;
+    }
 }
 
 void EditorUI::RenderWaypointExportModal(EditorScene& scene) {

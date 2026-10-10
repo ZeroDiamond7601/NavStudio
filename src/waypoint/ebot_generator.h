@@ -7,12 +7,12 @@
 #include <string>
 
 struct EBotGenerateOptions {
-    float nodeSpacing{60.0f};        // Distance between adjacent waypoint nodes (standard CS-EBOT: 40-65u)
-    float minDistance{48.0f};        // Minimum distance to prevent duplicate / cluttered nodes
+    float nodeSpacing{110.0f};       // Distance between adjacent waypoint nodes (standard CS-EBOT: 80-120u)
+    float minDistance{75.0f};        // Minimum distance to prevent duplicate / cluttered nodes
     float maxStepHeight{18.0f};      // Maximum step height walkable without jumping (standard: 18u)
     float maxJumpHeight{45.0f};      // Maximum jumpable elevation (standard: 45u)
     float maxDropHeight{250.0f};     // Maximum safe drop (standard: 250u)
-    float connectRadius{120.0f};     // Maximum connection link radius between nodes
+    float connectRadius{150.0f};     // Maximum connection link radius between nodes
     bool generateLadders{true};      // Parse func_ladder entities and generate ladder waypoints
     bool generateCamps{true};        // Detect camping and sniper perches with radial LOS
     GameMod mod{GameMod::Standard};  // Target game mod (Standard, ZombiePlague, Deathmatch)

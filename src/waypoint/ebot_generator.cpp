@@ -355,7 +355,7 @@ EBotGenerateResult EBotGenerator::Generate(
 
     // 4. Auto-Linking of nearby adjacent nodes
     if (progress) progress(0.82f, "Auto-linking neighboring waypoints...");
-    outGraph.AutoLinkNodes(options.connectRadius);
+    outGraph.AutoLinkNodes(options.connectRadius, &bsp);
 
     // 5. Line-of-sight validation and link pruning
     if (progress) progress(0.88f, "Pruning blocked pathways and validating geometry...");

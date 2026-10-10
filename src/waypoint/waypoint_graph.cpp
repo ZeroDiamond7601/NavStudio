@@ -100,21 +100,55 @@ bool WaypointGraph::DisconnectNodes(uint32_t fromId, uint32_t toId, bool bidirec
     return ok1 || ok2;
 }
 
-size_t WaypointGraph::AutoLinkNodes(float maxDist) {
+size_t WaypointGraph::AutoLinkNodes(float maxDist, const BSPFile* bsp) {
     size_t created = 0;
     float maxDistSq = maxDist * maxDist;
 
     for (size_t i = 0; i < m_nodes.size(); ++i) {
-        for (size_t j = i + 1; j < m_nodes.size(); ++j) {
-            Vector3 diff = m_nodes[j].origin - m_nodes[i].origin;
+        WaypointNode& from = m_nodes[i];
+        if (from.GetFreeSlotCount() == 0) continue;
+
+        struct CandLink {
+            uint32_t id;
+            float distSq;
+            float dz;
+        };
+        std::vector<CandLink> candidates;
+
+        for (size_t j = 0; j < m_nodes.size(); ++j) {
+            if (i == j) continue;
+            const WaypointNode& to = m_nodes[j];
+            if (from.HasConnectionTo(static_cast<int16_t>(to.id))) continue;
+
+            Vector3 diff = to.origin - from.origin;
             float dsq = diff.Dot(diff);
-            if (dsq <= maxDistSq) {
-                // Check height differential (standard step/jump reachable < 45 units)
-                if (std::abs(diff.z) <= 45.0f) {
-                    if (ConnectNodes(m_nodes[i].id, m_nodes[j].id, true, WPT_CONN_NONE)) {
-                        ++created;
+            if (dsq > maxDistSq) continue;
+            if (std::abs(diff.z) > 45.0f) continue;
+
+            // Check line of sight with BSP
+            if (bsp && bsp->IsLoaded()) {
+                Vector3 p1 = from.origin + Vector3(0.0f, 0.0f, 18.0f);
+                Vector3 p2 = to.origin + Vector3(0.0f, 0.0f, 18.0f);
+                BSPTraceResult tr;
+                if (bsp->TraceWorld(p1, p2, HULL_POINT, &tr)) {
+                    if (tr.fraction < 0.98f || tr.startsolid || tr.allsolid) {
+                        continue;
                     }
                 }
+            }
+
+            candidates.push_back({ to.id, dsq, diff.z });
+        }
+
+        std::sort(candidates.begin(), candidates.end(), [](const CandLink& a, const CandLink& b) {
+            return a.distSq < b.distSq;
+        });
+
+        for (const auto& cand : candidates) {
+            if (from.GetFreeSlotCount() == 0) break;
+            uint16_t cFlags = (cand.dz > 18.0f) ? WPT_CONN_JUMP : WPT_CONN_NONE;
+            if (ConnectNodes(from.id, cand.id, true, cFlags)) {
+                ++created;
             }
         }
     }

@@ -939,7 +939,7 @@ static void ProcessInput(GLFWwindow* window, float deltaTime) {
 
 static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
     static std::string lastTitle = "";
-    std::string title = "NavStudio v1.6.5";
+    std::string title = "NavStudio v1.6.6";
     if (scene.HasBSP() || scene.HasNAV() || scene.HasWaypoints()) {
         std::string map = "";
         if (scene.HasBSP()) {
@@ -969,7 +969,7 @@ static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
 
 int main(int argc, char* argv[]) {
     std::printf("====================================================\n");
-    std::printf("  NavStudio v1.6.5\n");
+    std::printf("  NavStudio v1.6.6\n");
     std::printf("====================================================\n");
 
     if (!glfwInit()) {
@@ -1042,7 +1042,7 @@ int main(int argc, char* argv[]) {
         initialHeight = 1080;
     }
 
-    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.6.5", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.6.6", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "[Error] Failed to create GLFW window\n");
         glfwTerminate();
@@ -1117,6 +1117,7 @@ int main(int argc, char* argv[]) {
     if (forceWaypointMode) {
         scene.SetTargetMode(EditorScene::TARGET_WAYPOINTS);
         scene.SetShowWaypoints(true);
+        scene.SetShowNAV(false);
     }
 
     glEnable(GL_DEPTH_TEST);

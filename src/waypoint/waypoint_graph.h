@@ -72,7 +72,7 @@ public:
     bool SavePODBot(const std::string& filepath, GameMod mod);
 
     // Auto-Link Tool (creates links between nodes with clear line of sight and within reach)
-    size_t AutoLinkNodes(float maxDist = 300.0f);
+    size_t AutoLinkNodes(float maxDist = 200.0f, const class BSPFile* bsp = nullptr);
 
     // Automated Waypoint Analyzer (integrating CS-EBOT NavMesh-like analysis & YaPB graph optimization)
     struct WaypointAnalysisStats {
