@@ -939,7 +939,7 @@ static void ProcessInput(GLFWwindow* window, float deltaTime) {
 
 static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
     static std::string lastTitle = "";
-    std::string title = "NavStudio v1.6.6";
+    std::string title = "NavStudio v1.6.7";
     if (scene.HasBSP() || scene.HasNAV() || scene.HasWaypoints()) {
         std::string map = "";
         if (scene.HasBSP()) {
@@ -969,7 +969,7 @@ static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
 
 int main(int argc, char* argv[]) {
     std::printf("====================================================\n");
-    std::printf("  NavStudio v1.6.6\n");
+    std::printf("  NavStudio v1.6.7\n");
     std::printf("====================================================\n");
 
     if (!glfwInit()) {
@@ -992,6 +992,7 @@ int main(int argc, char* argv[]) {
     int customShading = -1;
     int customEntities = -1;
     uint32_t customSelectArea = 0;
+    uint32_t customSelectWaypoint = 0;
     bool hasCustomCamPos = false;
     Vector3 customCamPos{0.0f, 0.0f, 0.0f};
     bool hasCustomCamAngles = false;
@@ -1012,6 +1013,8 @@ int main(int argc, char* argv[]) {
             customEntities = std::atoi(argv[++i]);
         } else if (arg == "--select-area" && i + 1 < argc) {
             customSelectArea = static_cast<uint32_t>(std::atoi(argv[++i]));
+        } else if ((arg == "--select-waypoint" || arg == "--select-node" || arg == "--select-wpt") && i + 1 < argc) {
+            customSelectWaypoint = static_cast<uint32_t>(std::atoi(argv[++i]));
         } else if ((arg == "--waypoints" || arg == "--wpt") && i + 1 < argc) {
             customWptPath = argv[++i];
         } else if (arg == "--mode" && i + 1 < argc) {
@@ -1042,7 +1045,7 @@ int main(int argc, char* argv[]) {
         initialHeight = 1080;
     }
 
-    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.6.6", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.6.7", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "[Error] Failed to create GLFW window\n");
         glfwTerminate();
@@ -1114,6 +1117,13 @@ int main(int argc, char* argv[]) {
     if (!customWptPath.empty()) {
         scene.LoadWaypoints(customWptPath);
     }
+    if (customSelectWaypoint > 0) {
+        scene.SelectWaypoint(customSelectWaypoint);
+        const WaypointNode* node = scene.GetWaypoints().GetNode(customSelectWaypoint);
+        if (node && !hasCustomCamPos) {
+            g_camera.FocusOn(node->origin, 250.0f);
+        }
+    }
     if (forceWaypointMode) {
         scene.SetTargetMode(EditorScene::TARGET_WAYPOINTS);
         scene.SetShowWaypoints(true);
@@ -1150,7 +1160,13 @@ int main(int argc, char* argv[]) {
                 if (customEntities >= 0) {
                     scene.GetEntityRenderer().SetShowEntities(customEntities != 0);
                 }
-                if (customSelectArea > 0) {
+                if (customSelectWaypoint > 0) {
+                    scene.SelectWaypoint(customSelectWaypoint);
+                    const WaypointNode* node = scene.GetWaypoints().GetNode(customSelectWaypoint);
+                    if (node && !hasCustomCamPos) {
+                        g_camera.FocusOn(node->origin, 250.0f);
+                    }
+                } else if (customSelectArea > 0) {
                     scene.SelectArea(customSelectArea);
                     NavArea* a = scene.GetNAV().GetAreaByID(customSelectArea);
                     if (a && !hasCustomCamPos) {

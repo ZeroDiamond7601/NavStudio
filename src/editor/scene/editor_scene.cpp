@@ -5047,8 +5047,8 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
         GridCoord cur = queue.front();
         queue.pop();
 
-        float wx = cur.gx * snapDist;
-        float wy = cur.gy * snapDist;
+        float wx = (newWaypointIds.empty()) ? seedFloor.x : (cur.gx * snapDist);
+        float wy = (newWaypointIds.empty()) ? seedFloor.y : (cur.gy * snapDist);
 
         // Trace down to floor relative to current cell's elevation
         Vector3 traceTop(wx, wy, cur.floorZ + 45.0f);
