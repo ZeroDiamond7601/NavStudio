@@ -374,41 +374,6 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     return;
                 }
 
-                // Test waypoint connections when visible
-                if (g_activeScene && g_activeScene->IsShowWaypoints() && g_activeScene->IsShowWaypointConnections()) {
-                    uint32_t wFrom = 0, wTo = 0;
-                    bool hitWptConn = ScenePicker::PickWaypointConnection(
-                        *g_activeScene,
-                        static_cast<float>(mouseX), static_cast<float>(mouseY),
-                        static_cast<float>(displayW), static_cast<float>(displayH),
-                        g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect),
-                        wFrom, wTo, 14.0f
-                    );
-                    if (hitWptConn) {
-                        g_activeScene->SelectWaypointConnection(wFrom, wTo);
-                        return;
-                    }
-                }
-
-                // Test directional connections when visible or in connection selection mode
-                bool connSelectMode = g_activeScene && (g_activeScene->IsConnectionSelectionMode() || g_activeScene->GetShowConnections());
-                if (connSelectMode) {
-                    uint32_t fromId = 0, toId = 0;
-                    int dir = -1;
-                    float pickTol = g_activeScene->IsConnectionSelectionMode() ? 18.0f : 12.0f;
-                    bool hitConn = ScenePicker::PickConnection(
-                        *g_activeScene,
-                        static_cast<float>(mouseX), static_cast<float>(mouseY),
-                        static_cast<float>(displayW), static_cast<float>(displayH),
-                        g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect),
-                        fromId, toId, dir, pickTol
-                    );
-                    if (hitConn) {
-                        g_activeScene->SelectConnection(fromId, toId, dir);
-                        return;
-                    }
-                }
-
                 // Pick ladder, entity, waypoint, and NavArea with accurate distance comparison
                 float ladDist = std::numeric_limits<float>::max();
                 uint32_t hitLadder = ScenePicker::PickLadder(*g_activeScene, ray, &ladDist);
@@ -430,13 +395,16 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                 bool toggle = (mods & GLFW_MOD_CONTROL) != 0;
 
                 // Priority: waypoint -> ladder -> area -> entity
-                if (hitWpt != 0 && (wptDist <= navDist + 8.0f && wptDist <= ladDist + 8.0f && wptDist <= entDist + 8.0f)) {
+                if (hitWpt != 0 && (g_activeScene->IsWaypointMode() || (wptDist <= navDist + 8.0f && wptDist <= ladDist + 8.0f && wptDist <= entDist + 8.0f))) {
                     g_activeScene->SelectWaypoint(hitWpt, additive || toggle);
                     g_activeScene->SelectLadder(0);
                     g_activeScene->ClearSelection();
                     g_activeScene->SelectEntity(-1);
                     if (g_activeScene->HasSelectedConnection()) {
                         g_activeScene->ClearSelectedConnection();
+                    }
+                    if (g_activeScene->HasSelectedWaypointConnection()) {
+                        g_activeScene->ClearSelectedWaypointConnection();
                     }
                 } else if (hitLadder != 0 && (ladDist <= navDist + 8.0f && ladDist <= entDist + 8.0f)) {
                     g_activeScene->ClearWaypointSelection();
@@ -744,6 +712,34 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                             g_camera.FocusOn(mid);
                         }
                     }
+                } else if (g_activeScene->GetSelectedWaypointID() != 0 || g_activeScene->HasWaypointMultiSelection()) {
+                    uint32_t selWpt = g_activeScene->GetSelectedWaypointID();
+                    WaypointNode* node = g_activeScene->GetWaypoints().GetNode(selWpt);
+                    if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
+                        if (g_activeScene->HasWaypointMultiSelection()) {
+                            g_activeScene->BatchDeleteWaypoints();
+                        } else {
+                            g_activeScene->DeleteSelectedWaypoint();
+                        }
+                    } else if (key == GLFW_KEY_SPACE) {
+                        if (g_activeScene->HasWaypointMultiSelection()) {
+                            g_activeScene->BatchSnapWaypointsToFloor();
+                        } else {
+                            g_activeScene->SnapSelectedWaypointToFloor();
+                        }
+                    } else if (key == GLFW_KEY_F) {
+                        if (node) g_camera.FocusOn(node->origin);
+                    } else if (key == GLFW_KEY_C && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) {
+                        if (g_activeScene->HasWaypointMultiSelection()) {
+                            g_activeScene->BatchConnectSelectedWaypoints(true);
+                        } else {
+                            g_activeScene->ToggleWaypointConnectMode();
+                        }
+                    } else if (key == GLFW_KEY_D && (mods & GLFW_MOD_SHIFT) != 0) {
+                        g_activeScene->DuplicateSelectedWaypoints();
+                    } else if (key == GLFW_KEY_B && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) {
+                        g_activeScene->BridgeSelectedWaypoints();
+                    }
                 } else if (g_activeScene->GetSelectedLadderID() != 0) {
                     if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
                         g_activeScene->DeleteSelectedLadder();
@@ -820,34 +816,6 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                         } else if (g_activeScene->HasBSP() && sel) {
                             g_cmdMgr->ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(g_activeScene, sel->GetID()));
                         }
-                    }
-                } else if (g_activeScene->GetSelectedWaypointID() != 0 || g_activeScene->HasWaypointMultiSelection()) {
-                    uint32_t selWpt = g_activeScene->GetSelectedWaypointID();
-                    WaypointNode* node = g_activeScene->GetWaypoints().GetNode(selWpt);
-                    if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
-                        if (g_activeScene->HasWaypointMultiSelection()) {
-                            g_activeScene->BatchDeleteWaypoints();
-                        } else {
-                            g_activeScene->DeleteSelectedWaypoint();
-                        }
-                    } else if (key == GLFW_KEY_SPACE) {
-                        if (g_activeScene->HasWaypointMultiSelection()) {
-                            g_activeScene->BatchSnapWaypointsToFloor();
-                        } else {
-                            g_activeScene->SnapSelectedWaypointToFloor();
-                        }
-                    } else if (key == GLFW_KEY_F) {
-                        if (node) g_camera.FocusOn(node->origin);
-                    } else if (key == GLFW_KEY_C && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) {
-                        if (g_activeScene->HasWaypointMultiSelection()) {
-                            g_activeScene->BatchConnectSelectedWaypoints(true);
-                        } else {
-                            g_activeScene->ToggleWaypointConnectMode();
-                        }
-                    } else if (key == GLFW_KEY_D && (mods & GLFW_MOD_SHIFT) != 0) {
-                        g_activeScene->DuplicateSelectedWaypoints();
-                    } else if (key == GLFW_KEY_B && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) {
-                        g_activeScene->BridgeSelectedWaypoints();
                     }
                 } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {
                     if (key == GLFW_KEY_F) {
@@ -1055,7 +1023,7 @@ static void ProcessInput(GLFWwindow* window, float deltaTime) {
 
 static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
     static std::string lastTitle = "";
-    std::string title = "NavStudio v1.6.8.1";
+    std::string title = "NavStudio v1.6.8.2";
     if (scene.HasBSP() || scene.HasNAV() || scene.HasWaypoints()) {
         std::string map = "";
         if (scene.HasBSP()) {
@@ -1085,7 +1053,7 @@ static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
 
 int main(int argc, char* argv[]) {
     std::printf("====================================================\n");
-    std::printf("  NavStudio v1.6.8.1\n");
+    std::printf("  NavStudio v1.6.8.2\n");
     std::printf("====================================================\n");
 
     if (!glfwInit()) {
@@ -1161,7 +1129,7 @@ int main(int argc, char* argv[]) {
         initialHeight = 1080;
     }
 
-    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.6.8.1", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.6.8.2", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "[Error] Failed to create GLFW window\n");
         glfwTerminate();

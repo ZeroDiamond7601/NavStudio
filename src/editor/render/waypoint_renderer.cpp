@@ -186,8 +186,8 @@ bool WaypointRenderer::BuildFromGraph(
             }
         }
 
-        // 4. Ground Tolerance Wayzone Disc & Precision Markers
-        if (m_showRadii || isSelected) {
+        // 4. Ground Tolerance Wayzone Disc & Precision Markers (Only for selected waypoints)
+        if (isSelected) {
             float rad = node.radius;
             if (rad > 0.0f) {
                 float effRad = std::max(12.0f, rad);

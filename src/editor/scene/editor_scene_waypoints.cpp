@@ -77,6 +77,10 @@ void EditorScene::SelectWaypoint(uint32_t id, bool addToSelection) {
         m_selectedWaypointId = id;
         if (id != 0) {
             m_selectedWaypointIds.insert(id);
+            m_selectedAreaId = 0;
+            m_selectedAreaIds.clear();
+            m_selectedLadderId = 0;
+            m_selectedWaypointConnection.clear();
         }
     } else {
         if (id != 0) {
@@ -88,6 +92,10 @@ void EditorScene::SelectWaypoint(uint32_t id, bool addToSelection) {
             } else {
                 m_selectedWaypointIds.insert(id);
                 m_selectedWaypointId = id;
+                m_selectedAreaId = 0;
+                m_selectedAreaIds.clear();
+                m_selectedLadderId = 0;
+                m_selectedWaypointConnection.clear();
             }
         }
     }
@@ -110,6 +118,10 @@ void EditorScene::SelectAllWaypoints() {
     if (!m_waypoints.IsEmpty()) {
         m_selectedWaypointId = m_waypoints.GetNodes().front().id;
     }
+    m_selectedAreaId = 0;
+    m_selectedAreaIds.clear();
+    m_selectedLadderId = 0;
+    m_selectedWaypointConnection.clear();
     RebuildWaypointRenderer();
     ShowToast("Selected all " + std::to_string(m_selectedWaypointIds.size()) + " waypoints");
 }
@@ -146,6 +158,12 @@ void EditorScene::BoxSelectWaypoints(const std::vector<uint32_t>& pickedIds, boo
     }
     if (m_selectedWaypointIds.find(m_selectedWaypointId) == m_selectedWaypointIds.end()) {
         m_selectedWaypointId = m_selectedWaypointIds.empty() ? 0 : *m_selectedWaypointIds.begin();
+    }
+    if (!m_selectedWaypointIds.empty()) {
+        m_selectedAreaId = 0;
+        m_selectedAreaIds.clear();
+        m_selectedLadderId = 0;
+        m_selectedWaypointConnection.clear();
     }
     RebuildWaypointRenderer();
     ShowToast("Box selected " + std::to_string(m_selectedWaypointIds.size()) + " waypoints");
@@ -201,13 +219,15 @@ void EditorScene::BatchConnectSelectedWaypoints(bool bidirectional) {
     if (m_selectedWaypointIds.size() < 2) return;
     std::vector<uint32_t> ids(m_selectedWaypointIds.begin(), m_selectedWaypointIds.end());
     size_t connected = 0;
-    for (size_t i = 0; i + 1 < ids.size(); ++i) {
-        if (m_cmdMgr) {
-            m_cmdMgr->ExecuteCommand(std::make_unique<CmdConnectWaypoints>(this, ids[i], ids[i + 1], bidirectional, WPT_CONN_NONE));
-            connected++;
-        } else {
-            if (m_waypoints.ConnectNodes(ids[i], ids[i + 1], bidirectional, WPT_CONN_NONE)) {
+    for (size_t i = 0; i < ids.size(); ++i) {
+        for (size_t j = i + 1; j < ids.size(); ++j) {
+            if (m_cmdMgr) {
+                m_cmdMgr->ExecuteCommand(std::make_unique<CmdConnectWaypoints>(this, ids[i], ids[j], bidirectional, WPT_CONN_NONE));
                 connected++;
+            } else {
+                if (m_waypoints.ConnectNodes(ids[i], ids[j], bidirectional, WPT_CONN_NONE)) {
+                    connected++;
+                }
             }
         }
     }
