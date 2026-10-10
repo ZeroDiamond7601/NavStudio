@@ -449,8 +449,9 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
                     indices.push_back(pBase + 0); indices.push_back(pBase + 1);
                     indices.push_back(pBase + 1); indices.push_back(pBase + 2);
                     indices.push_back(pBase + 2); indices.push_back(pBase + 3);
-                    indices.push_back(pBase + 3); indices.push_back(pBase + 0);
                 }
+            }
+        }
     }
 
     if (indices.empty()) return false;

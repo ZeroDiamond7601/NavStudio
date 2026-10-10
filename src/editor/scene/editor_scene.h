@@ -593,6 +593,7 @@ public:
         size_t campPointsCreated{0};
         size_t sniperPointsCreated{0};
         size_t zombieCampsCreated{0};
+        size_t parkourLinksCreated{0};
         double durationSeconds{0.0};
         std::string errorMessage;
     };

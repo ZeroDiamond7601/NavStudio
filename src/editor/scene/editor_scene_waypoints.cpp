@@ -209,6 +209,7 @@ bool EditorScene::StartEBotWaypointGeneration(const EBotGenerateOptions& options
             m_waypointGenProgress.campPointsCreated = res.campPointsCreated;
             m_waypointGenProgress.sniperPointsCreated = res.sniperPointsCreated;
             m_waypointGenProgress.zombieCampsCreated = res.zombieCampsCreated;
+            m_waypointGenProgress.parkourLinksCreated = res.parkourLinksCreated;
             m_waypointGenProgress.durationSeconds = res.durationSeconds;
             m_waypointGenProgress.errorMessage = res.errorMessage;
             m_waypointGenProgress.progress.store(1.0f);
