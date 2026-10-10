@@ -48,7 +48,9 @@ enum WaypointFlags : uint32_t {
     WPT_FLAG_JUMP             = (1 << 27),  // Requires jump
     WPT_FLAG_SNIPER           = (1 << 28),  // Long-range sniper nest
     WPT_FLAG_TERRORIST        = (1 << 29),  // Terrorist team exclusive
-    WPT_FLAG_COUNTER          = (1 << 30)   // CT team exclusive
+    WPT_FLAG_COUNTER          = (1 << 30),  // CT team exclusive
+    WPT_FLAG_TEAM_T           = WPT_FLAG_TERRORIST,
+    WPT_FLAG_TEAM_CT          = WPT_FLAG_COUNTER
 };
 
 // Waypoint Connection Link Flags
