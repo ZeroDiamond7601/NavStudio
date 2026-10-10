@@ -27,7 +27,8 @@ public:
         PENDING_OPEN_NAV,
         PENDING_RECENT,
         PENDING_UNLOAD_NAV,
-        PENDING_UNLOAD_BSP
+        PENDING_UNLOAD_BSP,
+        PENDING_UNLOAD_ALL
     };
 
     bool CheckUnsavedChanges(EditorScene& scene, CommandManager& cmdMgr, PendingAction action, const std::string& path = "");
@@ -105,6 +106,7 @@ private:
     void RenderWaypointInspector(EditorScene& scene, CommandManager& cmdMgr);
     void RenderWaypointExportModal(EditorScene& scene);
     void RenderNavToWaypointModal(EditorScene& scene);
+    void RenderEBotGenModal(EditorScene& scene, CommandManager& cmdMgr);
 
     bool m_marqueeActive{false};
     float m_marqueeStartX{0.0f};
@@ -186,6 +188,8 @@ private:
     // Bot Waypoint UI State
     bool m_showWaypointExportModal{false};
     bool m_showNavToWaypointModal{false};
+    bool m_showEBotGenModal{false};
+    EBotGenerateOptions m_ebotGenOptions;
     int m_waypointExportBot{0}; // 0=EBot, 1=SyPB, 2=YaPB, 3=PODBot
     int m_waypointExportMod{0}; // 0=Standard, 1=ZombiePlague, 2=Deathmatch
     char m_waypointExportPath[512]{""};

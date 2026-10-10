@@ -45,6 +45,9 @@ EditorScene::EditorScene()
 }
 
 EditorScene::~EditorScene() {
+    if (m_waypointGenThread.joinable()) {
+        m_waypointGenThread.join();
+    }
     if (m_navGenThread.joinable()) {
         m_navGenThread.join();
     }
@@ -653,6 +656,7 @@ bool EditorScene::ExportNAVToOBJ(const std::string& filepath) const {
 
 void EditorScene::UpdateAutosave(float deltaTime) {
     UpdateNavGeneration();
+    UpdateWaypointGeneration();
     UpdateToasts(deltaTime);
 
     if (!m_prefs.enableAutosave || m_prefs.autosaveIntervalMinutes <= 0) return;
@@ -4733,6 +4737,8 @@ const WaypointNode* EditorScene::GetSelectedWaypoint() const {
 
 bool EditorScene::LoadWaypoints(const std::string& path) {
     if (m_waypoints.Load(path)) {
+        m_showWaypoints = true;
+        m_waypointRenderer.SetShowWaypoints(true);
         RebuildWaypointRenderer();
         ShowToast("Loaded " + std::to_string(m_waypoints.GetNodeCount()) + " waypoints from " + path);
         return true;
@@ -4750,12 +4756,21 @@ bool EditorScene::SaveWaypoints(const std::string& path, BotType bot, GameMod mo
     return false;
 }
 
+void EditorScene::UnloadWaypoints() {
+    m_waypoints.Clear();
+    m_selectedWaypointId = 0;
+    m_waypointRenderer.Clear();
+    ShowToast("Unloaded bot waypoints");
+}
+
 bool EditorScene::ConvertNavToWaypoints(BotType bot, GameMod mod) {
     if (!m_nav || !m_nav->IsLoaded()) {
         ShowToast("No NavMesh loaded to convert!");
         return false;
     }
     auto stats = WaypointNavConverter::NavToWaypoints(*m_nav, m_waypoints, bot, mod);
+    m_showWaypoints = true;
+    m_waypointRenderer.SetShowWaypoints(true);
     RebuildWaypointRenderer();
     ShowToast("Converted NavMesh: " + std::to_string(stats.waypointsCreated) + " waypoints, " +
               std::to_string(stats.connectionsCreated) + " links!");
@@ -4773,6 +4788,7 @@ size_t EditorScene::ConvertWaypointsToNav() {
     size_t created = WaypointNavConverter::WaypointsToNav(m_waypoints, *m_nav);
     if (created > 0) {
         m_isModified = true;
+        m_showNav = true;
         RebuildNavRenderer();
         ShowToast("Generated " + std::to_string(created) + " NavAreas from waypoints!");
     }
@@ -4796,5 +4812,81 @@ WaypointGraph::WaypointAnalysisStats EditorScene::AutoAnalyzeWaypoints() {
               std::to_string(stats.campAnglesCalculated) + " camp sightlines, " +
               std::to_string(stats.blockedLinksPruned) + " blocked links pruned)!");
     return stats;
+}
+
+bool EditorScene::StartEBotWaypointGeneration(const EBotGenerateOptions& options) {
+    if (!m_bsp || !m_bsp->IsLoaded()) {
+        ShowToast("Cannot generate waypoints: No BSP map loaded!");
+        return false;
+    }
+    if (m_waypointGenProgress.isGenerating.load()) {
+        ShowToast("Waypoint generation is already in progress!");
+        return false;
+    }
+
+    if (m_waypointGenThread.joinable()) {
+        m_waypointGenThread.join();
+    }
+
+    m_waypointGenProgress.isGenerating.store(true);
+    m_waypointGenProgress.progress.store(0.0f);
+    m_waypointGenProgress.statusMessage = "Starting automated waypoint generation...";
+    m_waypointGenProgress.completed = false;
+    m_waypointGenProgress.success = false;
+    m_waypointGenProgress.errorMessage.clear();
+
+    m_pendingGeneratedGraph.Clear();
+
+    m_waypointGenThread = std::thread([this, options]() {
+        auto progressCb = [this](float p, const std::string& msg) {
+            m_waypointGenProgress.progress.store(p);
+            std::lock_guard<std::mutex> lock(m_waypointGenMutex);
+            m_waypointGenProgress.statusMessage = msg;
+        };
+
+        EBotGenerateResult res = EBotGenerator::Generate(*m_bsp, m_pendingGeneratedGraph, options, progressCb);
+
+        {
+            std::lock_guard<std::mutex> lock(m_waypointGenMutex);
+            m_pendingGenResult = res;
+            m_waypointGenProgress.success = res.success;
+            m_waypointGenProgress.waypointsCreated = res.waypointsCreated;
+            m_waypointGenProgress.connectionsCreated = res.connectionsCreated;
+            m_waypointGenProgress.laddersCreated = res.laddersCreated;
+            m_waypointGenProgress.campPointsCreated = res.campPointsCreated;
+            m_waypointGenProgress.sniperPointsCreated = res.sniperPointsCreated;
+            m_waypointGenProgress.zombieCampsCreated = res.zombieCampsCreated;
+            m_waypointGenProgress.durationSeconds = res.durationSeconds;
+            m_waypointGenProgress.errorMessage = res.errorMessage;
+            m_waypointGenProgress.progress.store(1.0f);
+            m_waypointGenProgress.completed = true;
+            m_waypointGenProgress.isGenerating.store(false);
+        }
+    });
+
+    return true;
+}
+
+void EditorScene::UpdateWaypointGeneration() {
+    if (m_waypointGenProgress.completed) {
+        m_waypointGenProgress.completed = false;
+        if (m_waypointGenThread.joinable()) {
+            m_waypointGenThread.join();
+        }
+
+        if (m_waypointGenProgress.success) {
+            {
+                std::lock_guard<std::mutex> lock(m_waypointGenMutex);
+                m_waypoints = std::move(m_pendingGeneratedGraph);
+            }
+            m_showWaypoints = true;
+            m_waypointRenderer.SetShowWaypoints(true);
+            RebuildWaypointRenderer();
+            ShowToast("Generated " + std::to_string(m_waypoints.GetNodeCount()) + " waypoints in " +
+                      std::to_string(m_pendingGenResult.durationSeconds).substr(0, 4) + "s!");
+        } else {
+            ShowToast("Waypoint generation failed: " + m_waypointGenProgress.errorMessage);
+        }
+    }
 }
 

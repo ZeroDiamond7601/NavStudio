@@ -10,31 +10,38 @@
 #include "../nav/nav_generator.h"
 #include "../waypoint/waypoint_graph.h"
 #include "../waypoint/waypoint_nav_converter.h"
+#include "../waypoint/ebot_generator.h"
 
 static void PrintHelp() {
     std::cout << "Usage:\n";
     std::cout << "  nav_cli <path_to_bsp_or_nav> [optional_second_file]\n";
     std::cout << "  nav_cli generate <map.bsp> [output.nav] [options]\n";
+    std::cout << "  nav_cli generate-waypoints <map.bsp> [output.ewp] [options]\n";
     std::cout << "  nav_cli batch <maps_directory> [options]\n";
     std::cout << "  nav_cli convert <input> <output> [options]\n\n";
     std::cout << "Commands:\n";
-    std::cout << "  generate <map.bsp> [out.nav]  Auto-generate navigation mesh for a BSP map\n";
-    std::cout << "  batch <maps_dir>              Mass-produce navigation meshes for all maps in directory\n";
-    std::cout << "  convert <in> <out> [opts]     Convert bidirectionally between NAV and Bot Waypoints\n";
-    std::cout << "  analyze <file> [map.bsp]      Auto-analyze flags, crouch, jumps & sightlines (Nav & Waypoints)\n";
-    std::cout << "  <map.bsp|map.nav>             Verify BSP data, NAV headers, places, and A* pathfinding\n\n";
+    std::cout << "  generate <map.bsp> [out.nav]           Auto-generate navigation mesh for a BSP map\n";
+    std::cout << "  generate-waypoints <map.bsp> [out]     Auto-generate CS-EBOT bot waypoint graph\n";
+    std::cout << "  batch <maps_dir>                       Mass-produce navigation meshes for all maps in directory\n";
+    std::cout << "  convert <in> <out> [opts]              Convert bidirectionally between NAV and Bot Waypoints\n";
+    std::cout << "  analyze <file> [map.bsp]               Auto-analyze flags, crouch, jumps & sightlines (Nav & Waypoints)\n";
+    std::cout << "  <map.bsp|map.nav>                      Verify BSP data, NAV headers, places, and A* pathfinding\n\n";
     std::cout << "Options:\n";
-    std::cout << "  --output, -o <dir|file>       Specify output directory or file path\n";
-    std::cout << "  --step <float>                Grid step size (default: 25.0)\n";
-    std::cout << "  --threads <int>               Worker thread count for batch mode (default: CPU cores)\n";
-    std::cout << "  --force, -f                   Overwrite existing .nav files\n";
-    std::cout << "  --recursive, -r               Recursively search directories for BSP files\n";
-    std::cout << "  --no-jump                     Disable jump drop connections\n";
-    std::cout << "  --no-merge                    Disable adjacent coplanar area merging\n";
-    std::cout << "  --bot <ebot|sypb|yapb|podbot> Bot engine target (default: ebot)\n";
-    std::cout << "  --mod <standard|zp|dm>        Game mod rules (default: standard)\n\n";
+    std::cout << "  --output, -o <dir|file>                Specify output directory or file path\n";
+    std::cout << "  --step <float>                         Grid step size (default: 25.0)\n";
+    std::cout << "  --spacing <float>                      Waypoint spacing (default: 110.0)\n";
+    std::cout << "  --threads <int>                        Worker thread count for batch mode (default: CPU cores)\n";
+    std::cout << "  --force, -f                            Overwrite existing files\n";
+    std::cout << "  --recursive, -r                        Recursively search directories for BSP files\n";
+    std::cout << "  --no-jump                              Disable jump drop connections\n";
+    std::cout << "  --no-merge                             Disable adjacent coplanar area merging\n";
+    std::cout << "  --no-camp                              Disable tactical sightline camp analysis\n";
+    std::cout << "  --no-ladders                           Disable ladder waypoint generation\n";
+    std::cout << "  --bot <ebot|sypb|yapb|podbot>          Bot engine target (default: ebot)\n";
+    std::cout << "  --mod <standard|zp|dm>                 Game mod rules (default: standard)\n\n";
     std::cout << "Examples:\n";
     std::cout << "  nav_cli generate cstrike/maps/de_dust2.bsp\n";
+    std::cout << "  nav_cli generate-waypoints de_dust2.bsp de_dust2.ewp --bot ebot\n";
     std::cout << "  nav_cli batch \"C:\\Steam\\Half-Life\\cstrike\\maps\" --threads 8\n";
     std::cout << "  nav_cli convert de_dust2.nav de_dust2.ewp --bot ebot --mod standard\n";
     std::cout << "  nav_cli convert zm_toxic.nav zm_toxic.pwf --bot yapb --mod zp\n";
@@ -529,6 +536,110 @@ static int HandleAnalyze(int argc, char* argv[]) {
     }
 }
 
+static int HandleGenerateWaypoints(int argc, char* argv[]) {
+    if (argc < 3) {
+        std::cerr << "Error: 'generate-waypoints' requires at least a path to a .bsp file.\n";
+        PrintHelp();
+        return 1;
+    }
+
+    std::string bspPath = argv[2];
+    std::string outPath = "";
+    EBotGenerateOptions options;
+    BotType botType = BotType::EBot;
+    GameMod mod = GameMod::Standard;
+
+    for (int i = 3; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--output" || arg == "-o") {
+            if (i + 1 < argc) outPath = argv[++i];
+        } else if (arg == "--bot") {
+            if (i + 1 < argc) {
+                std::string b = argv[++i];
+                if (b == "sypb") botType = BotType::SyPB;
+                else if (b == "yapb") botType = BotType::YaPB;
+                else if (b == "podbot" || b == "pod") botType = BotType::PODBot;
+                else botType = BotType::EBot;
+            }
+        } else if (arg == "--mod") {
+            if (i + 1 < argc) {
+                std::string m = argv[++i];
+                if (m == "zp" || m == "zombie") mod = GameMod::ZombiePlague;
+                else if (m == "dm" || m == "deathmatch") mod = GameMod::Deathmatch;
+                else mod = GameMod::Standard;
+            }
+        } else if (arg == "--spacing") {
+            if (i + 1 < argc) options.nodeSpacing = std::stof(argv[++i]);
+        } else if (arg == "--min-dist") {
+            if (i + 1 < argc) options.minDistance = std::stof(argv[++i]);
+        } else if (arg == "--connect-radius") {
+            if (i + 1 < argc) options.connectRadius = std::stof(argv[++i]);
+        } else if (arg == "--no-camp") {
+            options.generateCamps = false;
+        } else if (arg == "--no-ladders") {
+            options.generateLadders = false;
+        } else if (outPath.empty() && arg.find('.') != std::string::npos) {
+            outPath = arg;
+        }
+    }
+
+    if (outPath.empty()) {
+        std::string ext = ".ewp";
+        if (botType == BotType::SyPB) ext = ".spt";
+        else if (botType == BotType::YaPB) ext = ".pwf";
+        else if (botType == BotType::PODBot) ext = ".wpt";
+
+        if (bspPath.size() > 4 && bspPath.substr(bspPath.size() - 4) == ".bsp") {
+            outPath = bspPath.substr(0, bspPath.size() - 4) + ext;
+        } else {
+            outPath = bspPath + ext;
+        }
+    }
+
+    options.botType = botType;
+    options.mod = mod;
+
+    BSPFile bsp;
+    if (!bsp.Load(bspPath)) {
+        std::cerr << "[ERROR] Failed to load BSP file: " << bspPath << "\n";
+        return 1;
+    }
+
+    WaypointGraph graph;
+    std::cout << "[GENERATE-WAYPOINTS] Map: " << bspPath << "\n";
+    std::cout << "[GENERATE-WAYPOINTS] Output: " << outPath << "\n";
+
+    auto progressCallback = [](float progress, const std::string& msg) {
+        std::cout << "\r[" << std::setw(3) << static_cast<int>(progress * 100.0f) << "%] "
+                  << msg << std::string(20, ' ') << std::flush;
+    };
+
+    auto res = EBotGenerator::Generate(bsp, graph, options, progressCallback);
+    std::cout << "\n\n";
+
+    if (res.success) {
+        if (!graph.Save(outPath, botType, mod)) {
+            std::cerr << "[ERROR] Failed to save waypoints to: " << outPath << "\n";
+            return 1;
+        }
+        std::cout << "[SUCCESS] Generated Bot Waypoints successfully!\n";
+        std::cout << "  -> Total Waypoints:   " << res.waypointsCreated << "\n";
+        std::cout << "  -> Total Connections: " << res.connectionsCreated << "\n";
+        std::cout << "  -> Ladder Nodes:      " << res.laddersCreated << "\n";
+        std::cout << "  -> Tactical Camps:    " << res.campPointsCreated << "\n";
+        std::cout << "  -> Sniper Perches:    " << res.sniperPointsCreated << "\n";
+        if (res.zombieCampsCreated > 0) {
+            std::cout << "  -> Zombie Camps:      " << res.zombieCampsCreated << "\n";
+        }
+        std::cout << "  -> Elapsed Time:      " << std::fixed << std::setprecision(2) << res.durationSeconds << " s\n";
+        std::cout << "  -> Saved to:          " << outPath << "\n";
+        return 0;
+    } else {
+        std::cerr << "[ERROR] Generation failed: " << res.errorMessage << "\n";
+        return 1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     std::cout << "=========================================================\n";
     std::cout << " NavStudio CLI v1.6.0 - CS 1.6 BSP & NAV Tool\n";
@@ -542,9 +653,10 @@ int main(int argc, char* argv[]) {
         std::cout << "  [3] Inspect & Verify a BSP or NAV file\n";
         std::cout << "  [4] Convert between NavMesh and Bot Waypoints\n";
         std::cout << "  [5] Auto-Analyze NavMesh or Bot Waypoints\n";
-        std::cout << "  [6] View Help & Command-Line Usage\n";
+        std::cout << "  [6] Generate Bot Waypoints for a BSP map (CS-EBOT)\n";
+        std::cout << "  [7] View Help & Command-Line Usage\n";
         std::cout << "  [0] Exit\n\n";
-        std::cout << "Enter choice [0-6]: ";
+        std::cout << "Enter choice [0-7]: ";
 
         std::string choice;
         if (!std::getline(std::cin, choice) || choice == "0" || choice == "q" || choice == "exit") {
@@ -607,6 +719,15 @@ int main(int argc, char* argv[]) {
                 char* customArgv[] = { argv[0], (char*)"analyze", (char*)filePath.c_str() };
                 HandleAnalyze(3, customArgv);
             }
+        } else if (choice == "6") {
+            std::cout << "\nEnter path to .bsp file to generate waypoints for: ";
+            std::string bspPath;
+            std::getline(std::cin, bspPath);
+            bspPath = CleanPath(bspPath);
+            if (!bspPath.empty()) {
+                char* customArgv[] = { argv[0], (char*)"generate-waypoints", (char*)bspPath.c_str() };
+                HandleGenerateWaypoints(3, customArgv);
+            }
         } else {
             PrintHelp();
         }
@@ -626,6 +747,9 @@ int main(int argc, char* argv[]) {
     std::string firstArg = argv[1];
     if (firstArg == "generate" || firstArg == "-g") {
         return HandleGenerate(argc, argv);
+    }
+    if (firstArg == "generate-waypoints" || firstArg == "gen-wpt" || firstArg == "-gw") {
+        return HandleGenerateWaypoints(argc, argv);
     }
     if (firstArg == "batch" || firstArg == "mass" || firstArg == "generate-all") {
         return HandleBatch(argc, argv);

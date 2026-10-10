@@ -39,6 +39,7 @@ set(CORE_SOURCES
     src/nav/nav_generator.cpp
     src/waypoint/waypoint_graph.cpp
     src/waypoint/waypoint_nav_converter.cpp
+    src/waypoint/ebot_generator.cpp
 )
 
 add_library(nav_core STATIC ${CORE_SOURCES})

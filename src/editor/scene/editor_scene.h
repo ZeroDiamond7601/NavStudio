@@ -20,6 +20,7 @@
 #include "editor/scene/editor_handles.h"
 #include "editor/scene/editor_preferences.h"
 #include "waypoint/waypoint_graph.h"
+#include "waypoint/ebot_generator.h"
 #include "editor/render/waypoint_renderer.h"
 #include <vector>
 
@@ -496,10 +497,33 @@ public:
 
     bool LoadWaypoints(const std::string& path);
     bool SaveWaypoints(const std::string& path, BotType bot, GameMod mod);
+    void UnloadWaypoints();
     bool ConvertNavToWaypoints(BotType bot, GameMod mod);
     size_t ConvertWaypointsToNav();
     void RebuildWaypointRenderer();
     WaypointGraph::WaypointAnalysisStats AutoAnalyzeWaypoints();
+
+    // E-Bot Automated Waypoint Generator
+    struct WaypointGenProgress {
+        std::atomic<bool> isGenerating{false};
+        std::atomic<float> progress{0.0f};
+        std::string statusMessage{"Idle"};
+        bool completed{false};
+        bool success{false};
+        size_t waypointsCreated{0};
+        size_t connectionsCreated{0};
+        size_t laddersCreated{0};
+        size_t campPointsCreated{0};
+        size_t sniperPointsCreated{0};
+        size_t zombieCampsCreated{0};
+        double durationSeconds{0.0};
+        std::string errorMessage;
+    };
+    WaypointGenProgress& GetWaypointGenProgress() { return m_waypointGenProgress; }
+    const WaypointGenProgress& GetWaypointGenProgress() const { return m_waypointGenProgress; }
+    bool IsGeneratingWaypoints() const { return m_waypointGenProgress.isGenerating.load(); }
+    bool StartEBotWaypointGeneration(const EBotGenerateOptions& options = EBotGenerateOptions());
+    void UpdateWaypointGeneration();
 
     // User Preferences
     EditorPreferences& GetPreferences() { return m_prefs; }
@@ -739,6 +763,13 @@ private:
     WaypointRenderer m_waypointRenderer;
     bool m_showWaypoints{true};
     uint32_t m_selectedWaypointId{0};
+
+    // E-Bot Waypoint Generator thread state
+    WaypointGenProgress m_waypointGenProgress;
+    std::thread m_waypointGenThread;
+    WaypointGraph m_pendingGeneratedGraph;
+    EBotGenerateResult m_pendingGenResult;
+    std::mutex m_waypointGenMutex;
 
     void PostGenerateOptimize();
 };

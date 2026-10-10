@@ -262,29 +262,34 @@ bool WaypointGraph::Load(const std::string& filepath) {
     std::string lowerPath = filepath;
     std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::tolower);
 
+    // 1. Try loader matching extension or header magic first
     if (lowerPath.size() >= 4 && lowerPath.compare(lowerPath.size() - 4, 4, ".ewp") == 0) {
-        return LoadEBot(filepath);
+        if (LoadEBot(filepath)) return true;
     } else if (lowerPath.size() >= 4 && lowerPath.compare(lowerPath.size() - 4, 4, ".spt") == 0) {
-        return LoadSyPB(filepath);
+        if (LoadSyPB(filepath)) return true;
     } else if (lowerPath.size() >= 4 && lowerPath.compare(lowerPath.size() - 4, 4, ".pwf") == 0) {
-        // Test header to distinguish EBot / SyPB / YaPB
         FILE* f = std::fopen(filepath.c_str(), "rb");
         if (f) {
             char magic[8]{0};
             std::fread(magic, 1, 8, f);
             std::fclose(f);
-            if (std::strncmp(magic, "EBOTWP", 6) == 0) return LoadEBot(filepath);
-            if (std::strncmp(magic, "SyPB", 4) == 0) return LoadSyPB(filepath);
-            if (std::strncmp(magic, "YaPB", 4) == 0) return LoadYaPB(filepath);
+            if (std::strncmp(magic, "EBOTWP", 6) == 0 && LoadEBot(filepath)) return true;
+            if (std::strncmp(magic, "SyPB", 4) == 0 && LoadSyPB(filepath)) return true;
+            if (std::strncmp(magic, "YaPB", 4) == 0 && LoadYaPB(filepath)) return true;
         }
-        return LoadYaPB(filepath);
+        if (LoadYaPB(filepath)) return true;
+        if (LoadPODBot(filepath)) return true;
     } else if (lowerPath.size() >= 4 && lowerPath.compare(lowerPath.size() - 4, 4, ".wpt") == 0) {
-        return LoadPODBot(filepath);
+        if (LoadPODBot(filepath)) return true;
     }
 
-    // Default fallback: Try EBot loader first (handles LZSS & backwards compatibility), then POD-Bot
+    // 2. Comprehensive fallback: sequentially try every parser
     if (LoadEBot(filepath)) return true;
-    return LoadPODBot(filepath);
+    if (LoadYaPB(filepath)) return true;
+    if (LoadSyPB(filepath)) return true;
+    if (LoadPODBot(filepath)) return true;
+
+    return false;
 }
 
 bool WaypointGraph::Save(const std::string& filepath, BotType bot, GameMod mod) {
@@ -345,7 +350,7 @@ bool WaypointGraph::LoadEBot(const std::string& filepath) {
     m_loadedPath = filepath;
 
     int numPoints = hdr.pointNumber;
-    if (numPoints <= 0 || numPoints > 8192) {
+    if (numPoints <= 0 || numPoints > 65536) {
         std::fclose(f);
         return false;
     }
@@ -367,12 +372,18 @@ bool WaypointGraph::LoadEBot(const std::string& filepath) {
         std::fclose(f);
 
         size_t expectedUncomp = numPoints * sizeof(EBotDiskPath);
-        std::vector<uint8_t> uncompData(expectedUncomp);
+        std::vector<uint8_t> uncompData(expectedUncomp + 2048);
         size_t actualUncomp = 0;
 
         WaypointCompressor comp;
-        if (!comp.Decode(compData.data(), compData.size(), uncompData.data(), expectedUncomp, actualUncomp)) {
-            return false;
+        bool decompOk = comp.Decode(compData.data(), compData.size(), uncompData.data(), uncompData.size(), actualUncomp);
+        if (!decompOk || actualUncomp < expectedUncomp) {
+            // Fallback: raw uncompressed read
+            if (compSz >= static_cast<long>(expectedUncomp)) {
+                std::memcpy(uncompData.data(), compData.data(), expectedUncomp);
+            } else {
+                return false;
+            }
         }
 
         const EBotDiskPath* diskPaths = reinterpret_cast<const EBotDiskPath*>(uncompData.data());
@@ -509,29 +520,58 @@ bool WaypointGraph::LoadSyPB(const std::string& filepath) {
     m_loadedPath = filepath;
 
     int numPoints = hdr.pointNumber;
-    if (numPoints <= 0 || numPoints > 8192) {
+    if (numPoints <= 0 || numPoints > 65536) {
         std::fclose(f);
         return false;
     }
 
-    std::vector<EBotLegacyPathOLD> diskPaths(numPoints);
-    std::fread(diskPaths.data(), sizeof(EBotLegacyPathOLD), numPoints, f);
-    std::fclose(f);
+    std::fseek(f, 0, SEEK_END);
+    long fileSz = std::ftell(f);
+    long dataSz = fileSz - static_cast<long>(sizeof(hdr));
+    std::fseek(f, sizeof(hdr), SEEK_SET);
 
-    m_nodes.resize(numPoints);
-    for (int i = 0; i < numPoints; ++i) {
-        m_nodes[i].id = static_cast<uint32_t>(i + 1);
-        m_nodes[i].origin = diskPaths[i].origin;
-        m_nodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
-        m_nodes[i].radius = diskPaths[i].radius;
-        m_nodes[i].campYaw = diskPaths[i].campStartX;
-        m_nodes[i].campPitch = diskPaths[i].campStartY;
-        for (int c = 0; c < 8; ++c) {
-            int16_t rawIdx = diskPaths[i].index[c];
-            m_nodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints) ? (rawIdx + 1) : -1;
-            m_nodes[i].connectionFlags[c] = diskPaths[i].connectionFlags[c];
+    size_t perNodeSz = (numPoints > 0) ? (dataSz / numPoints) : 0;
+
+    if (perNodeSz >= sizeof(EBotLegacyPathOLD)) { // 200 bytes
+        std::vector<EBotLegacyPathOLD> diskPaths(numPoints);
+        std::fread(diskPaths.data(), sizeof(EBotLegacyPathOLD), numPoints, f);
+        std::fclose(f);
+
+        m_nodes.resize(numPoints);
+        for (int i = 0; i < numPoints; ++i) {
+            m_nodes[i].id = static_cast<uint32_t>(i + 1);
+            m_nodes[i].origin = diskPaths[i].origin;
+            m_nodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
+            m_nodes[i].radius = diskPaths[i].radius;
+            m_nodes[i].campYaw = diskPaths[i].campStartX;
+            m_nodes[i].campPitch = diskPaths[i].campStartY;
+            for (int c = 0; c < 8; ++c) {
+                int16_t rawIdx = diskPaths[i].index[c];
+                m_nodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints) ? (rawIdx + 1) : -1;
+                m_nodes[i].connectionFlags[c] = diskPaths[i].connectionFlags[c];
+            }
+        }
+    } else {
+        std::vector<uint8_t> rawData(dataSz);
+        std::fread(rawData.data(), 1, dataSz, f);
+        std::fclose(f);
+
+        m_nodes.resize(numPoints);
+        // Fallback POD-Bot mm compatible parser
+        for (int i = 0; i < numPoints; ++i) {
+            m_nodes[i].id = static_cast<uint32_t>(i + 1);
+            size_t offset = i * perNodeSz;
+            if (offset + 24 <= static_cast<size_t>(dataSz)) {
+                // If perNodeSz has pathNumber (104), origin is at offset + 8, otherwise offset + 4
+                bool hasPathNum = (perNodeSz >= 104);
+                size_t orgOff = offset + (hasPathNum ? 8 : 4);
+                if (orgOff + 12 <= static_cast<size_t>(dataSz)) {
+                    std::memcpy(&m_nodes[i].origin, &rawData[orgOff], sizeof(Vector3));
+                }
+            }
         }
     }
+
     m_nextId = static_cast<uint32_t>(numPoints + 1);
     return true;
 }
@@ -618,7 +658,7 @@ bool WaypointGraph::LoadYaPB(const std::string& filepath) {
     m_loadedPath = filepath;
 
     int numPoints = hdr.pointNumber;
-    if (numPoints <= 0 || numPoints > 8192) {
+    if (numPoints <= 0 || numPoints > 65536) {
         std::fclose(f);
         return false;
     }
@@ -633,11 +673,12 @@ bool WaypointGraph::LoadYaPB(const std::string& filepath) {
     std::fclose(f);
 
     size_t expectedUncomp = numPoints * sizeof(YaPBDiskPath);
-    std::vector<uint8_t> uncompData(expectedUncomp);
+    std::vector<uint8_t> uncompData(expectedUncomp + 2048);
     size_t actualUncomp = 0;
 
     WaypointCompressor comp;
-    if (!comp.Decode(payload.data(), payload.size(), uncompData.data(), expectedUncomp, actualUncomp) || actualUncomp != expectedUncomp) {
+    bool decompOk = comp.Decode(payload.data(), payload.size(), uncompData.data(), uncompData.size(), actualUncomp);
+    if (!decompOk || actualUncomp < expectedUncomp) {
         // Fallback: raw uncompressed YaPB or POD-Bot
         if (payloadSz >= static_cast<long>(expectedUncomp)) {
             std::memcpy(uncompData.data(), payload.data(), expectedUncomp);
@@ -722,7 +763,21 @@ bool WaypointGraph::SaveYaPB(const std::string& filepath, GameMod mod) {
 // --- POD-Bot mm (.wpt) Codec ---
 
 #pragma pack(push, 1)
-struct PODBotDiskNode {
+struct PODBotDiskNodeV6 {
+    int32_t pathNumber;
+    int32_t flags;
+    Vector3 origin;
+    float radius;
+    float campStartX;
+    float campStartY;
+    float campEndX;
+    float campEndY;
+    int16_t index[8];
+    uint16_t connectionFlags[8];
+    int32_t distances[8];
+};
+
+struct PODBotDiskNodeV5 {
     int32_t flags;
     Vector3 origin;
     float radius;
@@ -753,30 +808,71 @@ bool WaypointGraph::LoadPODBot(const std::string& filepath) {
     m_loadedPath = filepath;
 
     int numPoints = hdr.pointNumber;
-    if (numPoints <= 0 || numPoints > 8192) {
+    if (numPoints <= 0 || numPoints > 65536) {
         std::fclose(f);
         return false;
     }
 
-    std::vector<PODBotDiskNode> diskPaths(numPoints);
-    std::fread(diskPaths.data(), sizeof(PODBotDiskNode), numPoints, f);
-    std::fclose(f);
+    std::fseek(f, 0, SEEK_END);
+    long fileSz = std::ftell(f);
+    long dataSz = fileSz - static_cast<long>(sizeof(hdr));
+    std::fseek(f, sizeof(hdr), SEEK_SET);
+
+    size_t perNodeSz = (numPoints > 0) ? (dataSz / numPoints) : 0;
 
     m_nodes.resize(numPoints);
-    for (int i = 0; i < numPoints; ++i) {
-        m_nodes[i].id = static_cast<uint32_t>(i + 1);
-        m_nodes[i].origin = diskPaths[i].origin;
-        m_nodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
-        m_nodes[i].radius = diskPaths[i].radius;
-        m_nodes[i].campYaw = diskPaths[i].campStartX;
-        m_nodes[i].campPitch = diskPaths[i].campStartY;
 
-        for (int c = 0; c < 8; ++c) {
-            int16_t rawIdx = diskPaths[i].index[c];
-            m_nodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints) ? (rawIdx + 1) : -1;
-            m_nodes[i].connectionFlags[c] = diskPaths[i].connectionFlags[c];
+    if (perNodeSz >= sizeof(EBotLegacyPathOLD)) { // 200 bytes
+        std::vector<EBotLegacyPathOLD> diskPaths(numPoints);
+        std::fread(diskPaths.data(), sizeof(EBotLegacyPathOLD), numPoints, f);
+        for (int i = 0; i < numPoints; ++i) {
+            m_nodes[i].id = static_cast<uint32_t>(i + 1);
+            m_nodes[i].origin = diskPaths[i].origin;
+            m_nodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
+            m_nodes[i].radius = diskPaths[i].radius;
+            m_nodes[i].campYaw = diskPaths[i].campStartX;
+            m_nodes[i].campPitch = diskPaths[i].campStartY;
+            for (int c = 0; c < 8; ++c) {
+                int16_t rawIdx = diskPaths[i].index[c];
+                m_nodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints) ? (rawIdx + 1) : -1;
+                m_nodes[i].connectionFlags[c] = diskPaths[i].connectionFlags[c];
+            }
+        }
+    } else if (perNodeSz == sizeof(PODBotDiskNodeV6)) { // 104 bytes
+        std::vector<PODBotDiskNodeV6> diskPaths(numPoints);
+        std::fread(diskPaths.data(), sizeof(PODBotDiskNodeV6), numPoints, f);
+        for (int i = 0; i < numPoints; ++i) {
+            m_nodes[i].id = static_cast<uint32_t>(i + 1);
+            m_nodes[i].origin = diskPaths[i].origin;
+            m_nodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
+            m_nodes[i].radius = diskPaths[i].radius;
+            m_nodes[i].campYaw = diskPaths[i].campStartX;
+            m_nodes[i].campPitch = diskPaths[i].campStartY;
+            for (int c = 0; c < 8; ++c) {
+                int16_t rawIdx = diskPaths[i].index[c];
+                m_nodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints) ? (rawIdx + 1) : -1;
+                m_nodes[i].connectionFlags[c] = diskPaths[i].connectionFlags[c];
+            }
+        }
+    } else { // 100 bytes or fallback
+        std::vector<PODBotDiskNodeV5> diskPaths(numPoints);
+        std::fread(diskPaths.data(), sizeof(PODBotDiskNodeV5), numPoints, f);
+        for (int i = 0; i < numPoints; ++i) {
+            m_nodes[i].id = static_cast<uint32_t>(i + 1);
+            m_nodes[i].origin = diskPaths[i].origin;
+            m_nodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
+            m_nodes[i].radius = diskPaths[i].radius;
+            m_nodes[i].campYaw = diskPaths[i].campStartX;
+            m_nodes[i].campPitch = diskPaths[i].campStartY;
+            for (int c = 0; c < 8; ++c) {
+                int16_t rawIdx = diskPaths[i].index[c];
+                m_nodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints) ? (rawIdx + 1) : -1;
+                m_nodes[i].connectionFlags[c] = diskPaths[i].connectionFlags[c];
+            }
         }
     }
+
+    std::fclose(f);
     m_nextId = static_cast<uint32_t>(numPoints + 1);
     return true;
 }
@@ -792,10 +888,11 @@ bool WaypointGraph::SavePODBot(const std::string& filepath, GameMod mod) {
     std::strncpy(hdr.mapName, m_mapName.c_str(), 31);
     std::strncpy(hdr.author, m_author.c_str(), 31);
 
-    std::vector<PODBotDiskNode> diskPaths(m_nodes.size());
-    std::memset(diskPaths.data(), 0, diskPaths.size() * sizeof(PODBotDiskNode));
+    std::vector<PODBotDiskNodeV6> diskPaths(m_nodes.size());
+    std::memset(diskPaths.data(), 0, diskPaths.size() * sizeof(PODBotDiskNodeV6));
 
     for (size_t i = 0; i < m_nodes.size(); ++i) {
+        diskPaths[i].pathNumber = static_cast<int32_t>(i);
         uint32_t f = m_nodes[i].flags;
         if (f & WPT_FLAG_ZMHMCAMP) f |= WPT_FLAG_CAMP;
         f &= ~(WPT_FLAG_ZMHMCAMP | WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZOMBIEONLY | WPT_FLAG_HUMANONLY | WPT_FLAG_ZOMBIEPUSH | WPT_FLAG_HELICOPTER);
@@ -822,7 +919,7 @@ bool WaypointGraph::SavePODBot(const std::string& filepath, GameMod mod) {
     if (!f) return false;
 
     std::fwrite(&hdr, 1, sizeof(hdr), f);
-    std::fwrite(diskPaths.data(), sizeof(PODBotDiskNode), diskPaths.size(), f);
+    std::fwrite(diskPaths.data(), sizeof(PODBotDiskNodeV6), diskPaths.size(), f);
     std::fclose(f);
 
     m_loadedPath = filepath;
