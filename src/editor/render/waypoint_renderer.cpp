@@ -45,57 +45,103 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
         bool isSelected = (node.id == selectedId);
         bool isHovered = (node.id == hoveredId);
 
-        // Determine node color according to active GameMod and tactical flags
-        float r = 0.85f, g = 0.9f, b = 0.95f, a = 0.9f;
+        // Determine node colors according to exact CS-EBOT / GoldSrc bot color rules:
+        // By default, CS waypoints are Green (0, 255, 0)
+        float r = 0.0f, g = 1.0f, b = 0.0f, a = 0.95f;
 
-        if (mod == GameMod::ZombiePlague) {
-            if (node.flags & WPT_FLAG_HMCAMPMESH) {
-                r = 0.1f; g = 1.0f; b = 0.2f; // Neon Green (Human Camp)
-            } else if (node.flags & WPT_FLAG_ZMHMCAMP) {
-                r = 0.9f; g = 0.2f; b = 0.95f; // Neon Purple (Zombie Camp)
-            } else if (node.flags & WPT_FLAG_DJUMP) {
-                r = 1.0f; g = 0.65f; b = 0.0f; // Orange (Double Jump / Boost)
-            } else if (node.flags & WPT_FLAG_HELICOPTER) {
-                r = 1.0f; g = 1.0f; b = 0.2f; // Yellow (Helicopter Escape)
-            } else if (node.flags & WPT_FLAG_ZOMBIEONLY) {
-                r = 1.0f; g = 0.25f; b = 0.15f; // Red (Zombie Only)
-            } else if (node.flags & WPT_FLAG_HUMANONLY) {
-                r = 0.2f; g = 0.9f; b = 1.0f; // Cyan (Human Only)
-            } else if (node.flags & WPT_FLAG_LADDER) {
-                r = 0.2f; g = 0.85f; b = 0.95f;
-            } else {
-                r = 0.4f; g = 0.85f; b = 0.5f;
-            }
-        } else {
-            // Standard CS
-            if (node.flags & WPT_FLAG_TERRORIST) {
-                r = 0.95f; g = 0.2f; b = 0.2f; // Red (T)
-            } else if (node.flags & WPT_FLAG_COUNTER) {
-                r = 0.2f; g = 0.5f; b = 1.0f; // Blue (CT)
-            } else if (node.flags & WPT_FLAG_GOAL) {
-                r = 0.2f; g = 1.0f; b = 0.3f; // Green (Bomb/Hostage Goal)
-            } else if (node.flags & WPT_FLAG_SNIPER) {
-                r = 0.95f; g = 0.2f; b = 0.85f; // Magenta (Sniper Spot)
-            } else if (node.flags & WPT_FLAG_CAMP) {
-                r = 1.0f; g = 0.85f; b = 0.2f; // Amber (Camp Point)
-            } else if (node.flags & WPT_FLAG_LADDER) {
-                r = 0.2f; g = 0.85f; b = 0.95f; // Cyan (Ladder)
-            } else if (node.flags & WPT_FLAG_RESCUE) {
-                r = 0.2f; g = 0.9f; b = 0.5f;
-            }
+        if (node.flags & WPT_FLAG_CAMP) {
+            r = 0.0f; g = 1.0f; b = 1.0f; // Cyan (0, 255, 255)
+        } else if (node.flags & (WPT_FLAG_GOAL | WPT_FLAG_HELICOPTER)) {
+            r = 0.50f; g = 0.0f; b = 1.0f; // Purple / Violet (128, 0, 255)
+        } else if (node.flags & WPT_FLAG_LADDER) {
+            r = 0.50f; g = 0.25f; b = 0.0f; // Brown (128, 64, 0)
+        } else if (node.flags & WPT_FLAG_RESCUE) {
+            r = 1.0f; g = 1.0f; b = 1.0f; // White (255, 255, 255)
+        } else if (node.flags & WPT_FLAG_AVOID) {
+            r = 1.0f; g = 0.0f; b = 0.0f; // Red (255, 0, 0)
+        } else if (node.flags & WPT_FLAG_FALLCHECK) {
+            r = 0.50f; g = 0.50f; b = 0.50f; // Gray (128, 128, 128)
+        } else if (node.flags & WPT_FLAG_USEBUTTON) {
+            r = 0.0f; g = 0.0f; b = 1.0f; // Blue (0, 0, 255)
+        } else if (node.flags & WPT_FLAG_ZMHMCAMP) {
+            r = 0.78f; g = 0.27f; b = 0.82f; // Magenta (199, 69, 209)
+        } else if (node.flags & WPT_FLAG_HMCAMPMESH) {
+            r = 0.20f; g = 0.49f; b = 1.0f; // Sky Blue (50, 125, 255)
+        } else if (node.flags & WPT_FLAG_ZOMBIEONLY) {
+            r = 1.0f; g = 0.0f; b = 0.0f; // Red (255, 0, 0)
+        } else if (node.flags & WPT_FLAG_HUMANONLY) {
+            r = 0.0f; g = 0.0f; b = 1.0f; // Blue (0, 0, 255)
+        } else if (node.flags & WPT_FLAG_ZOMBIEPUSH) {
+            r = 0.98f; g = 0.29f; b = 0.59f; // Pink / Salmon (250, 75, 150)
+        } else if (node.flags & (WPT_FLAG_FALLRISK | WPT_FLAG_SPECIFICGRAVITY)) {
+            r = 0.50f; g = 0.50f; b = 0.50f; // Gray (128, 128, 128)
+        } else if (node.flags & WPT_FLAG_ONLYONE) {
+            r = 1.0f; g = 1.0f; b = 0.0f; // Yellow (255, 255, 0)
+        } else if (node.flags & WPT_FLAG_WAITUNTIL) {
+            r = 0.0f; g = 0.0f; b = 1.0f; // Blue (0, 0, 255)
+        } else if (node.flags & WPT_FLAG_TERRORIST) {
+            r = 1.0f; g = 0.0f; b = 0.0f; // Red (255, 0, 0)
+        } else if (node.flags & WPT_FLAG_COUNTER) {
+            r = 0.0f; g = 0.0f; b = 1.0f; // Blue (0, 0, 255)
+        } else if (node.flags & WPT_FLAG_SNIPER) {
+            r = 0.51f; g = 0.34f; b = 0.0f; // Brown / Amber (130, 87, 0)
+        }
+
+        // Subflag tactical color for upper quarter of the vertical pillar
+        float fr = r, fg = g, fb = b;
+        bool hasFlagColor = false;
+        if (node.flags & WPT_FLAG_SNIPER) {
+            fr = 0.51f; fg = 0.34f; fb = 0.0f; hasFlagColor = true;
+        } else if (node.flags & WPT_FLAG_TERRORIST) {
+            fr = 1.0f; fg = 0.0f; fb = 0.0f; hasFlagColor = true;
+        } else if (node.flags & WPT_FLAG_COUNTER) {
+            fr = 0.0f; fg = 0.0f; fb = 1.0f; hasFlagColor = true;
+        } else if (node.flags & (WPT_FLAG_ZMHMCAMP | WPT_FLAG_HMCAMPMESH)) {
+            fr = 0.0f; fg = 0.0f; fb = 1.0f; hasFlagColor = true;
+        } else if (node.flags & (WPT_FLAG_ZOMBIEONLY | WPT_FLAG_HUMANONLY)) {
+            fr = 1.0f; fg = 0.0f; fb = 1.0f; hasFlagColor = true;
+        } else if (node.flags & WPT_FLAG_ZOMBIEPUSH) {
+            fr = 1.0f; fg = 0.0f; fb = 0.0f; hasFlagColor = true;
+        } else if (node.flags & (WPT_FLAG_FALLRISK | WPT_FLAG_WAITUNTIL)) {
+            fr = 0.98f; fg = 0.29f; fb = 0.59f; hasFlagColor = true;
+        } else if (node.flags & WPT_FLAG_SPECIFICGRAVITY) {
+            fr = 0.50f; fg = 0.0f; fb = 1.0f; hasFlagColor = true;
         }
 
         if (isSelected) {
             r = 1.0f; g = 0.95f; b = 0.1f; a = 1.0f; // Highlight Yellow
+            fr = 1.0f; fg = 0.95f; fb = 0.1f;
         } else if (isHovered) {
             r = std::min(1.0f, r + 0.3f);
             g = std::min(1.0f, g + 0.3f);
             b = std::min(1.0f, b + 0.3f);
         }
 
-        // 1. Draw 3D Cross at Waypoint Center (+12 units Z elevation for floor visibility)
-        Vector3 pos = node.origin + Vector3(0.0f, 0.0f, 12.0f);
-        float sz = isSelected ? 12.0f : 7.0f;
+        // 1. Draw In-Game CS Vertical Pillar Beam (Floor to Stand/Crouch Player Height)
+        float pillarHeight = (node.flags & WPT_FLAG_CROUCH) ? 36.0f : 72.0f;
+        Vector3 floorPt = node.origin;
+        Vector3 topPt   = node.origin + Vector3(0.0f, 0.0f, pillarHeight);
+
+        uint32_t pillarBase = static_cast<uint32_t>(vertices.size());
+        if (hasFlagColor && !isSelected) {
+            Vector3 midPt = node.origin + Vector3(0.0f, 0.0f, pillarHeight * 0.75f);
+            // Lower 75% base color
+            vertices.push_back({ floorPt.x, floorPt.y, floorPt.z, 0,0,1, 0,0, r, g, b, 0.85f });
+            vertices.push_back({ midPt.x, midPt.y, midPt.z, 0,0,1, 0,0, r, g, b, 0.85f });
+            // Upper 25% flag color
+            vertices.push_back({ midPt.x, midPt.y, midPt.z, 0,0,1, 0,0, fr, fg, fb, 0.95f });
+            vertices.push_back({ topPt.x, topPt.y, topPt.z, 0,0,1, 0,0, fr, fg, fb, 0.95f });
+            indices.push_back(pillarBase + 0); indices.push_back(pillarBase + 1);
+            indices.push_back(pillarBase + 2); indices.push_back(pillarBase + 3);
+        } else {
+            vertices.push_back({ floorPt.x, floorPt.y, floorPt.z, 0,0,1, 0,0, r, g, b, 0.85f });
+            vertices.push_back({ topPt.x, topPt.y, topPt.z, 0,0,1, 0,0, r, g, b, 0.85f });
+            indices.push_back(pillarBase + 0); indices.push_back(pillarBase + 1);
+        }
+
+        // 2. Draw 3D Cross at Center (Elevated for clear 3D selection)
+        Vector3 pos = node.origin + Vector3(0.0f, 0.0f, pillarHeight * 0.5f);
+        float sz = isSelected ? 12.0f : 6.0f;
 
         uint32_t cBase = static_cast<uint32_t>(vertices.size());
         vertices.push_back({ pos.x - sz, pos.y, pos.z, 0,0,1, 0,0, r, g, b, a });
@@ -109,14 +155,8 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
         indices.push_back(cBase + 2); indices.push_back(cBase + 3);
         indices.push_back(cBase + 4); indices.push_back(cBase + 5);
 
-        // Ground peg line down to exact floor origin
-        uint32_t pegBase = static_cast<uint32_t>(vertices.size());
-        vertices.push_back({ node.origin.x, node.origin.y, node.origin.z, 0,0,1, 0,0, r, g, b, 0.5f });
-        indices.push_back(cBase + 4);
-        indices.push_back(pegBase);
-
-        // 2. Ground Projection Circle (Tolerance radius)
-        float rad = (m_showRadii || isSelected) ? std::max(12.0f, node.radius) : 12.0f;
+        // 3. Ground Projection Circle (Tolerance radius)
+        float rad = (m_showRadii || isSelected) ? std::max(8.0f, node.radius) : 8.0f;
         int segments = isSelected ? 16 : 8;
         uint32_t circleBase = static_cast<uint32_t>(vertices.size());
         float circleAlpha = isSelected ? 0.9f : 0.45f;
@@ -133,7 +173,7 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
             indices.push_back(circleBase + ((s + 1) % segments));
         }
 
-        // 3. Camp / Sniper Aim Direction Vector
+        // 4. Camp / Sniper Aim Direction Vector
         if (node.flags & (WPT_FLAG_CAMP | WPT_FLAG_SNIPER | WPT_FLAG_ZMHMCAMP | WPT_FLAG_HMCAMPMESH)) {
             float yawRad = node.campYaw * static_cast<float>(M_PI) / 180.0f;
             float pitchRad = node.campPitch * static_cast<float>(M_PI) / 180.0f;
@@ -144,15 +184,15 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
                 std::sin(pitchRad)
             );
 
-            Vector3 aimEnd = pos + aimDir * 28.0f;
+            Vector3 aimEnd = pos + aimDir * 32.0f;
             uint32_t aimBase = static_cast<uint32_t>(vertices.size());
-            vertices.push_back({ pos.x, pos.y, pos.z, 0,0,1, 0,0, 1.0f, 1.0f, 0.2f, 1.0f });
+            vertices.push_back({ pos.x, pos.y, pos.z, 0,0,1, 0,0, 1.0f, 1.0f, 0.0f, 1.0f });
             vertices.push_back({ aimEnd.x, aimEnd.y, aimEnd.z, 0,0,1, 0,0, 1.0f, 0.2f, 0.2f, 1.0f });
             indices.push_back(aimBase + 0);
             indices.push_back(aimBase + 1);
         }
 
-        // 4. Outgoing Path Connection Links
+        // 5. Outgoing Path Connection Links (Exact CS-EBOT Link Beam Colors)
         if (m_showConnections) {
             for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
                 int16_t targetId = node.connections[c];
@@ -166,15 +206,26 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
                 if (targetHasReverse && target->id < node.id) continue;
 
                 Vector3 startPt = node.origin + Vector3(0.0f, 0.0f, 10.0f);
-                Vector3 endPt = target->origin + Vector3(0.0f, 0.0f, 10.0f);
+                Vector3 endPt   = target->origin + Vector3(0.0f, 0.0f, 10.0f);
 
-                float lr = 0.2f, lg = 0.85f, lb = 1.0f, la = 0.85f; // Default Cyan
+                // CS-EBOT Connection Beam Colors:
+                // Jumping: Red (255, 0, 0)
+                // Double Jump: Blue (0, 0, 255)
+                // Visible: Green (0, 255, 0)
+                // Bothways / 2-Way: Yellow (255, 255, 0)
+                // Oneway Outgoing: White (250, 250, 250)
+                float lr = 0.98f, lg = 0.98f, lb = 0.98f, la = 0.90f; // Default Oneway: White
+
                 if (node.connectionFlags[c] & WPT_CONN_JUMP) {
-                    lr = 1.0f; lg = 0.8f; lb = 0.1f; // Yellow (Jump Link)
-                } else if (node.flags & WPT_FLAG_ZOMBIEONLY) {
-                    lr = 1.0f; lg = 0.2f; lb = 0.1f; // Red (Zombie Link)
-                } else if (node.flags & WPT_FLAG_HUMANONLY) {
-                    lr = 0.1f; lg = 1.0f; lb = 0.9f; // Cyan (Human Link)
+                    lr = 1.0f; lg = 0.0f; lb = 0.0f; // Red: Jumping
+                } else if (node.connectionFlags[c] & WPT_CONN_DOUBLE) {
+                    lr = 0.0f; lg = 0.0f; lb = 1.0f; // Blue: Double-jump
+                } else if (node.connectionFlags[c] & WPT_CONN_VISIBLE) {
+                    lr = 0.0f; lg = 1.0f; lb = 0.0f; // Green: Line of sight clear
+                } else if (node.connectionFlags[c] & WPT_CONN_CROUCH) {
+                    lr = 1.0f; lg = 0.65f; lb = 0.0f; // Orange: Crouch ducking connection
+                } else if (targetHasReverse) {
+                    lr = 1.0f; lg = 1.0f; lb = 0.0f; // Yellow: Two-way bothways
                 }
 
                 uint32_t lBase = static_cast<uint32_t>(vertices.size());

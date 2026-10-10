@@ -4926,7 +4926,7 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
         return 0;
     }
 
-    float spacing = (m_gridSize >= 32.0f && m_gridSize <= 128.0f) ? m_gridSize : 40.0f; // CS-EBOT standard analyze distance
+    float spacing = (m_gridSize >= 32.0f && m_gridSize <= 128.0f) ? m_gridSize : 60.0f;
     float snapDist = spacing;
 
     // Snapped seed coordinate
@@ -4935,6 +4935,8 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
 
     struct GridCoord {
         int gx, gy;
+        float floorZ;
+        float srcX, srcY;
         bool operator==(const GridCoord& o) const { return gx == o.gx && gy == o.gy; }
     };
     struct GridHash {
@@ -4946,12 +4948,18 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
     std::unordered_set<GridCoord, GridHash> visited;
     std::queue<GridCoord> queue;
 
-    GridCoord startCoord{ static_cast<int>(std::round(startX / snapDist)), static_cast<int>(std::round(startY / snapDist)) };
+    GridCoord startCoord{
+        static_cast<int>(std::round(startX / snapDist)),
+        static_cast<int>(std::round(startY / snapDist)),
+        seedFloor.z,
+        seedFloor.x,
+        seedFloor.y
+    };
     visited.insert(startCoord);
     queue.push(startCoord);
 
     std::vector<uint32_t> newWaypointIds;
-    const int maxPoints = 500; // room limit per flood click
+    const int maxPoints = 800; // room limit per flood click
 
     while (!queue.empty() && newWaypointIds.size() < maxPoints) {
         GridCoord cur = queue.front();
@@ -4960,27 +4968,43 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
         float wx = cur.gx * snapDist;
         float wy = cur.gy * snapDist;
 
-        // Trace down to floor
-        Vector3 traceTop(wx, wy, seedFloor.z + 45.0f);
-        Vector3 traceBottom(wx, wy, seedFloor.z - 256.0f);
+        // Trace down to floor relative to current cell's elevation
+        Vector3 traceTop(wx, wy, cur.floorZ + 45.0f);
+        Vector3 traceBottom(wx, wy, cur.floorZ - 150.0f);
         BSPTraceResult floorTr;
-        if (!m_bsp->TraceWorld(traceTop, traceBottom, HULL_POINT, &floorTr) || floorTr.fraction >= 1.0f) {
+        if (!m_bsp->TraceWorld(traceTop, traceBottom, HULL_POINT, &floorTr) || floorTr.fraction >= 1.0f || floorTr.startsolid || floorTr.allsolid) {
+            continue;
+        }
+
+        // Walkable surface slope check
+        if (floorTr.planeNormal.z < 0.7071f) {
             continue;
         }
 
         Vector3 groundPos = floorTr.endpos;
 
-        // Check clearance: standing hull (32x32x72) vs crouch hull (32x32x36)
-        Vector3 standTop = groundPos + Vector3(0.0f, 0.0f, 72.0f);
-        BSPTraceResult standTr;
-        bool canStand = m_bsp->TraceWorld(groundPos + Vector3(0.0f, 0.0f, 1.0f), standTop, HULL_HUMAN, &standTr) && standTr.fraction >= 1.0f;
+        // Check vertical headroom clearance upward from floor using HULL_POINT
+        BSPTraceResult headTr;
+        m_bsp->TraceWorld(groundPos + Vector3(0.0f, 0.0f, 2.0f), groundPos + Vector3(0.0f, 0.0f, 74.0f), HULL_POINT, &headTr);
+        float clearance = (headTr.fraction < 1.0f && !headTr.startsolid && !headTr.allsolid)
+            ? (headTr.endpos.z - groundPos.z)
+            : 74.0f;
 
-        Vector3 crouchTop = groundPos + Vector3(0.0f, 0.0f, 36.0f);
-        BSPTraceResult crouchTr;
-        bool canCrouch = m_bsp->TraceWorld(groundPos + Vector3(0.0f, 0.0f, 1.0f), crouchTop, HULL_HEAD, &crouchTr) && crouchTr.fraction >= 1.0f;
+        if (clearance < 36.0f) {
+            continue; // Cannot fit even crouching
+        }
+        bool canStand = (clearance >= 68.0f);
+        bool canCrouch = (clearance >= 36.0f);
 
-        if (!canStand && !canCrouch) {
-            continue; // Not walkable
+        // Traversal line of sight from previous coordinate (if not first seed node)
+        if (!newWaypointIds.empty()) {
+            float stepZ = std::max(cur.floorZ, groundPos.z);
+            BSPTraceResult stepTr;
+            if (!m_bsp->TraceWorld(Vector3(cur.srcX, cur.srcY, stepZ + 18.0f),
+                                   Vector3(wx, wy, stepZ + 18.0f),
+                                   HULL_POINT, &stepTr) || stepTr.fraction < 0.95f || stepTr.startsolid || stepTr.allsolid) {
+                continue; // Blocked by wall, column, or door frame
+            }
         }
 
         uint32_t flags = m_activeWaypointAddFlags;
@@ -5003,7 +5027,8 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
                 if (dsq <= (snapDist * 1.55f) * (snapDist * 1.55f) && std::abs(diff.z) <= 45.0f) {
                     // Check line of sight
                     BSPTraceResult losTr;
-                    if (m_bsp->TraceWorld(node->origin + Vector3(0, 0, 10), other->origin + Vector3(0, 0, 10), HULL_POINT, &losTr) && losTr.fraction >= 0.98f) {
+                    if (m_bsp->TraceWorld(node->origin + Vector3(0.0f, 0.0f, 10.0f), other->origin + Vector3(0.0f, 0.0f, 10.0f), HULL_POINT, &losTr) &&
+                        losTr.fraction >= 0.95f && !losTr.startsolid && !losTr.allsolid) {
                         uint16_t cflags = WPT_CONN_NONE;
                         if (std::abs(diff.z) > 18.0f) cflags |= WPT_CONN_JUMP;
                         m_waypoints.ConnectNodes(node->id, other->id, true, cflags);
@@ -5019,7 +5044,7 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
         const int dx[4] = { 1, -1, 0, 0 };
         const int dy[4] = { 0, 0, 1, -1 };
         for (int d = 0; d < 4; ++d) {
-            GridCoord nextCoord{ cur.gx + dx[d], cur.gy + dy[d] };
+            GridCoord nextCoord{ cur.gx + dx[d], cur.gy + dy[d], groundPos.z, wx, wy };
             if (visited.find(nextCoord) == visited.end()) {
                 visited.insert(nextCoord);
                 float nwx = nextCoord.gx * snapDist;

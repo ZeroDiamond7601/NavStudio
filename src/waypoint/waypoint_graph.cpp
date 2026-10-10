@@ -528,10 +528,6 @@ bool WaypointGraph::SaveEBot(const std::string& filepath, GameMod mod) {
     for (size_t i = 0; i < m_nodes.size(); ++i) {
         diskPaths[i].origin = m_nodes[i].origin;
         uint32_t f = m_nodes[i].flags;
-        if (mod == GameMod::Standard) {
-            // Strip zombie-only bits if targeting standard CS
-            f &= ~(WPT_FLAG_ZMHMCAMP | WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZOMBIEONLY | WPT_FLAG_HUMANONLY | WPT_FLAG_ZOMBIEPUSH | WPT_FLAG_HELICOPTER);
-        }
         diskPaths[i].flags = f;
         diskPaths[i].radius = static_cast<uint8_t>(std::clamp(m_nodes[i].radius, 0.0f, 255.0f));
         diskPaths[i].mesh = m_nodes[i].mesh;

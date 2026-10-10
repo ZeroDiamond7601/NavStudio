@@ -1249,31 +1249,52 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
                 "4: Rescue / Hostage",
                 "5: Camp / Ambush",
                 "6: Button / Use",
-                "100: Mission Goal",
-                "104: Zombie Camp",
-                "105: Human Camp Mesh"
+                "7: Sniper Nest",
+                "8: Ladder Point",
+                "9: Double Jump Boost",
+                "10: Zombie Only",
+                "11: Human Only",
+                "12: Zombie Rush / Push",
+                "13: Zombie Camp",
+                "14: Human Camp Mesh",
+                "15: Fall Check Ground",
+                "16: Fall Risk Hazard",
+                "17: Wait Until Condition",
+                "18: Only One Bot",
+                "100: Mission Goal"
             };
             uint32_t flagValues[] = {
                 WPT_FLAG_CROSSING,
                 WPT_FLAG_TERRORIST,
                 WPT_FLAG_COUNTER,
-                WPT_FLAG_FALLRISK,
+                WPT_FLAG_AVOID,
                 WPT_FLAG_RESCUE,
                 WPT_FLAG_CAMP,
                 WPT_FLAG_USEBUTTON,
-                WPT_FLAG_GOAL,
+                WPT_FLAG_SNIPER,
+                WPT_FLAG_LADDER,
+                WPT_FLAG_DJUMP,
+                WPT_FLAG_ZOMBIEONLY,
+                WPT_FLAG_HUMANONLY,
+                WPT_FLAG_ZOMBIEPUSH,
                 WPT_FLAG_ZMHMCAMP,
-                WPT_FLAG_HMCAMPMESH
+                WPT_FLAG_HMCAMPMESH,
+                WPT_FLAG_FALLCHECK,
+                WPT_FLAG_FALLRISK,
+                WPT_FLAG_WAITUNTIL,
+                WPT_FLAG_ONLYONE,
+                WPT_FLAG_GOAL
             };
+            constexpr int kNumWptTypes = sizeof(wptTypeNames) / sizeof(wptTypeNames[0]);
             int curTypeIdx = 0;
             uint32_t curFlags = scene.GetActiveWaypointAddFlags();
-            for (int i = 0; i < 10; ++i) {
+            for (int i = 0; i < kNumWptTypes; ++i) {
                 if (curFlags == flagValues[i]) {
                     curTypeIdx = i;
                     break;
                 }
             }
-            if (ImGui::Combo("##WptTypeCombo", &curTypeIdx, wptTypeNames, 10)) {
+            if (ImGui::Combo("##WptTypeCombo", &curTypeIdx, wptTypeNames, kNumWptTypes)) {
                 scene.SetActiveWaypointAddFlags(flagValues[curTypeIdx]);
             }
 
@@ -5394,37 +5415,34 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
         }
     };
 
-    if (scene.GetWaypoints().GetActiveMod() == GameMod::ZombiePlague) {
-        ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f), "Zombie Plague Mod Flags:");
-        FlagBox("Human Camp Mesh", WPT_FLAG_HMCAMPMESH, "Designates human barricade and camp defense area");
-        FlagBox("Zombie/Human Camp", WPT_FLAG_ZMHMCAMP, "General camp perch for zombies or humans");
-        FlagBox("Double Jump Boost", WPT_FLAG_DJUMP, "Requires bot team boost or double-jump skill");
-        FlagBox("Zombie Only", WPT_FLAG_ZOMBIEONLY, "Restricted exclusively to zombie players");
-        FlagBox("Human Only", WPT_FLAG_HUMANONLY, "Restricted exclusively to human players");
-        FlagBox("Zombie Rush / Push", WPT_FLAG_ZOMBIEPUSH, "Aggressive zombie advance node");
-        FlagBox("Helicopter Evac", WPT_FLAG_HELICOPTER, "Zombie escape extraction zone");
-        FlagBox("Crouch / Duck", WPT_FLAG_CROUCH, "Requires crouching through duct or obstacle");
-        FlagBox("Ladder Climb", WPT_FLAG_LADDER, "Ladder navigation point");
-        FlagBox("Jump Required", WPT_FLAG_JUMP, "Requires single jump across gap");
-        FlagBox("Fall Risk Hazard", WPT_FLAG_FALLRISK, "High ledge - prevents evasive strafing");
-        FlagBox("Only One Bot", WPT_FLAG_ONLYONE, "Only 1 bot allowed at once to prevent jamming");
-    } else {
-        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Standard Tactical Flags:");
-        FlagBox("Mission Goal (Bomb/Hostage)", WPT_FLAG_GOAL, "Bomb target or hostage holding point");
-        FlagBox("Camping Perch", WPT_FLAG_CAMP, "Ambush and defensive perch");
-        FlagBox("Sniper Nest", WPT_FLAG_SNIPER, "Long-range sniper vantage point");
-        FlagBox("Hostage Rescue Zone", WPT_FLAG_RESCUE, "CT rescue extraction point");
-        FlagBox("Crouch / Duck", WPT_FLAG_CROUCH, "Requires crouching");
-        FlagBox("Ladder Climb", WPT_FLAG_LADDER, "Ladder navigation point");
-        FlagBox("Jump Required", WPT_FLAG_JUMP, "Requires jump across obstacle");
-        FlagBox("Double Jump Boost", WPT_FLAG_DJUMP, "Requires teammate boost / double jump");
-        FlagBox("Elevator / Lift", WPT_FLAG_LIFT, "Wait for elevator trigger");
-        FlagBox("Use Button Trigger", WPT_FLAG_USEBUTTON, "Bot presses button or switch");
-        FlagBox("Terrorist Exclusive", WPT_FLAG_TERRORIST, "Only T team may pathfind here");
-        FlagBox("CT Exclusive", WPT_FLAG_COUNTER, "Only CT team may pathfind here");
-        FlagBox("Fall Risk Hazard", WPT_FLAG_FALLRISK, "High ledge - prevents evasive strafing");
-        FlagBox("Only One Bot", WPT_FLAG_ONLYONE, "Only 1 bot allowed at once");
-    }
+    ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Tactical & Mission Objectives:");
+    FlagBox("Mission Goal (Bomb/Hostage)", WPT_FLAG_GOAL, "Bomb target or hostage holding point");
+    FlagBox("Camping Perch", WPT_FLAG_CAMP, "Ambush and defensive perch");
+    FlagBox("Sniper Nest", WPT_FLAG_SNIPER, "Long-range sniper vantage point");
+    FlagBox("Hostage Rescue Zone", WPT_FLAG_RESCUE, "CT rescue extraction point");
+    FlagBox("Crouch / Duck", WPT_FLAG_CROUCH, "Requires ducking through low passage");
+    FlagBox("Ladder Climb", WPT_FLAG_LADDER, "Ladder navigation point");
+    FlagBox("Jump Required", WPT_FLAG_JUMP, "Requires single jump across obstacle");
+    FlagBox("Double Jump Boost", WPT_FLAG_DJUMP, "Requires teammate boost / double jump");
+    FlagBox("Elevator / Lift", WPT_FLAG_LIFT, "Wait for elevator trigger");
+    FlagBox("Use Button Trigger", WPT_FLAG_USEBUTTON, "Bot presses button or switch");
+    FlagBox("Terrorist Exclusive", WPT_FLAG_TERRORIST, "Only T team may pathfind here");
+    FlagBox("CT Exclusive", WPT_FLAG_COUNTER, "Only CT team may pathfind here");
+    FlagBox("Avoid Danger Point", WPT_FLAG_AVOID, "Bots avoid this node unless necessary");
+
+    ImGui::Spacing();
+    ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f), "CS-EBOT & Zombie Plague Flags:");
+    FlagBox("Zombie Only", WPT_FLAG_ZOMBIEONLY, "Restricted exclusively to zombie players");
+    FlagBox("Human Only", WPT_FLAG_HUMANONLY, "Restricted exclusively to human players");
+    FlagBox("Zombie Rush / Push", WPT_FLAG_ZOMBIEPUSH, "Aggressive directional zombie rush");
+    FlagBox("Zombie / Human Camp", WPT_FLAG_ZMHMCAMP, "Barricade defense perch for humans/zombies");
+    FlagBox("Human Camp Mesh", WPT_FLAG_HMCAMPMESH, "Human defense mesh cluster node");
+    FlagBox("Fall Check (Ground)", WPT_FLAG_FALLCHECK, "Check for solid ground before proceeding");
+    FlagBox("Wait Until Condition", WPT_FLAG_WAITUNTIL, "Wait for platform/door condition");
+    FlagBox("Helicopter Evac", WPT_FLAG_HELICOPTER, "Zombie escape helicopter extraction point");
+    FlagBox("Fall Risk Hazard", WPT_FLAG_FALLRISK, "High ledge - prevents evasive strafing");
+    FlagBox("Specific Gravity", WPT_FLAG_SPECIFICGRAVITY, "Low/custom gravity jump requirement");
+    FlagBox("Only One Bot", WPT_FLAG_ONLYONE, "Only 1 bot allowed at once to prevent jamming");
 
     ImGui::Spacing();
     ImGui::Separator();
