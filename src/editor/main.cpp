@@ -163,28 +163,6 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
 
     if (button == GLFW_MOUSE_BUTTON_RIGHT) {
         if (action == GLFW_PRESS) {
-            if (g_activeScene && g_activeScene->IsAddWaypointMode()) {
-                g_activeScene->SetAddWaypointMode(false);
-                return;
-            }
-            if (g_activeScene && g_activeScene->IsBridgeMode()) {
-                g_activeScene->CancelBridgeMode();
-                return;
-            }
-            if (g_activeScene && g_activeScene->IsPenToolActive()) {
-                g_activeScene->EndPenStroke();
-                g_activeScene->ShowToast("Pen chain ended. Click floor to start new chain.");
-                return;
-            }
-            if (g_activeScene && g_activeScene->IsFillAreaMode()) {
-                g_activeScene->ExitFillAreaMode();
-                return;
-            }
-            if (g_activeScene && g_activeScene->GetTransformMode() != EditorScene::TRANSFORM_NONE) {
-                // Right-click cancels active modal transform
-                g_activeScene->CancelTransform();
-                return;
-            }
             g_isRightMouseDown = true;
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
             g_firstMouse = true;
@@ -220,6 +198,21 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
 
             // Alt+Click: test connection picking first before orbiting
             if (altPressed && g_activeScene) {
+                if (g_activeScene->IsShowWaypoints() && g_activeScene->IsShowWaypointConnections()) {
+                    uint32_t wFrom = 0, wTo = 0;
+                    bool hitWptConn = ScenePicker::PickWaypointConnection(
+                        *g_activeScene,
+                        static_cast<float>(mouseX), static_cast<float>(mouseY),
+                        static_cast<float>(displayW), static_cast<float>(displayH),
+                        g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect),
+                        wFrom, wTo, 18.0f
+                    );
+                    if (hitWptConn) {
+                        g_activeScene->SelectWaypointConnection(wFrom, wTo);
+                        return;
+                    }
+                }
+
                 uint32_t fromId = 0, toId = 0;
                 int dir = -1;
                 bool hitConn = ScenePicker::PickConnection(
@@ -367,6 +360,34 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                         g_activeScene->StartDragHandle(handle, static_cast<float>(mouseX), static_cast<float>(mouseY), ray);
                     }
                     return;
+                }
+
+                // Waypoint Connect Mode Click
+                if (g_activeScene && g_activeScene->IsWaypointConnectMode()) {
+                    float wptDist = std::numeric_limits<float>::max();
+                    uint32_t hitWpt = ScenePicker::PickWaypoint(*g_activeScene, ray, &wptDist);
+                    if (hitWpt != 0) {
+                        bool oneWay = (mods & GLFW_MOD_SHIFT) != 0;
+                        g_activeScene->ConnectSelectedWaypointTo(hitWpt, WPT_CONN_NONE, !oneWay);
+                        g_activeScene->SetWaypointConnectMode(false);
+                    }
+                    return;
+                }
+
+                // Test waypoint connections when visible
+                if (g_activeScene && g_activeScene->IsShowWaypoints() && g_activeScene->IsShowWaypointConnections()) {
+                    uint32_t wFrom = 0, wTo = 0;
+                    bool hitWptConn = ScenePicker::PickWaypointConnection(
+                        *g_activeScene,
+                        static_cast<float>(mouseX), static_cast<float>(mouseY),
+                        static_cast<float>(displayW), static_cast<float>(displayH),
+                        g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect),
+                        wFrom, wTo, 14.0f
+                    );
+                    if (hitWptConn) {
+                        g_activeScene->SelectWaypointConnection(wFrom, wTo);
+                        return;
+                    }
                 }
 
                 // Test directional connections when visible or in connection selection mode
@@ -520,7 +541,7 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
         }
     }
 
-    if (action == GLFW_PRESS) {
+    if (action == GLFW_PRESS || action == GLFW_REPEAT) {
         bool ctrlDown = (mods & GLFW_MOD_CONTROL) != 0 ||
                         glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
                         glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
@@ -638,6 +659,12 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                 } else {
                     g_activeScene->SelectAllAreas();
                 }
+            } else if (key == GLFW_KEY_I && ctrlDown) { // Ctrl+I: Invert Selection
+                if (g_activeScene->IsWaypointMode()) {
+                    g_activeScene->InvertWaypointSelection();
+                } else {
+                    g_activeScene->InvertAreaSelection();
+                }
             } else if (key == GLFW_KEY_F12 && action == GLFW_PRESS) { // F12: Screenshot
                 int displayW = 0, displayH = 0;
                 glfwGetFramebufferSize(window, &displayW, &displayH);
@@ -666,6 +693,10 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                     g_activeScene->CancelBridgeMode();
                 } else if (g_activeScene->IsPathToolActive()) {
                     g_activeScene->SetPathToolActive(false);
+                } else if (g_activeScene->HasSelectedWaypointConnection()) {
+                    g_activeScene->ClearSelectedWaypointConnection();
+                } else if (g_activeScene->IsWaypointConnectMode()) {
+                    g_activeScene->SetWaypointConnectMode(false);
                 } else if (g_activeScene->HasSelectedConnection()) {
                     g_activeScene->ClearSelectedConnection();
                 } else if (g_activeScene->GetSelectedLadderID() != 0) {
@@ -681,7 +712,23 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
 
             // Normal Selection Mode Hotkeys (Connection & Ladder selection take priority over area selection)
             if (key != GLFW_KEY_ESCAPE) {
-                if (g_activeScene->HasSelectedConnection()) {
+                if (g_activeScene->HasSelectedWaypointConnection()) {
+                    if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
+                        g_activeScene->DeleteSelectedWaypointConnection();
+                    } else if (key == GLFW_KEY_R && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) {
+                        g_activeScene->ReverseSelectedWaypointConnection();
+                    } else if ((key == GLFW_KEY_2 || key == GLFW_KEY_T) && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) {
+                        g_activeScene->ToggleSelectedWaypointConnectionBidirectional();
+                    } else if (key == GLFW_KEY_F) {
+                        const auto& sc = g_activeScene->GetSelectedWaypointConnection();
+                        const auto* w1 = g_activeScene->GetWaypoints().GetNode(sc.fromId);
+                        const auto* w2 = g_activeScene->GetWaypoints().GetNode(sc.toId);
+                        if (w1 && w2) {
+                            Vector3 mid = (w1->origin + w2->origin) * 0.5f;
+                            g_camera.FocusOn(mid);
+                        }
+                    }
+                } else if (g_activeScene->HasSelectedConnection()) {
                     if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
                         g_activeScene->DeleteSelectedConnection(*g_cmdMgr);
                     } else if (key == GLFW_KEY_R && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) {
@@ -795,8 +842,12 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                         if (g_activeScene->HasWaypointMultiSelection()) {
                             g_activeScene->BatchConnectSelectedWaypoints(true);
                         } else {
-                            g_activeScene->StartConnectMode();
+                            g_activeScene->ToggleWaypointConnectMode();
                         }
+                    } else if (key == GLFW_KEY_D && (mods & GLFW_MOD_SHIFT) != 0) {
+                        g_activeScene->DuplicateSelectedWaypoints();
+                    } else if (key == GLFW_KEY_B && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) {
+                        g_activeScene->BridgeSelectedWaypoints();
                     }
                 } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {
                     if (key == GLFW_KEY_F) {
@@ -804,6 +855,25 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                         if (ent) g_camera.FocusOn(ent->origin);
                     }
                 }
+            }
+
+            // Arrow Keys Precision Nudge using Active Hammer Grid Size
+            if (key == GLFW_KEY_LEFT || key == GLFW_KEY_RIGHT || key == GLFW_KEY_UP || key == GLFW_KEY_DOWN ||
+                key == GLFW_KEY_PAGE_UP || key == GLFW_KEY_PAGE_DOWN) {
+                float step = g_activeScene->GetGridSize();
+                float dx = 0.0f, dy = 0.0f, dz = 0.0f;
+                if (key == GLFW_KEY_LEFT) dx = -step;
+                else if (key == GLFW_KEY_RIGHT) dx = step;
+                else if (key == GLFW_KEY_UP) {
+                    if ((mods & GLFW_MOD_SHIFT) != 0) dz = step;
+                    else dy = step;
+                } else if (key == GLFW_KEY_DOWN) {
+                    if ((mods & GLFW_MOD_SHIFT) != 0) dz = -step;
+                    else dy = -step;
+                } else if (key == GLFW_KEY_PAGE_UP) dz = step;
+                else if (key == GLFW_KEY_PAGE_DOWN) dz = -step;
+
+                g_activeScene->NudgeSelection(dx, dy, dz);
             }
 
             // DCC View Presets on Numpad (Hammer / Blender style)
@@ -1149,6 +1219,7 @@ int main(int argc, char* argv[]) {
     g_activeScene = &scene;
     CommandManager cmdMgr;
     g_cmdMgr = &cmdMgr;
+    scene.SetCommandManager(&cmdMgr);
     EditorUI editorUI;
     editorUI.Init();
     editorUI.ApplyPreferencesToRuntime(scene, g_camera, cmdMgr);

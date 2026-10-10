@@ -104,6 +104,7 @@ public:
 
     // Node Operations
     WaypointNode* AddNode(const Vector3& origin, uint32_t flags = WPT_FLAG_NONE, float radius = 16.0f);
+    WaypointNode* InsertNode(const WaypointNode& node);
     bool RemoveNode(uint32_t id);
     bool DeleteNode(uint32_t id) { return RemoveNode(id); }
     int FindNearestNode(const Vector3& pos, float maxDist = 500.0f) const;

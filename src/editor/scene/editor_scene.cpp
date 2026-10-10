@@ -1,6 +1,7 @@
 #include "editor/scene/editor_scene.h"
 #include "editor/scene/scene_picker.h"
 #include "editor/commands/nav_commands.h"
+#include "editor/commands/waypoint_commands.h"
 #include "waypoint/waypoint_nav_converter.h"
 #include "editor/camera/camera.h"
 #include <cstdio>
@@ -1269,6 +1270,25 @@ void EditorScene::SelectAllAreas() {
     RebuildNavRenderer();
 }
 
+void EditorScene::InvertAreaSelection() {
+    std::vector<uint32_t> inverted;
+    if (m_nav && m_nav->IsLoaded()) {
+        for (const auto* area : m_nav->GetAreas()) {
+            if (!area) continue;
+            uint32_t aid = area->GetID();
+            if (std::find(m_selectedAreaIds.begin(), m_selectedAreaIds.end(), aid) == m_selectedAreaIds.end()) {
+                inverted.push_back(aid);
+            }
+        }
+    }
+    m_selectedAreaIds = std::move(inverted);
+    m_selectedAreaId = m_selectedAreaIds.empty() ? 0 : m_selectedAreaIds.front();
+    m_selectedHandle = HANDLE_NONE;
+    m_hoveredHandle = HANDLE_NONE;
+    RebuildNavRenderer();
+    ShowToast("Inverted area selection (" + std::to_string(m_selectedAreaIds.size()) + " selected)");
+}
+
 void EditorScene::SetHoveredArea(uint32_t id) {
     if (m_hoveredAreaId == id) return;
     m_hoveredAreaId = id;
@@ -2448,6 +2468,16 @@ bool EditorScene::EndDragHandle(CommandManager& cmdMgr) {
 
         if (m_autoConnectOnEdgeSnap && (finishedHandle == HANDLE_GIZMO_CENTER || finishedHandle == HANDLE_PLANE_XY || finishedHandle == HANDLE_GIZMO_X || finishedHandle == HANDLE_GIZMO_Y)) {
             AutoConnectTouchingNeighbors(areaId);
+        }
+    } else {
+        WaypointNode* wpt = GetSelectedWaypoint();
+        if (wpt) {
+            Vector3 curPos = wpt->origin;
+            if (curPos != m_dragStartEntityOrigin) {
+                uint32_t wptId = wpt->id;
+                wpt->origin = m_dragStartEntityOrigin;
+                cmdMgr.ExecuteCommand(std::make_unique<CmdMoveWaypoint>(this, wptId, m_dragStartEntityOrigin, curPos));
+            }
         }
     }
 

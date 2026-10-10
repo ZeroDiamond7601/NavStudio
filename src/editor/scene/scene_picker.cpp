@@ -756,6 +756,62 @@ bool ScenePicker::PickConnection(
     return found;
 }
 
+bool ScenePicker::PickWaypointConnection(
+    const EditorScene& scene,
+    float screenX, float screenY,
+    float viewportWidth, float viewportHeight,
+    const Matrix4& viewMatrix,
+    const Matrix4& projMatrix,
+    uint32_t& outFromId, uint32_t& outToId,
+    float maxPixelDist
+) {
+    outFromId = 0;
+    outToId = 0;
+    if (!scene.IsShowWaypoints() || !scene.IsShowWaypointConnections()) return false;
+    const auto& graph = scene.GetWaypoints();
+    if (graph.IsEmpty()) return false;
+
+    Matrix4 viewProj = projMatrix * viewMatrix;
+
+    float bestDist = maxPixelDist;
+    float bestDepth = std::numeric_limits<float>::max();
+    bool found = false;
+
+    for (const auto& node : graph.GetNodes()) {
+        Vector3 startPt = node.origin + Vector3(0.0f, 0.0f, 10.0f);
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            int16_t targetId = node.connections[c];
+            if (targetId <= 0) continue;
+
+            const WaypointNode* target = graph.GetNodeByID(static_cast<uint32_t>(targetId));
+            if (!target) continue;
+
+            Vector3 endPt = target->origin + Vector3(0.0f, 0.0f, 10.0f);
+
+            ScreenPoint2D spA = ProjectToScreen(startPt, viewProj, viewportWidth, viewportHeight);
+            ScreenPoint2D spB = ProjectToScreen(endPt, viewProj, viewportWidth, viewportHeight);
+
+            if (!spA.valid && !spB.valid) continue;
+
+            float dist = DistToSegment2D(screenX, screenY, spA.x, spA.y, spB.x, spB.y);
+            if (dist <= bestDist) {
+                Vector3 mid = (startPt + endPt) * 0.5f;
+                Vector4 clip = viewProj * Vector4(mid.x, mid.y, mid.z, 1.0f);
+                float depth = clip.w;
+                if (dist < bestDist - 1.5f || (std::fabs(dist - bestDist) <= 1.5f && depth < bestDepth)) {
+                    bestDist = dist;
+                    bestDepth = depth;
+                    outFromId = node.id;
+                    outToId = target->id;
+                    found = true;
+                }
+            }
+        }
+    }
+
+    return found;
+}
+
 std::vector<uint32_t> ScenePicker::PickAreasInRect(
     const EditorScene& scene,
     float rectMinX, float rectMinY,

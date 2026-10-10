@@ -64,6 +64,17 @@ public:
         float maxPixelDist = 12.0f
     );
 
+    // Tests screen point against all waypoint connections in the scene
+    static bool PickWaypointConnection(
+        const EditorScene& scene,
+        float screenX, float screenY,
+        float viewportWidth, float viewportHeight,
+        const Matrix4& viewMatrix,
+        const Matrix4& projMatrix,
+        uint32_t& outFromId, uint32_t& outToId,
+        float maxPixelDist = 14.0f
+    );
+
     // Tests 2D screen marquee rectangle against all NavAreas in the scene
     static std::vector<uint32_t> PickAreasInRect(
         const EditorScene& scene,

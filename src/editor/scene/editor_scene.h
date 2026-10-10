@@ -64,6 +64,20 @@ struct SelectedConnection {
     }
 };
 
+struct SelectedWaypointConnection {
+    uint32_t fromId{0};
+    uint32_t toId{0};
+
+    bool valid() const { return fromId != 0 && toId != 0; }
+    void clear() { fromId = 0; toId = 0; }
+    bool operator==(const SelectedWaypointConnection& o) const {
+        return fromId == o.fromId && toId == o.toId;
+    }
+    bool operator!=(const SelectedWaypointConnection& o) const {
+        return !(*this == o);
+    }
+};
+
 class EditorScene {
 public:
     EditorScene();
@@ -104,6 +118,7 @@ public:
     size_t GetSelectedAreaCount() const { return m_selectedAreaIds.size(); }
     void ClearSelection();
     void SelectAllAreas();
+    void InvertAreaSelection();
 
     // Multi-Selection Batch Actions
     void BatchSetAttributes(uint8_t flags, class CommandManager& cmdMgr);
@@ -131,6 +146,20 @@ public:
     bool DeleteSelectedConnection(class CommandManager& cmdMgr);
     bool ReverseSelectedConnection(class CommandManager& cmdMgr);
     bool ToggleSelectedConnectionBidirectional(class CommandManager& cmdMgr);
+
+    // Waypoint Connection Selection & Editing
+    bool HasSelectedWaypointConnection() const { return m_selectedWaypointConnection.valid(); }
+    const SelectedWaypointConnection& GetSelectedWaypointConnection() const { return m_selectedWaypointConnection; }
+    void SelectWaypointConnection(uint32_t fromId, uint32_t toId);
+    void ClearSelectedWaypointConnection();
+    bool DeleteSelectedWaypointConnection();
+    bool ReverseSelectedWaypointConnection();
+    bool ToggleSelectedWaypointConnectionBidirectional();
+    bool SetSelectedWaypointConnectionFlags(uint16_t flags);
+
+    // Global CommandManager Binding
+    void SetCommandManager(class CommandManager* mgr) { m_cmdMgr = mgr; }
+    class CommandManager* GetCommandManager() const { return m_cmdMgr; }
 
     EntityRenderer& GetEntityRenderer() { return m_entityRenderer; }
     const EntityRenderer& GetEntityRenderer() const { return m_entityRenderer; }
@@ -498,18 +527,22 @@ public:
     void ToggleShowWaypoints();
 
     bool GetShowWaypointRadii() const { return m_showWaypointRadii; }
+    bool IsShowWaypointRadii() const { return m_showWaypointRadii; }
     void SetShowWaypointRadii(bool show);
     void ToggleShowWaypointRadii();
 
     bool GetShowWaypointDirection() const { return m_showWaypointDirection; }
+    bool IsShowWaypointDirection() const { return m_showWaypointDirection; }
     void SetShowWaypointDirection(bool show);
     void ToggleShowWaypointDirection();
 
     bool GetShowWaypointConnections() const { return m_showWaypointConnections; }
+    bool IsShowWaypointConnections() const { return m_showWaypointConnections; }
     void SetShowWaypointConnections(bool show);
     void ToggleShowWaypointConnections();
 
     bool GetShowParkourJumpArcs() const { return m_showParkourJumpArcs; }
+    bool IsShowParkourJumpArcs() const { return m_showParkourJumpArcs; }
     void SetShowParkourJumpArcs(bool show);
     void ToggleShowParkourJumpArcs();
 
@@ -594,6 +627,16 @@ public:
     void SnapSelectedWaypointToFloor();
     bool ConnectSelectedWaypointTo(uint32_t targetId, uint16_t connFlags = WPT_CONN_NONE, bool bidirectional = true);
     void DeleteSelectedWaypoint();
+
+    // Waypoint Tools ported from NavMesh workflow
+    void DuplicateSelectedWaypoints();
+    void BridgeSelectedWaypoints();
+    enum class WaypointAlignMode { MinX, CenterX, MaxX, MinY, CenterY, MaxY, FloorZ, AverageZ };
+    void AlignSelectedWaypoints(WaypointAlignMode mode);
+    void NudgeSelection(float dx, float dy, float dz);
+    bool IsWaypointConnectMode() const { return m_waypointConnectMode; }
+    void SetWaypointConnectMode(bool active);
+    void ToggleWaypointConnectMode();
 
     // Continuous Pen / Breadcrumb Path Tool
     bool IsPenToolActive() const { return m_penToolActive; }
@@ -923,6 +966,9 @@ private:
     float m_activeWaypointAddRadius{48.0f};
     bool m_autoConnectWaypoints{true};
     int m_waypointConnectType{2};
+    SelectedWaypointConnection m_selectedWaypointConnection;
+    class CommandManager* m_cmdMgr{nullptr};
+    bool m_waypointConnectMode{false};
 
     // Continuous Pen / Breadcrumb Tool state
     bool m_penToolActive{false};

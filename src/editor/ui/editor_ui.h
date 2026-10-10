@@ -114,6 +114,7 @@ private:
     // Bot Waypoint System UI
     void RenderWaypointInspector(EditorScene& scene, CommandManager& cmdMgr);
     void RenderWaypointMultiInspector(EditorScene& scene, CommandManager& cmdMgr);
+    void RenderWaypointConnectionInspector(EditorScene& scene, CommandManager& cmdMgr);
     void RenderWaypointGlobalInspector(EditorScene& scene, CommandManager& cmdMgr);
     void RenderWaypointExportModal(EditorScene& scene);
     void RenderNavToWaypointModal(EditorScene& scene);

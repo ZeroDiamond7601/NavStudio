@@ -31,7 +31,9 @@ public:
         bool penPreviewClear = true,
         const std::vector<uint32_t>* ghostBotPath = nullptr,
         const Vector3* ghostBotPos = nullptr,
-        float ghostBotYaw = 0.0f
+        float ghostBotYaw = 0.0f,
+        uint32_t selectedConnFrom = 0,
+        uint32_t selectedConnTo = 0
     );
     void Clear();
 

@@ -1,6 +1,8 @@
 #include "editor/scene/editor_scene.h"
 #include "editor/scene/scene_picker.h"
 #include "editor/camera/camera.h"
+#include "editor/commands/waypoint_commands.h"
+#include "editor/commands/nav_commands.h"
 #include "waypoint/waypoint_graph.h"
 #include "waypoint/ebot_generator.h"
 #include "waypoint/waypoint_nav_converter.h"
@@ -179,14 +181,19 @@ void EditorScene::BatchDeleteWaypoints() {
         DeleteSelectedWaypoint();
         return;
     }
-    size_t count = m_selectedWaypointIds.size();
-    for (uint32_t id : m_selectedWaypointIds) {
-        m_waypoints.RemoveNode(id);
+    std::vector<uint32_t> ids(m_selectedWaypointIds.begin(), m_selectedWaypointIds.end());
+    size_t count = ids.size();
+    if (m_cmdMgr) {
+        m_cmdMgr->ExecuteCommand(std::make_unique<CmdBatchDeleteWaypoints>(this, ids));
+    } else {
+        for (uint32_t id : ids) {
+            m_waypoints.RemoveNode(id);
+        }
+        m_selectedWaypointIds.clear();
+        m_selectedWaypointId = 0;
+        m_isModified = true;
+        RebuildWaypointRenderer();
     }
-    m_selectedWaypointIds.clear();
-    m_selectedWaypointId = 0;
-    m_isModified = true;
-    RebuildWaypointRenderer();
     ShowToast("Deleted " + std::to_string(count) + " waypoints");
 }
 
@@ -195,8 +202,13 @@ void EditorScene::BatchConnectSelectedWaypoints(bool bidirectional) {
     std::vector<uint32_t> ids(m_selectedWaypointIds.begin(), m_selectedWaypointIds.end());
     size_t connected = 0;
     for (size_t i = 0; i + 1 < ids.size(); ++i) {
-        if (m_waypoints.ConnectNodes(ids[i], ids[i + 1], bidirectional, WPT_CONN_NONE)) {
+        if (m_cmdMgr) {
+            m_cmdMgr->ExecuteCommand(std::make_unique<CmdConnectWaypoints>(this, ids[i], ids[i + 1], bidirectional, WPT_CONN_NONE));
             connected++;
+        } else {
+            if (m_waypoints.ConnectNodes(ids[i], ids[i + 1], bidirectional, WPT_CONN_NONE)) {
+                connected++;
+            }
         }
     }
     m_isModified = true;
@@ -206,19 +218,32 @@ void EditorScene::BatchConnectSelectedWaypoints(bool bidirectional) {
 
 void EditorScene::BatchSnapWaypointsToFloor() {
     if (m_selectedWaypointIds.empty() || !HasBSP()) return;
-    size_t snapped = 0;
+    std::vector<CmdBatchMoveWaypoints::MoveEntry> entries;
     for (uint32_t id : m_selectedWaypointIds) {
         WaypointNode* node = m_waypoints.GetNodeByID(id);
         if (node) {
             Vector3 ground;
             if (m_bsp->GetGround(node->origin + Vector3(0, 0, 18.0f), &ground, 500.0f)) {
-                node->origin = ground + Vector3(0, 0, 18.0f);
-                snapped++;
+                Vector3 newPos = ground + Vector3(0, 0, 18.0f);
+                entries.push_back({ id, node->origin, newPos });
             }
         }
     }
-    m_isModified = true;
-    RebuildWaypointRenderer();
+    if (entries.empty()) return;
+    size_t snapped = entries.size();
+    if (m_cmdMgr) {
+        m_cmdMgr->ExecuteCommand(std::make_unique<CmdBatchMoveWaypoints>(this, entries));
+    } else {
+        for (const auto& e : entries) {
+            auto* node = m_waypoints.GetNode(e.id);
+            if (node) {
+                node->origin = e.newPos;
+                if (m_bsp) m_waypoints.CalculateWayzone(e.id, m_bsp.get());
+            }
+        }
+        m_isModified = true;
+        RebuildWaypointRenderer();
+    }
     ShowToast("Snapped " + std::to_string(snapped) + " waypoints to floor");
 }
 
@@ -328,7 +353,9 @@ void EditorScene::RebuildWaypointRenderer() {
             m_penRubberbandClear,
             botPathPtr,
             botPosPtr,
-            m_ghostBotYaw
+            m_ghostBotYaw,
+            m_selectedWaypointConnection.fromId,
+            m_selectedWaypointConnection.toId
         );
     }
 }
@@ -823,13 +850,29 @@ uint32_t EditorScene::AddWaypointAt(const Vector3& pos) {
         m_waypoints.CalculateWayzone(node->id, m_bsp.get());
     }
 
-    SelectWaypoint(node->id);
-    m_showWaypoints = true;
-    m_waypointRenderer.SetShowWaypoints(true);
-    RebuildWaypointRenderer();
-    m_isModified = true;
-    ShowToast("Added Waypoint #" + std::to_string(node->id));
-    return node->id;
+    uint32_t createdId = node->id;
+    if (m_cmdMgr) {
+        std::vector<WaypointIncomingLink> inc;
+        for (const auto& other : m_waypoints.GetNodes()) {
+            if (other.id == createdId) continue;
+            for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+                if (other.connections[c] == static_cast<int16_t>(createdId)) {
+                    inc.push_back({ other.id, other.connectionFlags[c] });
+                }
+            }
+        }
+        WaypointNode copy = *node;
+        m_waypoints.RemoveNode(createdId);
+        m_cmdMgr->ExecuteCommand(std::make_unique<CmdAddWaypoint>(this, copy, inc));
+    } else {
+        SelectWaypoint(createdId);
+        m_showWaypoints = true;
+        m_waypointRenderer.SetShowWaypoints(true);
+        RebuildWaypointRenderer();
+        m_isModified = true;
+    }
+    ShowToast("Added Waypoint #" + std::to_string(createdId));
+    return createdId;
 }
 
 void EditorScene::SnapSelectedWaypointToFloor() {
@@ -841,16 +884,26 @@ void EditorScene::SnapSelectedWaypointToFloor() {
     Vector3 end(node->origin.x, node->origin.y, node->origin.z - 2048.0f);
     BSPTraceResult tr;
     if (m_bsp->TraceWorld(start, end, HULL_POINT, &tr) && !tr.startsolid && !tr.allsolid) {
-        node->origin.z = tr.endpos.z + 18.0f;
-        m_waypoints.CalculateWayzone(node->id, m_bsp.get());
-        RebuildWaypointRenderer();
-        m_isModified = true;
+        Vector3 newPos(node->origin.x, node->origin.y, tr.endpos.z + 18.0f);
+        if (m_cmdMgr) {
+            m_cmdMgr->ExecuteCommand(std::make_unique<CmdMoveWaypoint>(this, node->id, node->origin, newPos));
+        } else {
+            node->origin = newPos;
+            m_waypoints.CalculateWayzone(node->id, m_bsp.get());
+            RebuildWaypointRenderer();
+            m_isModified = true;
+        }
         ShowToast("Snapped Waypoint #" + std::to_string(node->id) + " to floor.");
     }
 }
 
 bool EditorScene::ConnectSelectedWaypointTo(uint32_t targetId, uint16_t connFlags, bool bidirectional) {
     if (m_selectedWaypointId == 0 || targetId == 0 || m_selectedWaypointId == targetId) return false;
+    if (m_cmdMgr) {
+        m_cmdMgr->ExecuteCommand(std::make_unique<CmdConnectWaypoints>(this, m_selectedWaypointId, targetId, bidirectional, connFlags));
+        ShowToast("Connected Waypoint #" + std::to_string(m_selectedWaypointId) + " to #" + std::to_string(targetId));
+        return true;
+    }
     bool ok = m_waypoints.ConnectNodes(m_selectedWaypointId, targetId, bidirectional, connFlags);
     if (ok) {
         RebuildWaypointRenderer();
@@ -863,11 +916,427 @@ bool EditorScene::ConnectSelectedWaypointTo(uint32_t targetId, uint16_t connFlag
 void EditorScene::DeleteSelectedWaypoint() {
     if (m_selectedWaypointId == 0) return;
     uint32_t id = m_selectedWaypointId;
-    SelectWaypoint(0);
-    m_waypoints.DeleteNode(id);
-    RebuildWaypointRenderer();
-    m_isModified = true;
+    if (m_cmdMgr) {
+        m_cmdMgr->ExecuteCommand(std::make_unique<CmdDeleteWaypoint>(this, id));
+    } else {
+        SelectWaypoint(0);
+        m_waypoints.DeleteNode(id);
+        RebuildWaypointRenderer();
+        m_isModified = true;
+    }
     ShowToast("Deleted Waypoint #" + std::to_string(id));
+}
+
+void EditorScene::SelectWaypointConnection(uint32_t fromId, uint32_t toId) {
+    m_selectedWaypointConnection.fromId = fromId;
+    m_selectedWaypointConnection.toId = toId;
+    m_selectedWaypointId = 0;
+    m_selectedWaypointIds.clear();
+    m_selectedAreaId = 0;
+    m_selectedAreaIds.clear();
+    m_selectedEntityIndex = -1;
+    m_selectedLadderId = 0;
+    m_selectedConnection.clear();
+    RebuildWaypointRenderer();
+    ShowToast("Selected Waypoint Link #" + std::to_string(fromId) + " -> #" + std::to_string(toId));
+}
+
+void EditorScene::ClearSelectedWaypointConnection() {
+    m_selectedWaypointConnection.clear();
+    RebuildWaypointRenderer();
+}
+
+bool EditorScene::DeleteSelectedWaypointConnection() {
+    if (!m_selectedWaypointConnection.valid()) return false;
+    uint32_t from = m_selectedWaypointConnection.fromId;
+    uint32_t to = m_selectedWaypointConnection.toId;
+    ClearSelectedWaypointConnection();
+    if (m_cmdMgr) {
+        m_cmdMgr->ExecuteCommand(std::make_unique<CmdDisconnectWaypoints>(this, from, to, false));
+    } else {
+        m_waypoints.DisconnectNodes(from, to, false);
+        SetModified(true);
+        RebuildWaypointRenderer();
+    }
+    ShowToast("Deleted Waypoint Link #" + std::to_string(from) + " -> #" + std::to_string(to));
+    return true;
+}
+
+bool EditorScene::ReverseSelectedWaypointConnection() {
+    if (!m_selectedWaypointConnection.valid()) return false;
+    uint32_t from = m_selectedWaypointConnection.fromId;
+    uint32_t to = m_selectedWaypointConnection.toId;
+    auto* fromNode = m_waypoints.GetNode(from);
+    if (!fromNode) return false;
+    uint16_t flags = WPT_CONN_NONE;
+    for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+        if (fromNode->connections[c] == static_cast<int16_t>(to)) {
+            flags = fromNode->connectionFlags[c];
+            break;
+        }
+    }
+    m_waypoints.DisconnectNodes(from, to, false);
+    m_waypoints.ConnectNodes(to, from, false, flags);
+    m_selectedWaypointConnection.fromId = to;
+    m_selectedWaypointConnection.toId = from;
+    SetModified(true);
+    RebuildWaypointRenderer();
+    ShowToast("Reversed link: now #" + std::to_string(to) + " -> #" + std::to_string(from));
+    return true;
+}
+
+bool EditorScene::ToggleSelectedWaypointConnectionBidirectional() {
+    if (!m_selectedWaypointConnection.valid()) return false;
+    uint32_t from = m_selectedWaypointConnection.fromId;
+    uint32_t to = m_selectedWaypointConnection.toId;
+    auto* fromNode = m_waypoints.GetNode(from);
+    auto* toNode = m_waypoints.GetNode(to);
+    if (!fromNode || !toNode) return false;
+
+    bool toHasFrom = toNode->HasConnectionTo(static_cast<int16_t>(from));
+    if (toHasFrom) {
+        if (m_cmdMgr) {
+            m_cmdMgr->ExecuteCommand(std::make_unique<CmdDisconnectWaypoints>(this, to, from, false));
+        } else {
+            m_waypoints.DisconnectNodes(to, from, false);
+            SetModified(true);
+            RebuildWaypointRenderer();
+        }
+        ShowToast("Converted to 1-Way (Unidirectional): #" + std::to_string(from) + " -> #" + std::to_string(to));
+    } else {
+        uint16_t flags = WPT_CONN_NONE;
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            if (fromNode->connections[c] == static_cast<int16_t>(to)) {
+                flags = fromNode->connectionFlags[c];
+                break;
+            }
+        }
+        if (m_cmdMgr) {
+            m_cmdMgr->ExecuteCommand(std::make_unique<CmdConnectWaypoints>(this, to, from, false, flags));
+        } else {
+            m_waypoints.ConnectNodes(to, from, false, flags);
+            SetModified(true);
+            RebuildWaypointRenderer();
+        }
+        ShowToast("Converted to 2-Way (Bidirectional): #" + std::to_string(from) + " <-> #" + std::to_string(to));
+    }
+    return true;
+}
+
+bool EditorScene::SetSelectedWaypointConnectionFlags(uint16_t flags) {
+    if (!m_selectedWaypointConnection.valid()) return false;
+    uint32_t from = m_selectedWaypointConnection.fromId;
+    uint32_t to = m_selectedWaypointConnection.toId;
+    auto* fromNode = m_waypoints.GetNode(from);
+    if (!fromNode) return false;
+    for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+        if (fromNode->connections[c] == static_cast<int16_t>(to)) {
+            fromNode->connectionFlags[c] = flags;
+            break;
+        }
+    }
+    SetModified(true);
+    RebuildWaypointRenderer();
+    return true;
+}
+
+void EditorScene::SetWaypointConnectMode(bool active) {
+    m_waypointConnectMode = active;
+    if (active) {
+        ShowToast("Waypoint Connect Mode: Click another waypoint to connect (Shift: 1-way, Esc: cancel)");
+    }
+}
+
+void EditorScene::ToggleWaypointConnectMode() {
+    SetWaypointConnectMode(!m_waypointConnectMode);
+}
+
+void EditorScene::DuplicateSelectedWaypoints() {
+    if (m_selectedWaypointIds.empty() && m_selectedWaypointId == 0) return;
+    std::vector<uint32_t> sourceIds;
+    if (m_selectedWaypointIds.empty()) sourceIds.push_back(m_selectedWaypointId);
+    else sourceIds.assign(m_selectedWaypointIds.begin(), m_selectedWaypointIds.end());
+
+    Vector3 offset(m_gridSize, 0.0f, 0.0f);
+    std::unordered_map<uint32_t, uint32_t> idMap;
+    std::vector<WaypointNode> clonedNodes;
+
+    uint32_t curNext = m_waypoints.GetNextId();
+    for (uint32_t id : sourceIds) {
+        const auto* src = m_waypoints.GetNode(id);
+        if (!src) continue;
+        WaypointNode clone = *src;
+        clone.id = curNext++;
+        clone.origin += offset;
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            clone.connections[c] = -1;
+            clone.connectionFlags[c] = 0;
+        }
+        idMap[id] = clone.id;
+        clonedNodes.push_back(clone);
+    }
+    m_waypoints.SetNextId(curNext);
+
+    for (size_t i = 0; i < clonedNodes.size(); ++i) {
+        uint32_t origId = sourceIds[i];
+        const auto* origNode = m_waypoints.GetNode(origId);
+        if (!origNode) continue;
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            int16_t tgt = origNode->connections[c];
+            if (tgt > 0 && idMap.find(static_cast<uint32_t>(tgt)) != idMap.end()) {
+                clonedNodes[i].AddConnection(static_cast<int16_t>(idMap[tgt]), origNode->connectionFlags[c]);
+            }
+        }
+    }
+
+    if (clonedNodes.empty()) return;
+
+    if (m_cmdMgr) {
+        m_cmdMgr->ExecuteCommand(std::make_unique<CmdDuplicateWaypoints>(this, clonedNodes));
+    } else {
+        std::vector<uint32_t> newIds;
+        for (const auto& n : clonedNodes) {
+            m_waypoints.InsertNode(n);
+            newIds.push_back(n.id);
+        }
+        BoxSelectWaypoints(newIds, false, false);
+        SetModified(true);
+        RebuildWaypointRenderer();
+    }
+    ShowToast("Duplicated " + std::to_string(clonedNodes.size()) + " waypoint(s) [Offset: " + std::to_string((int)m_gridSize) + "u]");
+}
+
+void EditorScene::BridgeSelectedWaypoints() {
+    if (m_selectedWaypointIds.size() != 2) {
+        ShowToast("Bridge Tool: Select exactly 2 waypoints to interpolate path");
+        return;
+    }
+    auto it = m_selectedWaypointIds.begin();
+    uint32_t idA = *it++;
+    uint32_t idB = *it;
+    const auto* nodeA = m_waypoints.GetNode(idA);
+    const auto* nodeB = m_waypoints.GetNode(idB);
+    if (!nodeA || !nodeB) return;
+
+    Vector3 pA = nodeA->origin;
+    Vector3 pB = nodeB->origin;
+    float dist = (pB - pA).Length();
+    float stepDist = std::max(64.0f, m_gridSize);
+    int numSteps = static_cast<int>(std::round(dist / stepDist));
+
+    if (numSteps < 2) {
+        ConnectSelectedWaypointTo(idB, WPT_CONN_NONE, true);
+        ShowToast("Directly connected waypoint #" + std::to_string(idA) + " <-> #" + std::to_string(idB));
+        return;
+    }
+
+    std::vector<WaypointNode> bridgeNodes;
+    uint32_t curNext = m_waypoints.GetNextId();
+
+    for (int i = 1; i < numSteps; ++i) {
+        float t = static_cast<float>(i) / static_cast<float>(numSteps);
+        Vector3 pos = pA + (pB - pA) * t;
+        if (HasBSP()) {
+            Vector3 ground;
+            if (m_bsp->GetGround(pos + Vector3(0.0f, 0.0f, 18.0f), &ground, 500.0f)) {
+                pos = ground + Vector3(0.0f, 0.0f, 18.0f);
+            }
+        }
+        WaypointNode bn;
+        bn.id = curNext++;
+        bn.origin = pos;
+        bn.flags = nodeA->flags;
+        bn.radius = (nodeA->radius + nodeB->radius) * 0.5f;
+        bridgeNodes.push_back(bn);
+    }
+    m_waypoints.SetNextId(curNext);
+
+    for (size_t i = 0; i < bridgeNodes.size(); ++i) {
+        if (i > 0) {
+            bridgeNodes[i - 1].AddConnection(static_cast<int16_t>(bridgeNodes[i].id), WPT_CONN_NONE);
+            bridgeNodes[i].AddConnection(static_cast<int16_t>(bridgeNodes[i - 1].id), WPT_CONN_NONE);
+        }
+    }
+
+    if (m_cmdMgr) {
+        m_cmdMgr->ExecuteCommand(std::make_unique<CmdBridgeWaypoints>(this, idA, idB, bridgeNodes));
+    } else {
+        for (size_t i = 0; i < bridgeNodes.size(); ++i) {
+            m_waypoints.InsertNode(bridgeNodes[i]);
+            if (i == 0) {
+                m_waypoints.ConnectNodes(idA, bridgeNodes[i].id, true, WPT_CONN_NONE);
+            } else {
+                m_waypoints.ConnectNodes(bridgeNodes[i - 1].id, bridgeNodes[i].id, true, WPT_CONN_NONE);
+            }
+        }
+        m_waypoints.ConnectNodes(bridgeNodes.back().id, idB, true, WPT_CONN_NONE);
+
+        std::vector<uint32_t> allBridgedIds;
+        for (const auto& b : bridgeNodes) allBridgedIds.push_back(b.id);
+        BoxSelectWaypoints(allBridgedIds, false, false);
+        SetModified(true);
+        RebuildWaypointRenderer();
+    }
+    ShowToast("Bridged " + std::to_string(bridgeNodes.size()) + " intermediate waypoints between #" +
+              std::to_string(idA) + " and #" + std::to_string(idB));
+}
+
+void EditorScene::AlignSelectedWaypoints(WaypointAlignMode mode) {
+    if (m_selectedWaypointIds.size() < 2) return;
+    std::vector<uint32_t> ids(m_selectedWaypointIds.begin(), m_selectedWaypointIds.end());
+    float minX = 1e9f, maxX = -1e9f, sumX = 0.0f;
+    float minY = 1e9f, maxY = -1e9f, sumY = 0.0f;
+    float minZ = 1e9f, maxZ = -1e9f, sumZ = 0.0f;
+
+    for (uint32_t id : ids) {
+        const auto* n = m_waypoints.GetNode(id);
+        if (!n) continue;
+        minX = std::min(minX, n->origin.x); maxX = std::max(maxX, n->origin.x); sumX += n->origin.x;
+        minY = std::min(minY, n->origin.y); maxY = std::max(maxY, n->origin.y); sumY += n->origin.y;
+        minZ = std::min(minZ, n->origin.z); maxZ = std::max(maxZ, n->origin.z); sumZ += n->origin.z;
+    }
+    float avgX = sumX / ids.size();
+    float avgY = sumY / ids.size();
+    float avgZ = sumZ / ids.size();
+
+    std::vector<CmdBatchMoveWaypoints::MoveEntry> entries;
+    for (uint32_t id : ids) {
+        auto* n = m_waypoints.GetNode(id);
+        if (!n) continue;
+        Vector3 newPos = n->origin;
+        switch (mode) {
+            case WaypointAlignMode::MinX:     newPos.x = minX; break;
+            case WaypointAlignMode::CenterX:  newPos.x = avgX; break;
+            case WaypointAlignMode::MaxX:     newPos.x = maxX; break;
+            case WaypointAlignMode::MinY:     newPos.y = minY; break;
+            case WaypointAlignMode::CenterY:  newPos.y = avgY; break;
+            case WaypointAlignMode::MaxY:     newPos.y = maxY; break;
+            case WaypointAlignMode::FloorZ:   newPos.z = minZ; break;
+            case WaypointAlignMode::AverageZ: newPos.z = avgZ; break;
+        }
+        if (newPos != n->origin) {
+            entries.push_back({ id, n->origin, newPos });
+        }
+    }
+
+    if (entries.empty()) return;
+    if (m_cmdMgr) {
+        m_cmdMgr->ExecuteCommand(std::make_unique<CmdBatchMoveWaypoints>(this, entries));
+    } else {
+        for (const auto& e : entries) {
+            auto* n = m_waypoints.GetNode(e.id);
+            if (n) {
+                n->origin = e.newPos;
+                if (m_bsp) m_waypoints.CalculateWayzone(e.id, m_bsp.get());
+            }
+        }
+        SetModified(true);
+        RebuildWaypointRenderer();
+    }
+    ShowToast("Aligned " + std::to_string(entries.size()) + " waypoints");
+}
+
+void EditorScene::NudgeSelection(float dx, float dy, float dz) {
+    Vector3 delta(dx, dy, dz);
+    if (m_selectedWaypointIds.size() > 1) {
+        std::vector<CmdBatchMoveWaypoints::MoveEntry> entries;
+        for (uint32_t id : m_selectedWaypointIds) {
+            auto* node = m_waypoints.GetNode(id);
+            if (node) {
+                entries.push_back({ id, node->origin, node->origin + delta });
+            }
+        }
+        if (!entries.empty()) {
+            if (m_cmdMgr) {
+                m_cmdMgr->ExecuteCommand(std::make_unique<CmdBatchMoveWaypoints>(this, entries));
+            } else {
+                for (const auto& e : entries) {
+                    auto* node = m_waypoints.GetNode(e.id);
+                    if (node) node->origin = e.newPos;
+                }
+                SetModified(true);
+                RebuildWaypointRenderer();
+            }
+            ShowToast("Nudged " + std::to_string(entries.size()) + " waypoints by grid size (" + std::to_string((int)m_gridSize) + "u)");
+        }
+    } else if (m_selectedWaypointId != 0) {
+        auto* node = m_waypoints.GetNode(m_selectedWaypointId);
+        if (node) {
+            Vector3 oldPos = node->origin;
+            Vector3 newPos = oldPos + delta;
+            if (m_cmdMgr) {
+                m_cmdMgr->ExecuteCommand(std::make_unique<CmdMoveWaypoint>(this, node->id, oldPos, newPos));
+            } else {
+                node->origin = newPos;
+                SetModified(true);
+                RebuildWaypointRenderer();
+            }
+            ShowToast("Nudged Waypoint #" + std::to_string(node->id) + " by grid size (" + std::to_string((int)m_gridSize) + "u)");
+        }
+    } else if (m_selectedAreaIds.size() > 1 && m_nav && m_nav->IsLoaded()) {
+        std::vector<std::unique_ptr<IEditCommand>> cmds;
+        for (uint32_t aid : m_selectedAreaIds) {
+            NavArea* a = m_nav->GetAreaByID(aid);
+            if (!a) continue;
+            NavExtent oldExt = a->GetExtent();
+            float oldNeZ = a->GetNEZ();
+            float oldSwZ = a->GetSWZ();
+            NavExtent newExt = oldExt;
+            newExt.lo += delta;
+            newExt.hi += delta;
+            float newNeZ = oldNeZ + delta.z;
+            float newSwZ = oldSwZ + delta.z;
+            cmds.push_back(std::make_unique<CmdTransformArea>(this, aid, oldExt, oldNeZ, oldSwZ, newExt, newNeZ, newSwZ, "Nudge Area"));
+        }
+        if (!cmds.empty()) {
+            if (m_cmdMgr) {
+                m_cmdMgr->ExecuteCommand(std::make_unique<CmdCompound>(std::move(cmds), "Nudge Areas"));
+            } else {
+                for (uint32_t aid : m_selectedAreaIds) {
+                    NavArea* a = m_nav->GetAreaByID(aid);
+                    if (a) {
+                        NavExtent ext = a->GetExtent();
+                        ext.lo += delta; ext.hi += delta;
+                        a->SetExtent(ext);
+                        a->SetCornerHeights(a->GetNEZ() + delta.z, a->GetSWZ() + delta.z);
+                    }
+                }
+                SetModified(true);
+                RebuildNavRenderer();
+            }
+            ShowToast("Nudged " + std::to_string(m_selectedAreaIds.size()) + " areas by grid size (" + std::to_string((int)m_gridSize) + "u)");
+        }
+    } else if (m_selectedAreaId != 0 && m_nav && m_nav->IsLoaded()) {
+        NavArea* a = m_nav->GetAreaByID(m_selectedAreaId);
+        if (a) {
+            NavExtent oldExt = a->GetExtent();
+            float oldNeZ = a->GetNEZ();
+            float oldSwZ = a->GetSWZ();
+            NavExtent newExt = oldExt;
+            newExt.lo += delta;
+            newExt.hi += delta;
+            float newNeZ = oldNeZ + delta.z;
+            float newSwZ = oldSwZ + delta.z;
+            if (m_cmdMgr) {
+                m_cmdMgr->ExecuteCommand(std::make_unique<CmdTransformArea>(this, a->GetID(), oldExt, oldNeZ, oldSwZ, newExt, newNeZ, newSwZ, "Nudge Area"));
+            } else {
+                a->SetExtent(newExt);
+                a->SetCornerHeights(newNeZ, newSwZ);
+                SetModified(true);
+                RebuildNavRenderer();
+            }
+            ShowToast("Nudged Area #" + std::to_string(a->GetID()) + " by grid size (" + std::to_string((int)m_gridSize) + "u)");
+        }
+    } else if (m_selectedEntityIndex >= 0) {
+        EditorEntity* ent = GetSelectedEntity();
+        if (ent) {
+            ent->origin += delta;
+            ent->worldMins += delta;
+            ent->worldMaxs += delta;
+            SetModified(true);
+            ShowToast("Nudged Entity #" + std::to_string(m_selectedEntityIndex) + " by grid size (" + std::to_string((int)m_gridSize) + "u)");
+        }
+    }
 }
 
 void EditorScene::CacheWaypoint(uint32_t id) {
@@ -1032,8 +1501,7 @@ uint32_t EditorScene::OnPenClick(const Ray& ray) {
     uint32_t hitWpt = ScenePicker::PickWaypoint(*this, ray, &dist);
     if (hitWpt != 0) {
         if (m_penLastWaypointId != 0 && m_penLastWaypointId != hitWpt) {
-            m_waypoints.ConnectNodes(m_penLastWaypointId, hitWpt, true, WPT_CONN_NONE);
-            m_isModified = true;
+            ConnectSelectedWaypointTo(hitWpt, WPT_CONN_NONE, true);
         }
         m_penLastWaypointId = hitWpt;
         m_selectedWaypointId = hitWpt;
@@ -1058,12 +1526,23 @@ uint32_t EditorScene::OnPenClick(const Ray& ray) {
         m_waypoints.ConnectNodes(m_penLastWaypointId, newId, true, WPT_CONN_NONE);
     }
 
+    if (m_cmdMgr) {
+        WaypointNode copy = *newNode;
+        std::vector<WaypointIncomingLink> inc;
+        if (m_penLastWaypointId != 0) {
+            inc.push_back({ m_penLastWaypointId, WPT_CONN_NONE });
+        }
+        m_waypoints.RemoveNode(newId);
+        m_cmdMgr->ExecuteCommand(std::make_unique<CmdAddWaypoint>(this, copy, inc));
+    } else {
+        m_isModified = true;
+        RebuildWaypointRenderer();
+    }
+
     m_penLastWaypointId = newId;
     m_selectedWaypointId = newId;
     m_selectedWaypointIds.clear();
     m_selectedWaypointIds.insert(newId);
-    m_isModified = true;
-    RebuildWaypointRenderer();
     ShowToast("Pen placed Waypoint #" + std::to_string(newId));
     return newId;
 }

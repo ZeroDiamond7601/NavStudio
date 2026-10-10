@@ -45,6 +45,21 @@ WaypointNode* WaypointGraph::AddNode(const Vector3& origin, uint32_t flags, floa
     return &m_nodes.back();
 }
 
+WaypointNode* WaypointGraph::InsertNode(const WaypointNode& node) {
+    auto it = std::find_if(m_nodes.begin(), m_nodes.end(), [&node](const WaypointNode& n) {
+        return n.id == node.id;
+    });
+    if (it != m_nodes.end()) {
+        *it = node;
+        return &(*it);
+    }
+    m_nodes.push_back(node);
+    if (node.id >= m_nextId) {
+        m_nextId = node.id + 1;
+    }
+    return &m_nodes.back();
+}
+
 bool WaypointGraph::RemoveNode(uint32_t id) {
     auto it = std::find_if(m_nodes.begin(), m_nodes.end(), [id](const WaypointNode& n) {
         return n.id == id;

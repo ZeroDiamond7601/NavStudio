@@ -49,3 +49,12 @@ push.bat
 # Runtime config & state
 imgui.ini
 navstudio_recent.txt
+navstudio_prefs.ini
+
+# Screenshots, archives & test maps
+*.bmp
+*.zip
+bin_v*/
+*.ewp
+dust2_*
+test_map.*

@@ -2369,6 +2369,12 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
             return;
         }
 
+        if (scene.HasSelectedWaypointConnection()) {
+            RenderWaypointConnectionInspector(scene, cmdMgr);
+            ImGui::End();
+            return;
+        }
+
         if (scene.GetSelectedLadderID() != 0) {
             RenderLadderInspector(scene, cmdMgr);
             ImGui::End();
@@ -3587,11 +3593,8 @@ void EditorUI::RenderAboutModal() {
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "Developer & Community:");
-        ImGui::BulletText("Author: Zero (ZeroDiamond7601 / zerodiamond.)");
-        ImGui::BulletText("Community: Born2Kill (B2K Community Founder)");
-        ImGui::BulletText("Discord: https://discord.born2kill.eu/");
-        ImGui::BulletText("CS 1.6 Zombie Plague Server: 145.239.138.236:27015");
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "Author & Profile:");
+        ImGui::BulletText("Developer: Zero (ZeroDiamond7601 / zerodiamond.)");
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -3600,16 +3603,8 @@ void EditorUI::RenderAboutModal() {
         ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Official Source & Distribution:");
         ImGui::Text("GitHub Repository:");
         ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "https://github.com/ZeroDiamond7601/NavStudio");
-        if (ImGui::Button("Copy GitHub URL", ImVec2(160, 24))) {
+        if (ImGui::Button("Copy GitHub URL to Clipboard", ImVec2(240, 24))) {
             ImGui::SetClipboardText("https://github.com/ZeroDiamond7601/NavStudio");
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Copy Discord Invite", ImVec2(160, 24))) {
-            ImGui::SetClipboardText("https://discord.born2kill.eu/");
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Copy Server IP", ImVec2(140, 24))) {
-            ImGui::SetClipboardText("145.239.138.236:27015");
         }
 
         ImGui::Spacing();

@@ -40,7 +40,9 @@ bool WaypointRenderer::BuildFromGraph(
     bool penPreviewClear,
     const std::vector<uint32_t>* ghostBotPath,
     const Vector3* ghostBotPos,
-    float ghostBotYaw
+    float ghostBotYaw,
+    uint32_t selectedConnFrom,
+    uint32_t selectedConnTo
 ) {
     Clear();
     if (graph.IsEmpty() && !penPreviewStart && !ghostBotPos) return false;
@@ -399,6 +401,12 @@ bool WaypointRenderer::BuildFromGraph(
                     lr = 1.0f; lg = 0.90f; lb = 0.15f; // Yellow: Two-way bothways
                 }
 
+                bool isSelectedConn = (selectedConnFrom == node.id && selectedConnTo == target->id) ||
+                                      (targetHasReverse && selectedConnFrom == target->id && selectedConnTo == node.id);
+                if (isSelectedConn) {
+                    lr = 0.10f; lg = 1.0f; lb = 1.0f; la = 1.0f; // Glowing Cyan when selected
+                }
+
                 // Render main link line
                 uint32_t lBase = static_cast<uint32_t>(vertices.size());
                 vertices.push_back({ startPt.x, startPt.y, startPt.z, 0,0,1, 0,0, lr, lg, lb, la });
@@ -406,39 +414,72 @@ bool WaypointRenderer::BuildFromGraph(
                 indices.push_back(lBase + 0);
                 indices.push_back(lBase + 1);
 
+                if (isSelectedConn) {
+                    // Draw extra halo line for selected connection
+                    uint32_t hBase = static_cast<uint32_t>(vertices.size());
+                    vertices.push_back({ startPt.x, startPt.y, startPt.z + 1.5f, 0,0,1, 0,0, 1.0f, 1.0f, 1.0f, 1.0f });
+                    vertices.push_back({ endPt.x, endPt.y, endPt.z + 1.5f, 0,0,1, 0,0, 1.0f, 1.0f, 1.0f, 1.0f });
+                    indices.push_back(hBase + 0);
+                    indices.push_back(hBase + 1);
+                }
+
                 Vector3 fwd = (endPt - startPt).Normalized();
                 Vector3 worldUp(0, 0, 1);
                 Vector3 side = fwd.Cross(worldUp);
                 if (side.Length() < 0.01f) side = Vector3(1, 0, 0);
                 else side = side.Normalized();
 
-                // Directional markers along the link:
+                auto DrawArrowHead = [&](const Vector3& tip, const Vector3& dir, const Vector3& lat, float len, float width, float ar, float ag, float ab, float aa) {
+                    Vector3 base = tip - dir * len;
+                    Vector3 w1 = base + lat * width;
+                    Vector3 w2 = base - lat * width;
+                    Vector3 up = lat.Cross(dir).Normalized();
+                    Vector3 w3 = base + up * (width * 0.7f);
+                    Vector3 w4 = base - up * (width * 0.7f);
+
+                    uint32_t aBase = static_cast<uint32_t>(vertices.size());
+                    vertices.push_back({ tip.x, tip.y, tip.z, 0,0,1, 0,0, ar, ag, ab, aa });
+                    vertices.push_back({ w1.x, w1.y, w1.z, 0,0,1, 0,0, ar, ag, ab, aa });
+                    vertices.push_back({ w2.x, w2.y, w2.z, 0,0,1, 0,0, ar, ag, ab, aa });
+                    vertices.push_back({ w3.x, w3.y, w3.z, 0,0,1, 0,0, ar, ag, ab, aa });
+                    vertices.push_back({ w4.x, w4.y, w4.z, 0,0,1, 0,0, ar, ag, ab, aa });
+                    vertices.push_back({ base.x, base.y, base.z, 0,0,1, 0,0, ar, ag, ab, aa * 0.75f });
+
+                    indices.push_back(aBase + 0); indices.push_back(aBase + 1);
+                    indices.push_back(aBase + 0); indices.push_back(aBase + 2);
+                    indices.push_back(aBase + 0); indices.push_back(aBase + 3);
+                    indices.push_back(aBase + 0); indices.push_back(aBase + 4);
+
+                    indices.push_back(aBase + 1); indices.push_back(aBase + 3);
+                    indices.push_back(aBase + 3); indices.push_back(aBase + 2);
+                    indices.push_back(aBase + 2); indices.push_back(aBase + 4);
+                    indices.push_back(aBase + 4); indices.push_back(aBase + 1);
+
+                    indices.push_back(aBase + 1); indices.push_back(aBase + 5);
+                    indices.push_back(aBase + 2); indices.push_back(aBase + 5);
+                };
+
+                // Directional 3D arrow visualizers along the link:
                 if (!targetHasReverse) {
-                    // One-way link: draw 2 forward-pointing chevrons along path (at 38% and 72%)
-                    const float fractions[2] = { 0.38f, 0.72f };
-                    for (int f = 0; f < 2; ++f) {
-                        Vector3 mid = startPt + (endPt - startPt) * fractions[f];
-                        Vector3 a1 = mid - fwd * 9.0f + side * 5.0f;
-                        Vector3 a2 = mid - fwd * 9.0f - side * 5.0f;
-                        uint32_t arrBase = static_cast<uint32_t>(vertices.size());
-                        vertices.push_back({ mid.x, mid.y, mid.z, 0,0,1, 0,0, lr, lg, lb, 1.0f });
-                        vertices.push_back({ a1.x, a1.y, a1.z, 0,0,1, 0,0, lr, lg, lb, 1.0f });
-                        vertices.push_back({ a2.x, a2.y, a2.z, 0,0,1, 0,0, lr, lg, lb, 1.0f });
-                        indices.push_back(arrBase + 0); indices.push_back(arrBase + 1);
-                        indices.push_back(arrBase + 0); indices.push_back(arrBase + 2);
-                    }
+                    // One-way link: draw 2 forward-pointing 3D arrows along path (at 35% and 70%)
+                    DrawArrowHead(startPt + (endPt - startPt) * 0.35f, fwd, side, 13.0f, 6.0f, lr, lg, lb, 1.0f);
+                    DrawArrowHead(startPt + (endPt - startPt) * 0.70f, fwd, side, 13.0f, 6.0f, lr, lg, lb, 1.0f);
                 } else {
-                    // Two-way link: draw bidirectional diamond at link midpoint
+                    // Two-way link: draw dual opposing 3D arrows (forward at 65%, backward at 35%)
+                    DrawArrowHead(startPt + (endPt - startPt) * 0.65f, fwd, side, 12.0f, 5.5f, lr, lg, lb, 1.0f);
+                    DrawArrowHead(startPt + (endPt - startPt) * 0.35f, -fwd, side, 12.0f, 5.5f, lr, lg, lb, 1.0f);
+
+                    // Midpoint diamond
                     Vector3 mid = (startPt + endPt) * 0.5f;
                     Vector3 dFwd = mid + fwd * 6.0f;
                     Vector3 dBack = mid - fwd * 6.0f;
                     Vector3 dRight = mid + side * 4.5f;
                     Vector3 dLeft = mid - side * 4.5f;
                     uint32_t dBase = static_cast<uint32_t>(vertices.size());
-                    vertices.push_back({ dFwd.x, dFwd.y, dFwd.z, 0,0,1, 0,0, lr, lg, lb, 0.85f });
-                    vertices.push_back({ dRight.x, dRight.y, dRight.z, 0,0,1, 0,0, lr, lg, lb, 0.85f });
-                    vertices.push_back({ dBack.x, dBack.y, dBack.z, 0,0,1, 0,0, lr, lg, lb, 0.85f });
-                    vertices.push_back({ dLeft.x, dLeft.y, dLeft.z, 0,0,1, 0,0, lr, lg, lb, 0.85f });
+                    vertices.push_back({ dFwd.x, dFwd.y, dFwd.z, 0,0,1, 0,0, lr, lg, lb, 0.90f });
+                    vertices.push_back({ dRight.x, dRight.y, dRight.z, 0,0,1, 0,0, lr, lg, lb, 0.90f });
+                    vertices.push_back({ dBack.x, dBack.y, dBack.z, 0,0,1, 0,0, lr, lg, lb, 0.90f });
+                    vertices.push_back({ dLeft.x, dLeft.y, dLeft.z, 0,0,1, 0,0, lr, lg, lb, 0.90f });
                     indices.push_back(dBase + 0); indices.push_back(dBase + 1);
                     indices.push_back(dBase + 1); indices.push_back(dBase + 2);
                     indices.push_back(dBase + 2); indices.push_back(dBase + 3);

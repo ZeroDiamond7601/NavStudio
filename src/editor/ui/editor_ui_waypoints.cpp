@@ -1,6 +1,7 @@
 #include "editor/ui/editor_ui.h"
 #include "editor/scene/editor_scene.h"
 #include "editor/commands/command.h"
+#include "editor/commands/waypoint_commands.h"
 #include "editor/ui/file_dialog.h"
 #include "waypoint/waypoint_types.h"
 #include <imgui.h>
@@ -10,7 +11,7 @@
 #include <cmath>
 #include <string>
 
-void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmdMgr*/) {
+void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& cmdMgr) {
     uint32_t selId = scene.GetSelectedWaypointID();
     WaypointNode* node = scene.GetWaypoints().GetNode(selId);
     if (!node) {
@@ -42,13 +43,21 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
 
     float pos[3] = { node->origin.x, node->origin.y, node->origin.z };
     if (DrawNudgeFloat3("Origin", pos, m_nudgeStepLinear)) {
-        node->origin = Vector3(pos[0], pos[1], pos[2]);
-        scene.RebuildWaypointRenderer();
+        Vector3 newPos(pos[0], pos[1], pos[2]);
+        cmdMgr.ExecuteCommand(std::make_unique<CmdMoveWaypoint>(&scene, node->id, node->origin, newPos));
     }
 
     // Radius
+    float oldRadius = node->radius;
     if (DrawNudgeFloat("Radius", &node->radius, 8.0f, 0.0f, 255.0f, "%.0f u")) {
-        scene.RebuildWaypointRenderer();
+        float newRadius = node->radius;
+        node->radius = oldRadius;
+        cmdMgr.ExecuteCommand(std::make_unique<CmdSetWaypointProps>(&scene, node->id,
+            node->flags, node->flags,
+            oldRadius, newRadius,
+            node->mesh, node->mesh,
+            node->campPitch, node->campPitch,
+            node->campYaw, node->campYaw));
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Navigation tolerance zone around node (0-255 units)");
@@ -62,8 +71,13 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
         std::snprintf(lbl, sizeof(lbl), "%.0f##insp_rad%d", rPresets[i], i);
         if (std::abs(node->radius - rPresets[i]) < 0.1f) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.50f, 0.15f, 1.0f));
         if (ImGui::Button(lbl, ImVec2(rBtnW, 20))) {
-            node->radius = rPresets[i];
-            scene.RebuildWaypointRenderer();
+            float newRadius = rPresets[i];
+            cmdMgr.ExecuteCommand(std::make_unique<CmdSetWaypointProps>(&scene, node->id,
+                node->flags, node->flags,
+                node->radius, newRadius,
+                node->mesh, node->mesh,
+                node->campPitch, node->campPitch,
+                node->campYaw, node->campYaw));
         }
         if (std::abs(node->radius - rPresets[i]) < 0.1f) ImGui::PopStyleColor();
     }
@@ -73,8 +87,13 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
         std::snprintf(lbl, sizeof(lbl), "%.0f##insp_rad%d", rPresets[i], i);
         if (std::abs(node->radius - rPresets[i]) < 0.1f) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.50f, 0.15f, 1.0f));
         if (ImGui::Button(lbl, ImVec2(rBtnW, 20))) {
-            node->radius = rPresets[i];
-            scene.RebuildWaypointRenderer();
+            float newRadius = rPresets[i];
+            cmdMgr.ExecuteCommand(std::make_unique<CmdSetWaypointProps>(&scene, node->id,
+                node->flags, node->flags,
+                node->radius, newRadius,
+                node->mesh, node->mesh,
+                node->campPitch, node->campPitch,
+                node->campYaw, node->campYaw));
         }
         if (std::abs(node->radius - rPresets[i]) < 0.1f) ImGui::PopStyleColor();
     }
@@ -89,19 +108,51 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
     // Camp Pitch & Yaw
     ImGui::Spacing();
     ImGui::Text("Aim / Camp Orientation:");
+    float oldPitch = node->campPitch;
     if (DrawNudgeAngle("Pitch", &node->campPitch, m_nudgeStepAngular, -89.0f, 89.0f)) {
-        scene.RebuildWaypointRenderer();
+        float newPitch = node->campPitch;
+        node->campPitch = oldPitch;
+        cmdMgr.ExecuteCommand(std::make_unique<CmdSetWaypointProps>(&scene, node->id,
+            node->flags, node->flags,
+            node->radius, node->radius,
+            node->mesh, node->mesh,
+            oldPitch, newPitch,
+            node->campYaw, node->campYaw));
     }
+    float oldYaw = node->campYaw;
     if (DrawNudgeAngle("Yaw", &node->campYaw, m_nudgeStepAngular, 0.0f, 360.0f, true)) {
-        scene.RebuildWaypointRenderer();
+        float newYaw = node->campYaw;
+        node->campYaw = oldYaw;
+        cmdMgr.ExecuteCommand(std::make_unique<CmdSetWaypointProps>(&scene, node->id,
+            node->flags, node->flags,
+            node->radius, node->radius,
+            node->mesh, node->mesh,
+            node->campPitch, node->campPitch,
+            oldYaw, newYaw));
     }
-    if (ImGui::Button("0 deg (E)", ImVec2(50, 20))) { node->campYaw = 0.0f; scene.RebuildWaypointRenderer(); }
+    if (ImGui::Button("0 deg (E)", ImVec2(50, 20))) {
+        cmdMgr.ExecuteCommand(std::make_unique<CmdSetWaypointProps>(&scene, node->id,
+            node->flags, node->flags, node->radius, node->radius, node->mesh, node->mesh,
+            node->campPitch, node->campPitch, node->campYaw, 0.0f));
+    }
     ImGui::SameLine();
-    if (ImGui::Button("90 deg (N)", ImVec2(50, 20))) { node->campYaw = 90.0f; scene.RebuildWaypointRenderer(); }
+    if (ImGui::Button("90 deg (N)", ImVec2(50, 20))) {
+        cmdMgr.ExecuteCommand(std::make_unique<CmdSetWaypointProps>(&scene, node->id,
+            node->flags, node->flags, node->radius, node->radius, node->mesh, node->mesh,
+            node->campPitch, node->campPitch, node->campYaw, 90.0f));
+    }
     ImGui::SameLine();
-    if (ImGui::Button("180 deg (W)", ImVec2(50, 20))) { node->campYaw = 180.0f; scene.RebuildWaypointRenderer(); }
+    if (ImGui::Button("180 deg (W)", ImVec2(50, 20))) {
+        cmdMgr.ExecuteCommand(std::make_unique<CmdSetWaypointProps>(&scene, node->id,
+            node->flags, node->flags, node->radius, node->radius, node->mesh, node->mesh,
+            node->campPitch, node->campPitch, node->campYaw, 180.0f));
+    }
     ImGui::SameLine();
-    if (ImGui::Button("270 deg (S)", ImVec2(50, 20))) { node->campYaw = 270.0f; scene.RebuildWaypointRenderer(); }
+    if (ImGui::Button("270 deg (S)", ImVec2(50, 20))) {
+        cmdMgr.ExecuteCommand(std::make_unique<CmdSetWaypointProps>(&scene, node->id,
+            node->flags, node->flags, node->radius, node->radius, node->mesh, node->mesh,
+            node->campPitch, node->campPitch, node->campYaw, 270.0f));
+    }
 
     int meshVal = static_cast<int>(node->mesh);
     if (ImGui::SliderInt("Mesh Group", &meshVal, 0, 255)) {
@@ -117,9 +168,14 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
     auto FlagBox = [&](const char* label, uint32_t flag, const char* tip = nullptr) {
         bool checked = (node->flags & flag) != 0;
         if (ImGui::Checkbox(label, &checked)) {
-            if (checked) node->flags |= flag;
-            else node->flags &= ~flag;
-            scene.RebuildWaypointRenderer();
+            uint32_t oldFlags = node->flags;
+            uint32_t newFlags = checked ? (oldFlags | flag) : (oldFlags & ~flag);
+            cmdMgr.ExecuteCommand(std::make_unique<CmdSetWaypointProps>(&scene, node->id,
+                oldFlags, newFlags,
+                node->radius, node->radius,
+                node->mesh, node->mesh,
+                node->campPitch, node->campPitch,
+                node->campYaw, node->campYaw));
         }
         if (tip && ImGui::IsItemHovered()) {
             ImGui::SetTooltip("%s", tip);
@@ -271,6 +327,14 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
 
     if (ImGui::Button("Start Pen Path from this Node", ImVec2(-1, 22))) {
         scene.SetPenToolActive(true);
+    }
+
+    if (ImGui::Button("Duplicate Waypoint [Shift+D]", ImVec2(-1, 24))) {
+        scene.DuplicateSelectedWaypoints();
+    }
+
+    if (ImGui::Button("Connect Mode [C]", ImVec2(-1, 24))) {
+        scene.ToggleWaypointConnectMode();
     }
 
     if (ImGui::Button("Snap to Floor [Space]", ImVec2(-1, 24))) {
@@ -978,15 +1042,7 @@ void EditorUI::RenderWaypointMultiInspector(EditorScene& scene, CommandManager& 
     float nBtnW = 42.0f;
     ImGui::Text("Nudge Position (+/- %.0fu):", batchStep);
     auto BatchNudge = [&](float dx, float dy, float dz) {
-        for (uint32_t id : selIds) {
-            WaypointNode* n = scene.GetWaypoints().GetNode(id);
-            if (n) {
-                n->origin.x += dx;
-                n->origin.y += dy;
-                n->origin.z += dz;
-            }
-        }
-        scene.RebuildWaypointRenderer();
+        scene.NudgeSelection(dx, dy, dz);
     };
     if (ImGui::Button("-X##bn", ImVec2(nBtnW, 20))) BatchNudge(-batchStep, 0.0f, 0.0f);
     ImGui::SameLine();
@@ -1002,32 +1058,156 @@ void EditorUI::RenderWaypointMultiInspector(EditorScene& scene, CommandManager& 
 
     ImGui::Spacing();
     ImGui::Separator();
+    ImGui::Text("Align Coordinates (Hammer Style):");
+    float aBtnW = (ImGui::GetContentRegionAvail().x - 8.0f) / 3.0f;
+    if (ImGui::Button("Min X##aw", ImVec2(aBtnW, 20))) scene.AlignSelectedWaypoints(EditorScene::WaypointAlignMode::MinX);
+    ImGui::SameLine();
+    if (ImGui::Button("Center X##aw", ImVec2(aBtnW, 20))) scene.AlignSelectedWaypoints(EditorScene::WaypointAlignMode::CenterX);
+    ImGui::SameLine();
+    if (ImGui::Button("Max X##aw", ImVec2(aBtnW, 20))) scene.AlignSelectedWaypoints(EditorScene::WaypointAlignMode::MaxX);
+
+    if (ImGui::Button("Min Y##aw", ImVec2(aBtnW, 20))) scene.AlignSelectedWaypoints(EditorScene::WaypointAlignMode::MinY);
+    ImGui::SameLine();
+    if (ImGui::Button("Center Y##aw", ImVec2(aBtnW, 20))) scene.AlignSelectedWaypoints(EditorScene::WaypointAlignMode::CenterY);
+    ImGui::SameLine();
+    if (ImGui::Button("Max Y##aw", ImVec2(aBtnW, 20))) scene.AlignSelectedWaypoints(EditorScene::WaypointAlignMode::MaxY);
+
+    float zBtnW = (ImGui::GetContentRegionAvail().x - 4.0f) * 0.5f;
+    if (ImGui::Button("Floor Z (Lowest)##aw", ImVec2(zBtnW, 20))) scene.AlignSelectedWaypoints(EditorScene::WaypointAlignMode::FloorZ);
+    ImGui::SameLine();
+    if (ImGui::Button("Average Z (Flatten)##aw", ImVec2(zBtnW, 20))) scene.AlignSelectedWaypoints(EditorScene::WaypointAlignMode::AverageZ);
+
+    ImGui::Spacing();
+    ImGui::Separator();
     ImGui::Text("Batch Operations:");
 
-    if (ImGui::Button("Connect Selected in Consecutive Chain", ImVec2(-1, 24))) {
-        scene.BatchConnectSelectedWaypoints(true);
+    if (ImGui::Button("Duplicate Selected Waypoints [Shift+D]", ImVec2(-1, 24))) {
+        scene.DuplicateSelectedWaypoints();
     }
     if (selIds.size() == 2) {
+        if (ImGui::Button("Bridge Intermediate Waypoints [B]", ImVec2(-1, 24))) {
+            scene.BridgeSelectedWaypoints();
+        }
         if (ImGui::Button("Create Ladder Pair (Enforce 0-radius)", ImVec2(-1, 24))) {
             scene.CreateLadderPairFromSelected();
         }
     }
-    if (ImGui::Button("Snap Selected to BSP Floor", ImVec2(-1, 24))) {
+    if (ImGui::Button("Connect Selected in Consecutive Chain", ImVec2(-1, 24))) {
+        scene.BatchConnectSelectedWaypoints(true);
+    }
+    if (ImGui::Button("Snap Selected to BSP Floor [Space]", ImVec2(-1, 24))) {
         scene.BatchSnapWaypointsToFloor();
     }
     if (ImGui::Button("Invert Selection", ImVec2(-1, 22))) {
         scene.InvertWaypointSelection();
     }
-    if (ImGui::Button("Clear Selection", ImVec2(-1, 22))) {
+    if (ImGui::Button("Clear Selection [Esc]", ImVec2(-1, 22))) {
         scene.ClearWaypointSelection();
     }
 
     ImGui::Spacing();
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.15f, 0.15f, 1.0f));
     char delLabel[64];
-    std::snprintf(delLabel, sizeof(delLabel), "Delete %zu Selected Waypoints", selIds.size());
+    std::snprintf(delLabel, sizeof(delLabel), "Delete %zu Selected Waypoints [Delete]", selIds.size());
     if (ImGui::Button(delLabel, ImVec2(-1, 26))) {
         scene.BatchDeleteWaypoints();
+    }
+    ImGui::PopStyleColor();
+}
+
+void EditorUI::RenderWaypointConnectionInspector(EditorScene& scene, CommandManager& /*cmdMgr*/) {
+    const auto& conn = scene.GetSelectedWaypointConnection();
+    if (!conn.valid()) return;
+
+    auto* fromNode = scene.GetWaypoints().GetNode(conn.fromId);
+    auto* toNode = scene.GetWaypoints().GetNode(conn.toId);
+    if (!fromNode || !toNode) {
+        scene.ClearSelectedWaypointConnection();
+        return;
+    }
+
+    bool isTwoWay = toNode->HasConnectionTo(static_cast<int16_t>(conn.fromId));
+    float dist = (toNode->origin - fromNode->origin).Length();
+
+    ImGui::TextColored(ImVec4(0.2f, 0.9f, 1.0f, 1.0f), "[WAYPOINT LINK INSPECTOR]");
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::Text("From Node: #%u (%.1f, %.1f, %.1f)", fromNode->id, fromNode->origin.x, fromNode->origin.y, fromNode->origin.z);
+    ImGui::SameLine();
+    char fLbl[32];
+    std::snprintf(fLbl, sizeof(fLbl), "Select##from_%u", fromNode->id);
+    if (ImGui::SmallButton(fLbl)) {
+        scene.SelectWaypoint(fromNode->id, false);
+    }
+
+    ImGui::Text("To Node:   #%u (%.1f, %.1f, %.1f)", toNode->id, toNode->origin.x, toNode->origin.y, toNode->origin.z);
+    ImGui::SameLine();
+    char tLbl[32];
+    std::snprintf(tLbl, sizeof(tLbl), "Select##to_%u", toNode->id);
+    if (ImGui::SmallButton(tLbl)) {
+        scene.SelectWaypoint(toNode->id, false);
+    }
+
+    ImGui::Text("Link Distance: %.1f units", dist);
+    if (isTwoWay) {
+        ImGui::TextColored(ImVec4(1.0f, 0.9f, 0.2f, 1.0f), "Topology: Bidirectional <-> (2-Way)");
+    } else {
+        ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.9f, 1.0f), "Topology: Unidirectional -> (1-Way Outgoing)");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "Traversal Flags:");
+
+    uint16_t curFlags = WPT_CONN_NONE;
+    for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+        if (fromNode->connections[c] == static_cast<int16_t>(toNode->id)) {
+            curFlags = fromNode->connectionFlags[c];
+            break;
+        }
+    }
+
+    bool fJump = (curFlags & WPT_CONN_JUMP) != 0;
+    bool fDouble = (curFlags & WPT_CONN_DOUBLE) != 0;
+    bool fCrouch = (curFlags & WPT_CONN_CROUCH) != 0;
+    bool fVisible = (curFlags & WPT_CONN_VISIBLE) != 0;
+
+    bool flagsChanged = false;
+    if (ImGui::Checkbox("Requires Jump (WPT_CONN_JUMP)", &fJump)) flagsChanged = true;
+    if (ImGui::Checkbox("Requires Double Jump (WPT_CONN_DOUBLE)", &fDouble)) flagsChanged = true;
+    if (ImGui::Checkbox("Requires Crouch Ducking (WPT_CONN_CROUCH)", &fCrouch)) flagsChanged = true;
+    if (ImGui::Checkbox("Requires Clear Line-of-Sight (WPT_CONN_VISIBLE)", &fVisible)) flagsChanged = true;
+
+    if (flagsChanged) {
+        uint16_t newFlags = WPT_CONN_NONE;
+        if (fJump) newFlags |= WPT_CONN_JUMP;
+        if (fDouble) newFlags |= WPT_CONN_DOUBLE;
+        if (fCrouch) newFlags |= WPT_CONN_CROUCH;
+        if (fVisible) newFlags |= WPT_CONN_VISIBLE;
+        scene.SetSelectedWaypointConnectionFlags(newFlags);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Text("Link Operations:");
+
+    if (ImGui::Button(isTwoWay ? "Convert to 1-Way (Unidirectional)" : "Convert to 2-Way (Bidirectional)", ImVec2(-1, 24))) {
+        scene.ToggleSelectedWaypointConnectionBidirectional();
+    }
+
+    if (ImGui::Button("Reverse Traversal Direction (R)", ImVec2(-1, 24))) {
+        scene.ReverseSelectedWaypointConnection();
+    }
+
+    if (ImGui::Button("Deselect Link (Esc)", ImVec2(-1, 22))) {
+        scene.ClearSelectedWaypointConnection();
+    }
+
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.15f, 0.15f, 1.0f));
+    if (ImGui::Button("Delete Connection Link (Del / Backspace)", ImVec2(-1, 26))) {
+        scene.DeleteSelectedWaypointConnection();
     }
     ImGui::PopStyleColor();
 }
