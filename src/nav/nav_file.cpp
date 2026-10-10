@@ -478,6 +478,35 @@ void NavMesh::BuildLadders(const BSPFile* bsp) {
         ladder->topForwardArea = m_grid.GetNearestArea(ladder->top, 200.0f);
         ladder->bottomArea = m_grid.GetNearestArea(ladder->bottom, 200.0f);
 
+        // Connect adjacent navigation areas across the ladder for bot traversal
+        if (ladder->bottomArea && ladder->topForwardArea && ladder->bottomArea != ladder->topForwardArea) {
+            if (!ladder->bottomArea->IsConnected(ladder->topForwardArea, ladder->dir)) {
+                ladder->bottomArea->ConnectTo(ladder->topForwardArea, ladder->dir);
+            }
+            NavDirType oppDir = static_cast<NavDirType>((ladder->dir + 2) % 4);
+            if (!ladder->topForwardArea->IsConnected(ladder->bottomArea, oppDir)) {
+                ladder->topForwardArea->ConnectTo(ladder->bottomArea, oppDir);
+            }
+        }
+
+        Vector3 topBehind = ladder->top;
+        switch (ladder->dir) {
+            case NAV_DIR_NORTH: topBehind.y += 32.0f; break;
+            case NAV_DIR_SOUTH: topBehind.y -= 32.0f; break;
+            case NAV_DIR_EAST:  topBehind.x -= 32.0f; break;
+            case NAV_DIR_WEST:  topBehind.x += 32.0f; break;
+        }
+        ladder->topBehindArea = m_grid.GetNearestArea(topBehind, 150.0f);
+        if (ladder->topBehindArea && ladder->bottomArea && ladder->topBehindArea != ladder->bottomArea) {
+            if (!ladder->bottomArea->IsConnected(ladder->topBehindArea, ladder->dir)) {
+                ladder->bottomArea->ConnectTo(ladder->topBehindArea, ladder->dir);
+            }
+            NavDirType oppDir = static_cast<NavDirType>((ladder->dir + 2) % 4);
+            if (!ladder->topBehindArea->IsConnected(ladder->bottomArea, oppDir)) {
+                ladder->topBehindArea->ConnectTo(ladder->bottomArea, oppDir);
+            }
+        }
+
         m_ladders.push_back(ladder);
     }
 }

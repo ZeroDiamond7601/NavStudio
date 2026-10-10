@@ -50,6 +50,9 @@ EditorScene::~EditorScene() {
     if (m_waypointGenThread.joinable()) {
         m_waypointGenThread.join();
     }
+    if (m_waypointTaskThread.joinable()) {
+        m_waypointTaskThread.join();
+    }
     if (m_navGenThread.joinable()) {
         m_navGenThread.join();
     }
@@ -4651,7 +4654,9 @@ bool EditorScene::StartFullMapNavGeneration(float stepHeight, float maxJump, flo
 
         NavGenerateResult res = NavGenerator::Generate(*m_bsp, *newNav, options, progressCb);
         if (res.success) {
+            newNav->BuildLadders(m_bsp.get());
             m_nav = std::move(newNav);
+            PostGenerateOptimize();
             m_navGenProgress.success = true;
             m_navGenProgress.generatedAreas = res.areasGenerated;
             m_navGenProgress.statusMessage = "Complete! " + std::to_string(res.areasGenerated) + " areas generated.";

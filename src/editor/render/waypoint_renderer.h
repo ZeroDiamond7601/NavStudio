@@ -2,6 +2,7 @@
 #define WAYPOINT_RENDERER_H
 
 #include <vector>
+#include <unordered_set>
 #include <cstdint>
 #include "editor/glad/include/glad/glad.h"
 #include "waypoint/waypoint_graph.h"
@@ -20,7 +21,18 @@ public:
     WaypointRenderer();
     ~WaypointRenderer();
 
-    bool BuildFromGraph(const WaypointGraph& graph, uint32_t selectedId = 0, uint32_t hoveredId = 0);
+    bool BuildFromGraph(
+        const WaypointGraph& graph,
+        uint32_t selectedId = 0,
+        uint32_t hoveredId = 0,
+        const std::unordered_set<uint32_t>* selectedSet = nullptr,
+        const Vector3* penPreviewStart = nullptr,
+        const Vector3* penPreviewEnd = nullptr,
+        bool penPreviewClear = true,
+        const std::vector<uint32_t>* ghostBotPath = nullptr,
+        const Vector3* ghostBotPos = nullptr,
+        float ghostBotYaw = 0.0f
+    );
     void Clear();
 
     void Render(const Shader& lineShader, const Matrix4& mvp);

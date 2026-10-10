@@ -819,3 +819,33 @@ std::vector<uint32_t> ScenePicker::PickAreasInRect(
 
     return result;
 }
+
+std::vector<uint32_t> ScenePicker::PickWaypointsInRect(
+    const EditorScene& scene,
+    float rectMinX, float rectMinY,
+    float rectMaxX, float rectMaxY,
+    float viewportWidth, float viewportHeight,
+    const Matrix4& viewMatrix,
+    const Matrix4& projMatrix
+) {
+    std::vector<uint32_t> result;
+    if (!scene.HasWaypoints() || !scene.GetShowWaypoints()) return result;
+
+    Matrix4 viewProj = projMatrix * viewMatrix;
+    float rMinX = std::min(rectMinX, rectMaxX);
+    float rMaxX = std::max(rectMinX, rectMaxX);
+    float rMinY = std::min(rectMinY, rectMaxY);
+    float rMaxY = std::max(rectMinY, rectMaxY);
+
+    for (const auto& node : scene.GetWaypoints().GetNodes()) {
+        Vector3 testPos = node.origin + Vector3(0.0f, 0.0f, 16.0f);
+        ScreenPoint2D sp = ProjectToScreen(testPos, viewProj, viewportWidth, viewportHeight);
+        if (sp.valid) {
+            if (sp.x >= rMinX && sp.x <= rMaxX && sp.y >= rMinY && sp.y <= rMaxY) {
+                result.push_back(node.id);
+            }
+        }
+    }
+
+    return result;
+}

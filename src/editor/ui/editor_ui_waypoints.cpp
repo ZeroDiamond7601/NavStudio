@@ -237,12 +237,37 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
         }
     }
 
+    // Ladder and Ghost Bot shortcuts
+    if (ImGui::Button("Toggle Ladder Rung (Zero-Radius)", ImVec2(-1, 22))) {
+        if (node->flags & WPT_FLAG_LADDER) {
+            node->flags &= ~WPT_FLAG_LADDER;
+            node->radius = 32.0f;
+        } else {
+            node->flags |= WPT_FLAG_LADDER;
+            node->radius = 0.0f; // Critical zero-radius enforcement for ladders
+        }
+        scene.RebuildWaypointRenderer();
+    }
+
+    if (ImGui::Button("Set as Ghost Bot Start Point", ImVec2(-1, 22))) {
+        m_ghostBotInputStart = static_cast<int>(node->id);
+        m_showGhostBotModal = true;
+    }
+    if (ImGui::Button("Set as Ghost Bot Goal Point", ImVec2(-1, 22))) {
+        m_ghostBotInputGoal = static_cast<int>(node->id);
+        m_showGhostBotModal = true;
+    }
+
+    if (ImGui::Button("Start Pen Path from this Node", ImVec2(-1, 22))) {
+        scene.SetPenToolActive(true);
+    }
+
     if (ImGui::Button("Snap to Floor [Space]", ImVec2(-1, 24))) {
         scene.SnapSelectedWaypointToFloor();
     }
 
     if (ImGui::Button("Deselect [Escape]", ImVec2(-1, 24))) {
-        scene.SelectWaypoint(0);
+        scene.ClearWaypointSelection();
     }
 
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.25f, 0.2f, 1.0f));
@@ -299,7 +324,39 @@ void EditorUI::RenderWaypointGlobalInspector(EditorScene& scene, CommandManager&
 
     ImGui::Spacing();
     ImGui::Separator();
-    ImGui::Text("Global Actions:");
+    ImGui::Text("Interactive Drawing & Simulation:");
+
+    bool isPen = scene.IsPenToolActive();
+    if (isPen) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.9f, 0.5f, 0.1f, 1.0f));
+    if (ImGui::Button(isPen ? "Pen Tool Active (Click floor to place & chain)" : "Pen / Breadcrumb Tool (Chain Drawing)", ImVec2(-1, 26))) {
+        scene.TogglePenTool();
+    }
+    if (isPen) ImGui::PopStyleColor();
+
+    if (isPen) {
+        if (ImGui::Button("Finish / End Pen Stroke", ImVec2(-1, 22))) {
+            scene.EndPenStroke();
+        }
+    }
+
+    if (ImGui::Button("Ghost Bot Simulation & Path Auditor...", ImVec2(-1, 26))) {
+        m_showGhostBotModal = true;
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Text("BSP Map Extractions:");
+
+    if (ImGui::Button("Snap Objectives from BSP Entities", ImVec2(-1, 24))) {
+        scene.SnapObjectivesFromEntities();
+    }
+    if (ImGui::Button("Extract Ladders from BSP (func_ladder)", ImVec2(-1, 24))) {
+        scene.AssignLaddersFromBSP();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Text("Global Graph Actions:");
 
     if (ImGui::Button("Auto-Analyze Flags & Crouch...", ImVec2(-1, 24))) {
         m_waypointAnalyzerStats = scene.AutoAnalyzeWaypoints();
@@ -319,6 +376,9 @@ void EditorUI::RenderWaypointGlobalInspector(EditorScene& scene, CommandManager&
         size_t fixed = scene.GetWaypoints().FixWaypoints(scene.HasBSP() ? &scene.GetBSP() : nullptr);
         scene.ShowToast("Pruned / fixed " + std::to_string(fixed) + " invalid links!");
         scene.RebuildWaypointRenderer();
+    }
+    if (ImGui::Button("Generate Parkour & Jump Paths...", ImVec2(-1, 24))) {
+        m_showParkourModal = true;
     }
     if (ImGui::Button("Optimize Waypoint Graph...", ImVec2(-1, 24))) {
         m_showWaypointOptimizeModal = true;
@@ -667,11 +727,26 @@ void EditorUI::RenderWaypointOptimizeModal(EditorScene& scene, CommandManager& /
         ImGui::Separator();
         ImGui::Spacing();
 
-        if (ImGui::Button("Run Optimizer Now", ImVec2(160, 28))) {
-            if (scene.HasWaypoints()) {
-                m_waypointOptStats = scene.OptimizeWaypoints(m_waypointOptOptions);
-            } else {
-                scene.ShowToast("No waypoints loaded in graph!");
+        auto& task = scene.GetWaypointTaskProgress();
+        if (task.isRunning.load()) {
+            ImGui::Spacing();
+            ImGui::ProgressBar(task.progress.load(), ImVec2(-1, 24));
+            ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "%s", task.statusMessage.c_str());
+            ImGui::Spacing();
+        }
+
+        bool running = task.isRunning.load();
+        if (running) {
+            ImGui::BeginDisabled();
+            ImGui::Button("Optimizing...", ImVec2(160, 28));
+            ImGui::EndDisabled();
+        } else {
+            if (ImGui::Button("Run Optimizer Now", ImVec2(160, 28))) {
+                if (scene.HasWaypoints()) {
+                    scene.StartAsyncOptimizeWaypoints(m_waypointOptOptions);
+                } else {
+                    scene.ShowToast("No waypoints loaded in graph!");
+                }
             }
         }
         ImGui::SameLine();
@@ -811,12 +886,305 @@ void EditorUI::RenderParkourModal(EditorScene& scene, CommandManager& /*cmdMgr*/
         ImGui::Separator();
         ImGui::Spacing();
 
-        if (ImGui::Button("Generate Parkour Paths", ImVec2(180, 28))) {
-            m_parkourStats = scene.GenerateParkour(m_parkourOptions);
+        auto& task = scene.GetWaypointTaskProgress();
+        if (task.isRunning.load()) {
+            ImGui::Spacing();
+            ImGui::ProgressBar(task.progress.load(), ImVec2(-1, 24));
+            ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "%s", task.statusMessage.c_str());
+            ImGui::Spacing();
+        }
+
+        bool running = task.isRunning.load();
+        if (running) {
+            ImGui::BeginDisabled();
+            ImGui::Button("Generating...", ImVec2(180, 28));
+            ImGui::EndDisabled();
+        } else {
+            if (ImGui::Button("Generate Parkour Paths", ImVec2(180, 28))) {
+                scene.StartAsyncGenerateParkour(m_parkourOptions);
+            }
         }
         ImGui::SameLine();
         if (ImGui::Button("Close", ImVec2(90, 28))) {
             m_showParkourModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderWaypointMultiInspector(EditorScene& scene, CommandManager& /*cmdMgr*/) {
+    const auto& selIds = scene.GetSelectedWaypointIDs();
+    ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "Multi-Waypoint Selection: %zu Nodes", selIds.size());
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Batch Radius
+    ImGui::Text("Batch Wayzone Radius:");
+    static float batchRadius = 48.0f;
+    if (ImGui::SliderFloat("##BatchRadiusSlider", &batchRadius, 0.0f, 255.0f, "%.0f units")) {
+        scene.BatchSetWaypointRadius(batchRadius);
+    }
+    const float rPresets[] = { 0.0f, 16.0f, 32.0f, 48.0f, 64.0f, 96.0f };
+    for (int i = 0; i < 6; ++i) {
+        if (i > 0) ImGui::SameLine();
+        char lbl[16];
+        std::snprintf(lbl, sizeof(lbl), "%.0f##b_rad%d", rPresets[i], i);
+        if (ImGui::Button(lbl, ImVec2(40, 20))) {
+            batchRadius = rPresets[i];
+            scene.BatchSetWaypointRadius(batchRadius);
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Text("Batch Flag Assignment:");
+
+    auto FlagBtn = [&](const char* label, uint32_t flag) {
+        if (ImGui::Button(label, ImVec2(-1, 22))) {
+            scene.BatchSetWaypointFlags(flag, true);
+        }
+    };
+
+    if (ImGui::TreeNode("Tactical & Role Flags")) {
+        FlagBtn("Set WPT_FLAG_CAMP", WPT_FLAG_CAMP);
+        FlagBtn("Set WPT_FLAG_SNIPER", WPT_FLAG_SNIPER);
+        FlagBtn("Set WPT_FLAG_CROUCH", WPT_FLAG_CROUCH);
+        FlagBtn("Set WPT_FLAG_JUMP", WPT_FLAG_JUMP);
+        FlagBtn("Set WPT_FLAG_LADDER (0 radius)", WPT_FLAG_LADDER);
+        FlagBtn("Set WPT_FLAG_GOAL (Bomb/Rescue)", WPT_FLAG_GOAL);
+        FlagBtn("Set WPT_FLAG_RESCUE", WPT_FLAG_RESCUE);
+        FlagBtn("Set WPT_FLAG_TEAM_CT", WPT_FLAG_COUNTER);
+        FlagBtn("Set WPT_FLAG_TEAM_T", WPT_FLAG_TERRORIST);
+        ImGui::TreePop();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Text("Batch Operations:");
+
+    if (ImGui::Button("Connect Selected in Consecutive Chain", ImVec2(-1, 24))) {
+        scene.BatchConnectSelectedWaypoints(true);
+    }
+    if (selIds.size() == 2) {
+        if (ImGui::Button("Create Ladder Pair (Enforce 0-radius)", ImVec2(-1, 24))) {
+            scene.CreateLadderPairFromSelected();
+        }
+    }
+    if (ImGui::Button("Snap Selected to BSP Floor", ImVec2(-1, 24))) {
+        scene.BatchSnapWaypointsToFloor();
+    }
+    if (ImGui::Button("Invert Selection", ImVec2(-1, 22))) {
+        scene.InvertWaypointSelection();
+    }
+    if (ImGui::Button("Clear Selection", ImVec2(-1, 22))) {
+        scene.ClearWaypointSelection();
+    }
+
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.15f, 0.15f, 1.0f));
+    char delLabel[64];
+    std::snprintf(delLabel, sizeof(delLabel), "Delete %zu Selected Waypoints", selIds.size());
+    if (ImGui::Button(delLabel, ImVec2(-1, 26))) {
+        scene.BatchDeleteWaypoints();
+    }
+    ImGui::PopStyleColor();
+}
+
+void EditorUI::RenderGhostBotModal(EditorScene& scene) {
+    if (m_showGhostBotModal) {
+        ImGui::OpenPopup("Ghost Bot Simulation & Path Auditor##Modal");
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(620, 560), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("Ghost Bot Simulation & Path Auditor##Modal", &m_showGhostBotModal, ImGuiWindowFlags_None)) {
+        ImGui::TextColored(ImVec4(0.1f, 0.9f, 1.0f, 1.0f), "Interactive Ghost Bot Simulation & A* Path Auditing");
+        ImGui::TextDisabled("Simulates autonomous player locomotion along the bot waypoint graph with real-time clearance, jump, and ladder auditing.");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // Start & Goal inputs
+        ImGui::Text("Path Endpoints:");
+        ImGui::SetNextItemWidth(120);
+        ImGui::InputInt("Start Waypoint ID", &m_ghostBotInputStart);
+        ImGui::SameLine();
+        if (ImGui::Button("Use Selected##Start")) {
+            if (scene.GetSelectedWaypointID() != 0) m_ghostBotInputStart = (int)scene.GetSelectedWaypointID();
+        }
+
+        ImGui::SetNextItemWidth(120);
+        ImGui::InputInt("Goal Waypoint ID", &m_ghostBotInputGoal);
+        ImGui::SameLine();
+        if (ImGui::Button("Use Selected##Goal")) {
+            if (scene.GetSelectedWaypointID() != 0) m_ghostBotInputGoal = (int)scene.GetSelectedWaypointID();
+        }
+
+        ImGui::Spacing();
+
+        if (ImGui::Button("Run A* Search & Start Simulation", ImVec2(240, 28))) {
+            scene.StartGhostBotSimulation(static_cast<uint32_t>(m_ghostBotInputStart), static_cast<uint32_t>(m_ghostBotInputGoal));
+        }
+
+        if (scene.IsGhostBotActive()) {
+            ImGui::SameLine();
+            if (ImGui::Button("Stop Simulation", ImVec2(120, 28))) {
+                scene.StopGhostBotSimulation();
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            // Playback controls
+            if (scene.IsGhostBotPaused()) {
+                if (ImGui::Button("Resume Playback", ImVec2(130, 24))) {
+                    scene.TogglePauseGhostBot();
+                }
+            } else {
+                if (ImGui::Button("Pause Playback", ImVec2(130, 24))) {
+                    scene.TogglePauseGhostBot();
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Reset to Start", ImVec2(110, 24))) {
+                scene.ResetGhostBotSimulation();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Step Forward", ImVec2(110, 24))) {
+                scene.StepGhostBotSimulation();
+            }
+
+            bool loop = scene.GetGhostBotLoop();
+            if (ImGui::Checkbox("Loop Traversal", &loop)) {
+                scene.SetGhostBotLoop(loop);
+            }
+
+            float spd = scene.GetGhostBotSpeedMultiplier();
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(140);
+            if (ImGui::SliderFloat("Speed Multiplier", &spd, 0.25f, 5.0f, "%.2fx")) {
+                scene.SetGhostBotSpeedMultiplier(spd);
+            }
+
+            // Path stats
+            const auto& audit = scene.GetGhostBotAudit();
+            ImGui::Spacing();
+            ImGui::Text("Traversal Metrics:");
+            ImGui::BulletText("Path Waypoints: %zu nodes", scene.GetGhostBotPath().size());
+            ImGui::BulletText("Total Distance: %.1f units", audit.totalDistance);
+            ImGui::BulletText("Estimated Run Time: %.2f seconds", audit.estimatedDurationSec);
+            ImGui::BulletText("Current Step: %zu / %zu", scene.GetGhostBotCurrentStep() + 1, scene.GetGhostBotPath().size());
+
+            if (!audit.warnings.empty()) {
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.2f, 1.0f), "Audit Warnings (%zu found):", audit.warnings.size());
+                ImGui::BeginChild("##AuditWarns", ImVec2(-1, 80), true);
+                for (const auto& w : audit.warnings) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "  - %s", w.c_str());
+                }
+                ImGui::EndChild();
+            }
+
+            // Step Details Table
+            ImGui::Spacing();
+            ImGui::Text("Step-by-Step Traversal Audit:");
+            if (ImGui::BeginTable("##StepAuditTable", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, ImVec2(-1, 140))) {
+                ImGui::TableSetupColumn("Step", ImGuiTableColumnFlags_WidthFixed, 40);
+                ImGui::TableSetupColumn("From -> To", ImGuiTableColumnFlags_WidthFixed, 90);
+                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 70);
+                ImGui::TableSetupColumn("Distance", ImGuiTableColumnFlags_WidthFixed, 65);
+                ImGui::TableSetupColumn("Delta Z", ImGuiTableColumnFlags_WidthFixed, 60);
+                ImGui::TableSetupColumn("Status / Notes", ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableHeadersRow();
+
+                for (size_t s = 0; s < audit.steps.size(); ++s) {
+                    const auto& step = audit.steps[s];
+                    ImGui::TableNextRow();
+                    if (s == scene.GetGhostBotCurrentStep()) {
+                        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImColor(30, 80, 140, 180));
+                    }
+
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::Text("%zu", s + 1);
+
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::Text("#%u -> #%u", step.fromId, step.toId);
+
+                    ImGui::TableSetColumnIndex(2);
+                    if (step.isLadder) ImGui::TextColored(ImVec4(0.8f, 0.5f, 0.1f, 1.0f), "Ladder");
+                    else if (step.isJump) ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.2f, 1.0f), "Jump");
+                    else if (step.isCrouch) ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Crouch");
+                    else ImGui::Text("Walk");
+
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::Text("%.0fu", step.distance);
+
+                    ImGui::TableSetColumnIndex(4);
+                    ImGui::Text("%+.0fu", step.deltaZ);
+
+                    ImGui::TableSetColumnIndex(5);
+                    if (!step.warning.empty()) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.2f, 1.0f), "%s", step.warning.c_str());
+                    } else {
+                        ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.3f, 1.0f), "Clear");
+                    }
+                }
+                ImGui::EndTable();
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Close", ImVec2(90, 26))) {
+            m_showGhostBotModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderWaypointTaskModal(EditorScene& scene) {
+    auto& task = scene.GetWaypointTaskProgress();
+    if (!task.isRunning.load()) return;
+
+    ImGui::OpenPopup("Waypoint Processing##Modal");
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(480, 190), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("Waypoint Processing##Modal", nullptr, ImGuiWindowFlags_NoResize)) {
+        ImGui::TextColored(ImVec4(0.2f, 0.85f, 1.0f, 1.0f), "%s", task.taskName.c_str());
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        float progress = task.progress.load();
+        if (progress < 0.0f) progress = 0.0f;
+        if (progress > 1.0f) progress = 1.0f;
+
+        char progressText[32];
+        std::snprintf(progressText, sizeof(progressText), "%.0f%%", progress * 100.0f);
+        ImGui::ProgressBar(progress, ImVec2(-1, 26), progressText);
+
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.45f, 0.85f, 1.0f, 1.0f), "%s", task.statusMessage.c_str());
+
+        int dotCount = static_cast<int>(ImGui::GetTime() * 4.0) % 4;
+        std::string dots = std::string(dotCount, '.');
+        ImGui::TextDisabled("Processing waypoint graph and geometry validation%s", dots.c_str());
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Run in Background", ImVec2(160, 26))) {
             ImGui::CloseCurrentPopup();
         }
 

@@ -74,6 +74,16 @@ public:
         const Matrix4& projMatrix
     );
 
+    // Tests 2D screen marquee rectangle against all Waypoints in the scene
+    static std::vector<uint32_t> PickWaypointsInRect(
+        const EditorScene& scene,
+        float rectMinX, float rectMinY,
+        float rectMaxX, float rectMaxY,
+        float viewportWidth, float viewportHeight,
+        const Matrix4& viewMatrix,
+        const Matrix4& projMatrix
+    );
+
 private:
     static bool RayIntersectsAABB(
         const Ray& ray,

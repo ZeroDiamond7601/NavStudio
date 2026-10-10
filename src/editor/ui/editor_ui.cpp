@@ -427,8 +427,14 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     if (m_showParkourModal) {
         RenderParkourModal(scene, cmdMgr);
     }
+    if (m_showGhostBotModal) {
+        RenderGhostBotModal(scene);
+    }
     if (scene.HasPendingNavOrWptChoice()) {
         RenderNavOrWaypointPromptModal(scene);
+    }
+    if (scene.IsWaypointTaskRunning()) {
+        RenderWaypointTaskModal(scene);
     }
     RenderToastHUD(scene);
 }
@@ -824,6 +830,10 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
 
             if (ImGui::BeginMenu("E-Bot Interactive Tools")) {
+                bool penActive = scene.IsPenToolActive();
+                if (ImGui::MenuItem("Continuous Pen / Breadcrumb Tool", nullptr, &penActive)) {
+                    scene.TogglePenTool();
+                }
                 bool addWptActive = scene.IsAddWaypointMode();
                 if (ImGui::MenuItem("Add Waypoint Tool", "N", &addWptActive)) {
                     scene.ToggleAddWaypointMode();
@@ -833,6 +843,21 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                     scene.SetTargetMode(EditorScene::TARGET_WAYPOINTS);
                     scene.ToggleFillAreaMode();
                 }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Snap Objectives from BSP (Spawns, Goals, Rescue)", nullptr, false, scene.HasBSP())) {
+                    scene.SnapObjectivesFromEntities();
+                }
+                if (ImGui::MenuItem("Extract Ladders from BSP (func_ladder)", nullptr, false, scene.HasBSP())) {
+                    scene.AssignLaddersFromBSP();
+                }
+                if (ImGui::MenuItem("Create Ladder Pair from Selected", nullptr, false, scene.GetSelectedWaypointIDs().size() == 2)) {
+                    scene.CreateLadderPairFromSelected();
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Ghost Bot Simulation & Path Auditor...", nullptr, m_showGhostBotModal)) {
+                    m_showGhostBotModal = true;
+                }
+                ImGui::Separator();
                 uint32_t selWpt = scene.GetSelectedWaypointID();
                 if (ImGui::MenuItem("Connect Selected Waypoint", "C", false, selWpt != 0)) {
                     scene.StartConnectMode();
@@ -840,8 +865,9 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                 if (ImGui::MenuItem("Snap Selected to Floor", "Space", false, selWpt != 0 && scene.HasBSP())) {
                     scene.SnapSelectedWaypointToFloor();
                 }
-                if (ImGui::MenuItem("Delete Selected Waypoint", "Delete / X", false, selWpt != 0)) {
-                    scene.DeleteSelectedWaypoint();
+                if (ImGui::MenuItem("Delete Selected Waypoint", "Delete / X", false, selWpt != 0 || scene.HasWaypointMultiSelection())) {
+                    if (scene.HasWaypointMultiSelection()) scene.BatchDeleteWaypoints();
+                    else scene.DeleteSelectedWaypoint();
                 }
                 ImGui::EndMenu();
             }
@@ -936,9 +962,7 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                     scene.RebuildWaypointRenderer();
                 }
                 if (ImGui::MenuItem("Auto-Analyze Bot Waypoints (CS-EBOT / YaPB)...", nullptr, false, scene.HasWaypoints())) {
-                    m_waypointAnalyzerStats = scene.AutoAnalyzeWaypoints();
-                    m_analyzerTargetWaypoints = true;
-                    m_showAnalyzerModal = true;
+                    scene.StartAsyncAutoAnalyzeWaypoints();
                 }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Clear All Waypoints", nullptr, false, scene.HasWaypoints())) {
@@ -970,14 +994,17 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 
         if (ImGui::BeginMenu("Tools")) {
             if (ImGui::BeginMenu("Simulation & Hull")) {
-                if (ImGui::MenuItem("Interactive Path Simulator", "P", m_showPathPanel || scene.IsPathToolActive(), scene.HasNAV())) {
+                if (ImGui::MenuItem("Interactive Path Simulator (NavMesh)", "P", m_showPathPanel || scene.IsPathToolActive(), scene.HasNAV())) {
                     scene.TogglePathTool();
                     m_showPathPanel = scene.IsPathToolActive();
+                }
+                if (ImGui::MenuItem("Ghost Bot Simulation & Path Auditor (Waypoints)...", nullptr, m_showGhostBotModal, scene.HasWaypoints())) {
+                    m_showGhostBotModal = true;
                 }
                 if (ImGui::MenuItem("Player Clearance Hull Visualizer", "H", scene.GetShowClearanceHull(), scene.HasNAV())) {
                     scene.ToggleClearanceHull();
                 }
-                if (ImGui::MenuItem("Marquee Box Selection", "Shift+B", scene.IsBoxSelectMode(), scene.HasNAV())) {
+                if (ImGui::MenuItem("Marquee Box Selection", "Shift+B", scene.IsBoxSelectMode())) {
                     scene.ToggleBoxSelectMode();
                 }
                 ImGui::EndMenu();
@@ -2306,6 +2333,12 @@ void EditorUI::RenderInspector(EditorScene& scene, Camera& camera, CommandManage
 
         if (scene.GetSelectedLadderID() != 0) {
             RenderLadderInspector(scene, cmdMgr);
+            ImGui::End();
+            return;
+        }
+
+        if (scene.HasWaypointMultiSelection()) {
+            RenderWaypointMultiInspector(scene, cmdMgr);
             ImGui::End();
             return;
         }

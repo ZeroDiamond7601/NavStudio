@@ -171,6 +171,11 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                 g_activeScene->CancelBridgeMode();
                 return;
             }
+            if (g_activeScene && g_activeScene->IsPenToolActive()) {
+                g_activeScene->EndPenStroke();
+                g_activeScene->ShowToast("Pen chain ended. Click floor to start new chain.");
+                return;
+            }
             if (g_activeScene && g_activeScene->IsFillAreaMode()) {
                 g_activeScene->ExitFillAreaMode();
                 return;
@@ -256,6 +261,15 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
             // Draw Area Mode Left Click: Click 1st corner, then 2nd corner
             if (g_activeScene->IsDrawAreaMode()) {
                 g_activeScene->OnDrawAreaClick(ray, *g_cmdMgr);
+                return;
+            }
+
+            // Continuous Pen / Breadcrumb Tool Left Click: Click floor to place & auto-connect chain
+            if (g_activeScene->IsPenToolActive()) {
+                uint32_t wid = g_activeScene->OnPenClick(ray);
+                if (wid != 0) {
+                    std::printf("[NavStudio] Pen placed waypoint #%u\n", wid);
+                }
                 return;
             }
 
@@ -396,7 +410,7 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
 
                 // Priority: waypoint -> ladder -> area -> entity
                 if (hitWpt != 0 && (wptDist <= navDist + 8.0f && wptDist <= ladDist + 8.0f && wptDist <= entDist + 8.0f)) {
-                    g_activeScene->SelectWaypoint(hitWpt);
+                    g_activeScene->SelectWaypoint(hitWpt, additive || toggle);
                     g_activeScene->SelectLadder(0);
                     g_activeScene->ClearSelection();
                     g_activeScene->SelectEntity(-1);
@@ -404,7 +418,7 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                         g_activeScene->ClearSelectedConnection();
                     }
                 } else if (hitLadder != 0 && (ladDist <= navDist + 8.0f && ladDist <= entDist + 8.0f)) {
-                    g_activeScene->SelectWaypoint(0);
+                    g_activeScene->ClearWaypointSelection();
                     g_activeScene->SelectLadder(hitLadder);
                     g_activeScene->ClearSelection();
                     g_activeScene->SelectEntity(-1);
@@ -412,7 +426,7 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                         g_activeScene->ClearSelectedConnection();
                     }
                 } else if (hitArea != 0 && (hitEntity < 0 || navDist <= entDist + 16.0f)) {
-                    g_activeScene->SelectWaypoint(0);
+                    g_activeScene->ClearWaypointSelection();
                     g_activeScene->SelectLadder(0);
                     g_activeScene->SelectArea(hitArea, additive, toggle);
                     g_activeScene->SelectEntity(-1);
@@ -420,7 +434,7 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                         g_activeScene->ClearSelectedConnection();
                     }
                 } else if (hitEntity >= 0) {
-                    g_activeScene->SelectWaypoint(0);
+                    g_activeScene->ClearWaypointSelection();
                     g_activeScene->SelectLadder(0);
                     g_activeScene->SelectEntity(hitEntity);
                     g_activeScene->ClearSelection();
@@ -429,7 +443,7 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     }
                 } else {
                     if (!additive && !toggle) {
-                        g_activeScene->SelectWaypoint(0);
+                        g_activeScene->ClearWaypointSelection();
                         g_activeScene->SelectLadder(0);
                         g_activeScene->ClearSelection();
                         g_activeScene->ClearSelectedConnection();
@@ -458,16 +472,28 @@ static void MouseButtonCallback(GLFWwindow* window, int button, int action, int 
                     int displayW = 0, displayH = 0;
                     glfwGetFramebufferSize(window, &displayW, &displayH);
                     float aspect = (displayH > 0) ? (static_cast<float>(displayW) / static_cast<float>(displayH)) : 1.0f;
-                    auto picked = ScenePicker::PickAreasInRect(
-                        *g_activeScene,
-                        static_cast<float>(g_boxSelectStartX), static_cast<float>(g_boxSelectStartY),
-                        static_cast<float>(g_boxSelectCurrentX), static_cast<float>(g_boxSelectCurrentY),
-                        static_cast<float>(displayW), static_cast<float>(displayH),
-                        g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
-                    );
                     bool additive = (mods & GLFW_MOD_SHIFT) != 0;
                     bool subtractive = (mods & GLFW_MOD_ALT) != 0;
-                    g_activeScene->BoxSelectAreas(picked, additive, subtractive);
+
+                    if (g_activeScene->IsWaypointMode()) {
+                        auto picked = ScenePicker::PickWaypointsInRect(
+                            *g_activeScene,
+                            static_cast<float>(g_boxSelectStartX), static_cast<float>(g_boxSelectStartY),
+                            static_cast<float>(g_boxSelectCurrentX), static_cast<float>(g_boxSelectCurrentY),
+                            static_cast<float>(displayW), static_cast<float>(displayH),
+                            g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
+                        );
+                        g_activeScene->BoxSelectWaypoints(picked, additive, subtractive);
+                    } else {
+                        auto picked = ScenePicker::PickAreasInRect(
+                            *g_activeScene,
+                            static_cast<float>(g_boxSelectStartX), static_cast<float>(g_boxSelectStartY),
+                            static_cast<float>(g_boxSelectCurrentX), static_cast<float>(g_boxSelectCurrentY),
+                            static_cast<float>(displayW), static_cast<float>(displayH),
+                            g_camera.GetViewMatrix(), g_camera.GetProjectionMatrix(aspect)
+                        );
+                        g_activeScene->BoxSelectAreas(picked, additive, subtractive);
+                    }
                 }
             }
         }
@@ -487,8 +513,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
         return;
     }
 
-    // When in drawing mode, knife mode, or add waypoint mode, WASD keys navigate the camera
-    if (g_activeScene && (g_activeScene->IsDrawAreaMode() || g_activeScene->IsKnifeMode() || g_activeScene->IsAddWaypointMode())) {
+    // When in drawing mode, knife mode, add waypoint mode, or pen tool mode, WASD keys navigate the camera
+    if (g_activeScene && (g_activeScene->IsDrawAreaMode() || g_activeScene->IsKnifeMode() || g_activeScene->IsAddWaypointMode() || g_activeScene->IsPenToolActive())) {
         if (key == GLFW_KEY_W || key == GLFW_KEY_A || key == GLFW_KEY_S || key == GLFW_KEY_D) {
             return;
         }
@@ -607,7 +633,11 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                        g_activeScene->GetSelectedEntityIndex() < 0) { // L: Create Ladder Modal
                 if (g_editorUI) g_editorUI->OpenLadderCreateModal();
             } else if (key == GLFW_KEY_A && ctrlDown) { // Ctrl+A: Select All
-                g_activeScene->SelectAllAreas();
+                if (g_activeScene->IsWaypointMode()) {
+                    g_activeScene->SelectAllWaypoints();
+                } else {
+                    g_activeScene->SelectAllAreas();
+                }
             } else if (key == GLFW_KEY_F12 && action == GLFW_PRESS) { // F12: Screenshot
                 int displayW = 0, displayH = 0;
                 glfwGetFramebufferSize(window, &displayW, &displayH);
@@ -622,6 +652,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
             } else if (key == GLFW_KEY_ESCAPE) {
                 if (g_activeScene->IsBoxSelectMode()) {
                     g_activeScene->SetBoxSelectMode(false);
+                } else if (g_activeScene->IsPenToolActive()) {
+                    g_activeScene->SetPenToolActive(false);
                 } else if (g_activeScene->IsAddWaypointMode()) {
                     g_activeScene->SetAddWaypointMode(false);
                 } else if (g_activeScene->IsKnifeMode()) {
@@ -638,8 +670,8 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                     g_activeScene->ClearSelectedConnection();
                 } else if (g_activeScene->GetSelectedLadderID() != 0) {
                     g_activeScene->SelectLadder(0);
-                } else if (g_activeScene->GetSelectedWaypointID() != 0) {
-                    g_activeScene->SelectWaypoint(0);
+                } else if (g_activeScene->HasWaypointMultiSelection() || g_activeScene->GetSelectedWaypointID() != 0) {
+                    g_activeScene->ClearWaypointSelection();
                 } else if (!g_activeScene->GetSelectedAreaIDs().empty() || g_activeScene->GetSelectedAreaID() != 0) {
                     g_activeScene->ClearSelection();
                 } else if (g_activeScene->GetSelectedEntityIndex() >= 0) {
@@ -742,17 +774,27 @@ static void KeyCallback(GLFWwindow* window, int key, int /*scancode*/, int actio
                             g_cmdMgr->ExecuteCommand(std::make_unique<CmdSnapAreaToFloor>(g_activeScene, sel->GetID()));
                         }
                     }
-                } else if (g_activeScene->GetSelectedWaypointID() != 0) {
+                } else if (g_activeScene->GetSelectedWaypointID() != 0 || g_activeScene->HasWaypointMultiSelection()) {
                     uint32_t selWpt = g_activeScene->GetSelectedWaypointID();
                     WaypointNode* node = g_activeScene->GetWaypoints().GetNode(selWpt);
-                    if (node) {
-                        if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
+                    if (key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE || ((key == GLFW_KEY_X) && (mods & GLFW_MOD_SHIFT) == 0)) {
+                        if (g_activeScene->HasWaypointMultiSelection()) {
+                            g_activeScene->BatchDeleteWaypoints();
+                        } else {
                             g_activeScene->DeleteSelectedWaypoint();
-                        } else if (key == GLFW_KEY_F) {
-                            g_camera.FocusOn(node->origin);
-                        } else if (key == GLFW_KEY_SPACE) {
+                        }
+                    } else if (key == GLFW_KEY_SPACE) {
+                        if (g_activeScene->HasWaypointMultiSelection()) {
+                            g_activeScene->BatchSnapWaypointsToFloor();
+                        } else {
                             g_activeScene->SnapSelectedWaypointToFloor();
-                        } else if (key == GLFW_KEY_C && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) {
+                        }
+                    } else if (key == GLFW_KEY_F) {
+                        if (node) g_camera.FocusOn(node->origin);
+                    } else if (key == GLFW_KEY_C && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) == 0) {
+                        if (g_activeScene->HasWaypointMultiSelection()) {
+                            g_activeScene->BatchConnectSelectedWaypoints(true);
+                        } else {
                             g_activeScene->StartConnectMode();
                         }
                     }
@@ -862,6 +904,10 @@ static void CursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
         if (g_isBoxSelecting) {
             g_boxSelectCurrentX = xpos;
             g_boxSelectCurrentY = ypos;
+        }
+
+        if (g_activeScene->IsPenToolActive()) {
+            g_activeScene->UpdatePenRubberband(ray);
         }
 
         if (g_activeScene->IsDraggingHandle()) {
@@ -1149,6 +1195,10 @@ int main(int argc, char* argv[]) {
         // Update background scene loading and stage progress
         scene.UpdateAsyncLoading(deltaTime);
         scene.UpdateAutosave(deltaTime);
+        scene.UpdateGhostBot(deltaTime);
+        scene.UpdateNavGeneration();
+        scene.UpdateWaypointGeneration();
+        scene.UpdateWaypointTasks();
 
         if (!screenshotPath.empty() && !scene.IsLoading()) {
             static bool s_configured = false;

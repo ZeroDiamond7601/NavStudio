@@ -9,6 +9,7 @@
 #include <chrono>
 #include <unordered_map>
 #include <unordered_set>
+#include <queue>
 
 WaypointGraph::WaypointGraph() = default;
 
@@ -156,13 +157,22 @@ size_t WaypointGraph::AutoLinkNodes(float maxDist, const BSPFile* bsp) {
     return created;
 }
 
-WaypointGraph::WaypointAnalysisStats WaypointGraph::AnalyzeGraph(const BSPFile* bsp, GameMod mod) {
+WaypointGraph::WaypointAnalysisStats WaypointGraph::AnalyzeGraph(const BSPFile* bsp, GameMod mod, WaypointProgressCallback progressCb) {
     WaypointAnalysisStats stats;
     stats.totalScanned = m_nodes.size();
+    if (m_nodes.empty()) return stats;
 
     bool hasBsp = (bsp && bsp->IsLoaded());
+    size_t scanned = 0;
 
     for (auto& node : m_nodes) {
+        if (progressCb && (scanned % 50 == 0 || scanned + 1 == m_nodes.size())) {
+            float frac = static_cast<float>(scanned) / static_cast<float>(m_nodes.size());
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Analyzing node %zu / %zu (%.0f%%)", scanned + 1, m_nodes.size(), frac * 100.0f);
+            progressCb(frac, buf);
+        }
+        scanned++;
         bool nodeModified = false;
 
         // 1. BSP Geometry Analysis: Headroom / Crouch (CS-EBOT & NavMesh style)
@@ -290,6 +300,7 @@ WaypointGraph::WaypointAnalysisStats WaypointGraph::AnalyzeGraph(const BSPFile* 
         }
     }
 
+    if (progressCb) progressCb(1.0f, "Analysis complete!");
     return stats;
 }
 
@@ -452,11 +463,18 @@ void WaypointGraph::CalculateWayzone(uint32_t nodeId, const BSPFile* bsp) {
     node->radius = std::clamp(finalRadius, 0.0f, 128.0f);
 }
 
-size_t WaypointGraph::CalculateAllWayzones(const BSPFile* bsp) {
+size_t WaypointGraph::CalculateAllWayzones(const BSPFile* bsp, WaypointProgressCallback progressCb) {
+    if (!bsp || !bsp->IsLoaded() || m_nodes.empty()) return 0;
     size_t count = 0;
-    for (auto& n : m_nodes) {
-        CalculateWayzone(n.id, bsp);
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        CalculateWayzone(m_nodes[i].id, bsp);
         ++count;
+        if (progressCb && (count % 20 == 0 || count == m_nodes.size())) {
+            float frac = static_cast<float>(count) / static_cast<float>(m_nodes.size());
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Calculating wayzone radii: %zu / %zu (%.0f%%)", count, m_nodes.size(), frac * 100.0f);
+            progressCb(frac, buf);
+        }
     }
     return count;
 }
@@ -501,13 +519,14 @@ bool WaypointGraph::ValidateNodes(std::vector<std::string>* outWarnings) {
     return allValid;
 }
 
-WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile* bsp, const WaypointOptimizeOptions& options) {
+WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile* bsp, const WaypointOptimizeOptions& options, WaypointProgressCallback progressCb) {
     WaypointOptimizeStats stats;
     auto tStart = std::chrono::high_resolution_clock::now();
 
     if (m_nodes.empty()) return stats;
 
     // Pass 1: Merge Overlapping Nodes (closer than mergeDistance)
+    if (progressCb) progressCb(0.05f, "Pass 1/6: Merging overlapping nodes...");
     if (options.mergeOverlapping && options.mergeDistance > 0.0f) {
         float mergeDistSq = options.mergeDistance * options.mergeDistance;
         std::unordered_set<uint32_t> toDelete;
@@ -576,6 +595,7 @@ WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile*
     }
 
     // Pass 2: Prune Blocked Connections using BSP Collision Traces
+    if (progressCb) progressCb(0.20f, "Pass 2/6: Pruning blocked links with collision traces...");
     if (options.pruneBlockedLinks && bsp && bsp->IsLoaded()) {
         for (auto& n : m_nodes) {
             for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
@@ -609,6 +629,7 @@ WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile*
     }
 
     // Pass 3: Fix Flat-Ground One-Way Links
+    if (progressCb) progressCb(0.40f, "Pass 3/6: Restoring ground one-way links...");
     if (options.fixOneWayLinks) {
         for (size_t i = 0; i < m_nodes.size(); ++i) {
             uint32_t fromId = m_nodes[i].id;
@@ -646,6 +667,7 @@ WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile*
     }
 
     // Pass 4: Prune Redundant Co-linear Nodes along straight corridors
+    if (progressCb) progressCb(0.60f, "Pass 4/6: Pruning collinear corridor nodes...");
     if (options.pruneCollinear) {
         float cosTol = std::cos(options.collinearMaxAngle * (3.14159265f / 180.0f));
         std::unordered_set<uint32_t> collinearToDelete;
@@ -732,23 +754,29 @@ WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile*
     }
 
     // Pass 5: Prune Dead-End Orphans
+    if (progressCb) progressCb(0.75f, "Pass 5/6: Pruning dead-end orphan nodes...");
     if (options.pruneOrphans) {
         stats.orphansRemoved = DeleteOrphanNodes();
     }
 
     // Pass 6: Recalculate Optimal Wayzone Radii
     if (options.recalculateWayzones) {
-        stats.wayzonesCalculated = CalculateAllWayzones(bsp);
+        if (progressCb) progressCb(0.85f, "Pass 6/6: Recalculating optimal wayzone radii...");
+        auto subCb = [&](float p, const std::string& msg) {
+            if (progressCb) progressCb(0.85f + p * 0.14f, msg);
+        };
+        stats.wayzonesCalculated = CalculateAllWayzones(bsp, subCb);
     }
 
     auto tEnd = std::chrono::high_resolution_clock::now();
     stats.durationSeconds = std::chrono::duration<double>(tEnd - tStart).count();
     stats.totalModified = stats.overlappingMerged + stats.collinearPruned + stats.blockedLinksPruned + stats.oneWayLinksFixed + stats.orphansRemoved;
 
+    if (progressCb) progressCb(1.0f, "Optimization complete!");
     return stats;
 }
 
-WaypointGraph::WaypointParkourStats WaypointGraph::GenerateParkour(const BSPFile* bsp, const WaypointParkourOptions& options) {
+WaypointGraph::WaypointParkourStats WaypointGraph::GenerateParkour(const BSPFile* bsp, const WaypointParkourOptions& options, WaypointProgressCallback progressCb) {
     auto tStart = std::chrono::high_resolution_clock::now();
     WaypointParkourStats stats;
     if (m_nodes.empty()) return stats;
@@ -774,6 +802,12 @@ WaypointGraph::WaypointParkourStats WaypointGraph::GenerateParkour(const BSPFile
     }
 
     for (size_t i = 0; i < m_nodes.size(); ++i) {
+        if (progressCb && (i % 25 == 0 || i + 1 == m_nodes.size())) {
+            float frac = static_cast<float>(i) / static_cast<float>(m_nodes.size());
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Analyzing parkour trajectories: node %zu / %zu (%.0f%%)", i + 1, m_nodes.size(), frac * 100.0f);
+            progressCb(frac, buf);
+        }
         WaypointNode& nodeA = m_nodes[i];
         int gx = static_cast<int>(std::floor(nodeA.origin.x / cellSize));
         int gy = static_cast<int>(std::floor(nodeA.origin.y / cellSize));
@@ -898,6 +932,187 @@ WaypointGraph::WaypointParkourStats WaypointGraph::GenerateParkour(const BSPFile
 
     auto tEnd = std::chrono::high_resolution_clock::now();
     stats.durationSeconds = std::chrono::duration<double>(tEnd - tStart).count();
+    if (progressCb) progressCb(1.0f, "Parkour links generated!");
     return stats;
+}
+
+bool WaypointGraph::FindPath(uint32_t startId, uint32_t goalId, std::vector<uint32_t>& outPath, float* outTotalCost) const {
+    outPath.clear();
+    if (outTotalCost) *outTotalCost = 0.0f;
+    if (startId == 0 || goalId == 0) return false;
+    if (startId == goalId) {
+        if (GetNodeByID(startId)) {
+            outPath.push_back(startId);
+            return true;
+        }
+        return false;
+    }
+
+    const WaypointNode* startNode = GetNodeByID(startId);
+    const WaypointNode* goalNode = GetNodeByID(goalId);
+    if (!startNode || !goalNode) return false;
+
+    struct NodeRecord {
+        uint32_t id;
+        float fScore;
+        bool operator>(const NodeRecord& other) const { return fScore > other.fScore; }
+    };
+
+    std::priority_queue<NodeRecord, std::vector<NodeRecord>, std::greater<NodeRecord>> openSet;
+    std::unordered_map<uint32_t, float> gScore;
+    std::unordered_map<uint32_t, uint32_t> cameFrom;
+
+    auto Heuristic = [](const Vector3& a, const Vector3& b) -> float {
+        return (a - b).Length();
+    };
+
+    gScore[startId] = 0.0f;
+    openSet.push({ startId, Heuristic(startNode->origin, goalNode->origin) });
+
+    while (!openSet.empty()) {
+        NodeRecord current = openSet.top();
+        openSet.pop();
+
+        if (current.id == goalId) {
+            uint32_t curr = goalId;
+            while (curr != 0) {
+                outPath.push_back(curr);
+                auto it = cameFrom.find(curr);
+                if (it != cameFrom.end()) curr = it->second;
+                else break;
+            }
+            std::reverse(outPath.begin(), outPath.end());
+            if (outTotalCost) *outTotalCost = gScore[goalId];
+            return true;
+        }
+
+        auto gIt = gScore.find(current.id);
+        const WaypointNode* node = GetNodeByID(current.id);
+        if (!node) continue;
+
+        float currG = (gIt != gScore.end()) ? gIt->second : 0.0f;
+        if (current.fScore > currG + Heuristic(node->origin, goalNode->origin) + 0.1f) {
+            continue;
+        }
+
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            int16_t neighborId16 = node->connections[c];
+            if (neighborId16 <= 0) continue;
+            uint32_t neighborId = static_cast<uint32_t>(neighborId16);
+
+            const WaypointNode* neighbor = GetNodeByID(neighborId);
+            if (!neighbor) continue;
+
+            uint16_t connFlags = node->connectionFlags[c];
+            float edgeDist = (neighbor->origin - node->origin).Length();
+            float edgeCost = edgeDist;
+
+            // Movement penalties: jumps cost slightly more, crouching has lower speed (higher cost)
+            if (connFlags & WPT_CONN_JUMP) {
+                edgeCost += 25.0f;
+            }
+            if ((connFlags & WPT_CONN_CROUCH) || (neighbor->flags & WPT_FLAG_CROUCH)) {
+                edgeCost *= 1.4f;
+            }
+            if (neighbor->flags & WPT_FLAG_LADDER) {
+                edgeCost *= 1.2f;
+            }
+
+            float tentativeG = currG + edgeCost;
+            auto neighGIt = gScore.find(neighborId);
+            if (neighGIt == gScore.end() || tentativeG < neighGIt->second) {
+                cameFrom[neighborId] = current.id;
+                gScore[neighborId] = tentativeG;
+                float f = tentativeG + Heuristic(neighbor->origin, goalNode->origin);
+                openSet.push({ neighborId, f });
+            }
+        }
+    }
+
+    return false;
+}
+
+WaypointPathAudit WaypointGraph::AuditPath(const std::vector<uint32_t>& path, const class BSPFile* bsp) const {
+    WaypointPathAudit audit;
+    if (path.size() < 2) {
+        audit.success = (path.size() == 1);
+        return audit;
+    }
+
+    audit.success = true;
+    const float kRunSpeed = 250.0f;    // Standard CS running speed (units/sec)
+    const float kCrouchSpeed = 90.0f;  // Standard CS crouch speed (units/sec)
+    const float kLadderSpeed = 150.0f; // Climbing speed (units/sec)
+
+    for (size_t i = 0; i + 1 < path.size(); ++i) {
+        uint32_t fromId = path[i];
+        uint32_t toId = path[i + 1];
+        const WaypointNode* nodeA = GetNodeByID(fromId);
+        const WaypointNode* nodeB = GetNodeByID(toId);
+
+        WaypointPathStep step;
+        step.fromId = fromId;
+        step.toId = toId;
+
+        if (!nodeA || !nodeB) {
+            step.warning = "Invalid waypoint ID in path";
+            audit.warnings.push_back(step.warning);
+            audit.steps.push_back(step);
+            continue;
+        }
+
+        step.fromPos = nodeA->origin;
+        step.toPos = nodeB->origin;
+        step.distance = (nodeB->origin - nodeA->origin).Length();
+        step.deltaZ = nodeB->origin.z - nodeA->origin.z;
+
+        // Find connection flags
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            if (nodeA->connections[c] == static_cast<int16_t>(toId)) {
+                step.connFlags = nodeA->connectionFlags[c];
+                break;
+            }
+        }
+
+        step.isJump = (step.connFlags & WPT_CONN_JUMP) != 0 || (step.deltaZ > 18.0f);
+        step.isCrouch = (step.connFlags & WPT_CONN_CROUCH) != 0 || (nodeB->flags & WPT_FLAG_CROUCH) != 0;
+        step.isLadder = (nodeA->flags & WPT_FLAG_LADDER) != 0 && (nodeB->flags & WPT_FLAG_LADDER) != 0;
+
+        // Step travel time estimate
+        float speed = kRunSpeed;
+        if (step.isLadder) speed = kLadderSpeed;
+        else if (step.isCrouch) speed = kCrouchSpeed;
+        float stepTime = step.distance / std::max(10.0f, speed);
+        if (step.isJump) stepTime += 0.35f;
+
+        // LOS Collision Validation with BSP
+        if (bsp && bsp->IsLoaded()) {
+            BSPTraceResult tr;
+            Vector3 startProbe = nodeA->origin + Vector3(0.0f, 0.0f, step.isCrouch ? 18.0f : 36.0f);
+            Vector3 endProbe = nodeB->origin + Vector3(0.0f, 0.0f, step.isCrouch ? 18.0f : 36.0f);
+            bsp->TraceWorld(startProbe, endProbe, HULL_POINT, &tr);
+            if (tr.fraction < 0.95f || tr.startsolid) {
+                step.warning = "Path segment obstructed by level geometry (LOS fraction: " + std::to_string(tr.fraction) + ")";
+                audit.warnings.push_back("Step " + std::to_string(i + 1) + ": " + step.warning);
+            }
+        }
+
+        // Height warning check
+        if (step.deltaZ > 55.0f && !step.isLadder) {
+            std::string w = "Elevation rise (" + std::to_string(step.deltaZ) + "u) exceeds standard jump height";
+            step.warning = step.warning.empty() ? w : (step.warning + " | " + w);
+            audit.warnings.push_back("Step " + std::to_string(i + 1) + ": " + w);
+        } else if (step.deltaZ < -350.0f) {
+            std::string w = "High drop (" + std::to_string(-step.deltaZ) + "u) causes severe falling damage";
+            step.warning = step.warning.empty() ? w : (step.warning + " | " + w);
+            audit.warnings.push_back("Step " + std::to_string(i + 1) + ": " + w);
+        }
+
+        audit.totalDistance += step.distance;
+        audit.estimatedDurationSec += stepTime;
+        audit.steps.push_back(step);
+    }
+
+    return audit;
 }
 

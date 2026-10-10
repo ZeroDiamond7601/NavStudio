@@ -533,26 +533,66 @@ NavGenerateResult NavGenerator::Generate(
             }
         }
 
-        // Jump down drops along edges
+        // Jump connections (drops and jump-ups to camp spots / ledges / vents)
         if (options.generateJumpConnections) {
             for (int d = 0; d < NUM_NAV_DIRECTIONS; ++d) {
                 if (area->GetAdjacentCount(static_cast<NavDirType>(d)) == 0) {
-                    Vector3 testStart = area->GetCenter();
+                    Vector3 testPos = area->GetCenter();
                     switch (d) {
-                        case NAV_DIR_NORTH: testStart.y = minY - options.stepSize * 0.5f; break;
-                        case NAV_DIR_EAST:  testStart.x = maxX + options.stepSize * 0.5f; break;
-                        case NAV_DIR_SOUTH: testStart.y = maxY + options.stepSize * 0.5f; break;
-                        case NAV_DIR_WEST:  testStart.x = minX - options.stepSize * 0.5f; break;
+                        case NAV_DIR_NORTH: testPos.y = minY - options.stepSize * 0.75f; break;
+                        case NAV_DIR_EAST:  testPos.x = maxX + options.stepSize * 0.75f; break;
+                        case NAV_DIR_SOUTH: testPos.y = maxY + options.stepSize * 0.75f; break;
+                        case NAV_DIR_WEST:  testPos.x = minX - options.stepSize * 0.75f; break;
                     }
 
+                    // A) Downward drop connections
                     Vector3 dropGround;
-                    if (bsp.GetGround(testStart + Vector3(0, 0, 10.0f), &dropGround, options.maxDrop)) {
+                    if (bsp.GetGround(testPos + Vector3(0, 0, 10.0f), &dropGround, options.maxDrop)) {
                         float dropDelta = area->GetCenter().z - dropGround.z;
                         if (dropDelta > options.maxStepHeight && dropDelta <= options.maxDrop) {
                             NavArea* dropArea = outNav.GetNearestArea(dropGround, options.stepSize * 1.5f);
                             if (dropArea && dropArea != area && !area->IsConnected(dropArea, d)) {
                                 area->ConnectTo(dropArea, static_cast<NavDirType>(d));
                                 connectionCount++;
+                            }
+                        }
+                    }
+
+                    // B) Upward jump connections (crates, ledges, vents, elevated camp perches)
+                    // CS standing jump reaches ~45u, jump-crouch (duck-jump) reaches ~58u
+                    Vector3 jumpProbeStart = testPos + Vector3(0, 0, 60.0f);
+                    Vector3 jumpGround;
+                    if (bsp.GetGround(jumpProbeStart, &jumpGround, 65.0f)) {
+                        float jumpDelta = jumpGround.z - area->GetCenter().z;
+                        if (jumpDelta > options.maxStepHeight && jumpDelta <= 58.0f) {
+                            NavArea* jumpTargetArea = outNav.GetNearestArea(jumpGround, options.stepSize * 1.5f);
+                            if (jumpTargetArea && jumpTargetArea != area && !area->IsConnected(jumpTargetArea, d)) {
+                                // Verify LOS trajectory clearance from source to jump landing
+                                BSPTraceResult trTraverse;
+                                Vector3 tStart = area->GetCenter() + Vector3(0, 0, jumpDelta + 20.0f);
+                                Vector3 tEnd = jumpGround + Vector3(0, 0, 20.0f);
+                                bsp.TraceWorld(tStart, tEnd, HULL_POINT, &trTraverse);
+                                if (trTraverse.fraction >= 0.95f) {
+                                    area->ConnectTo(jumpTargetArea, static_cast<NavDirType>(d));
+                                    connectionCount++;
+
+                                    // Check vertical headroom clearance at target
+                                    BSPTraceResult trHead;
+                                    bsp.TraceWorld(jumpGround + Vector3(0, 0, 2.0f), jumpGround + Vector3(0, 0, 100.0f), HULL_POINT, &trHead);
+                                    float clearance = trHead.endpos.z - jumpGround.z;
+
+                                    if (clearance < options.humanHeight - 6.0f && clearance >= options.crouchHeight - 2.0f) {
+                                        // Low-clearance entrance (human camp spot, vent, crawlspace): require jump-crouch
+                                        jumpTargetArea->SetAttributes(jumpTargetArea->GetAttributes() | NAV_ATTR_CROUCH | NAV_ATTR_JUMP);
+                                        // Add a defensive hiding spot
+                                        if (jumpTargetArea->GetHidingSpots().empty()) {
+                                            NavHidingSpot spot(jumpTargetArea->GetID() * 100 + 1, jumpTargetArea->GetCenter(), HIDING_IN_COVER | HIDING_GOOD_SNIPER);
+                                            jumpTargetArea->GetHidingSpots().push_back(spot);
+                                        }
+                                    } else {
+                                        jumpTargetArea->SetAttributes(jumpTargetArea->GetAttributes() | NAV_ATTR_JUMP);
+                                    }
+                                }
                             }
                         }
                     }

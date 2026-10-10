@@ -104,6 +104,7 @@ private:
 
     // Bot Waypoint System UI
     void RenderWaypointInspector(EditorScene& scene, CommandManager& cmdMgr);
+    void RenderWaypointMultiInspector(EditorScene& scene, CommandManager& cmdMgr);
     void RenderWaypointGlobalInspector(EditorScene& scene, CommandManager& cmdMgr);
     void RenderWaypointExportModal(EditorScene& scene);
     void RenderNavToWaypointModal(EditorScene& scene);
@@ -111,6 +112,9 @@ private:
     void RenderWaypointOptimizeModal(EditorScene& scene, CommandManager& cmdMgr);
     void RenderParkourModal(EditorScene& scene, CommandManager& cmdMgr);
     void RenderNavOrWaypointPromptModal(EditorScene& scene);
+    void RenderGhostBotModal(EditorScene& scene);
+    void ToggleGhostBotModal() { m_showGhostBotModal = !m_showGhostBotModal; }
+    void RenderWaypointTaskModal(EditorScene& scene);
 
     bool m_marqueeActive{false};
     float m_marqueeStartX{0.0f};
@@ -204,6 +208,9 @@ private:
     int m_waypointExportMod{0}; // 0=Standard, 1=ZombiePlague, 2=Deathmatch
     char m_waypointExportPath[512]{""};
     char m_waypointFilter[64]{""};
+    bool m_showGhostBotModal{false};
+    int m_ghostBotInputStart{0};
+    int m_ghostBotInputGoal{0};
 };
 
 #endif // EDITOR_UI_H

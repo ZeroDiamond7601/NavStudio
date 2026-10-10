@@ -5,8 +5,11 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <functional>
 #include <cstddef>
 #include <cstdint>
+
+using WaypointProgressCallback = std::function<void(float progress, const std::string& status)>;
 
 // Waypoint Graph Optimizer Options & Results
 struct WaypointOptimizeOptions {
@@ -49,6 +52,28 @@ struct WaypointParkourStats {
     size_t doubleJumpsCreated{0};
     size_t totalParkourLinks{0};
     double durationSeconds{0.0};
+};
+
+struct WaypointPathStep {
+    uint32_t fromId{0};
+    uint32_t toId{0};
+    Vector3 fromPos;
+    Vector3 toPos;
+    uint16_t connFlags{0};
+    float distance{0.0f};
+    float deltaZ{0.0f};
+    bool isJump{false};
+    bool isCrouch{false};
+    bool isLadder{false};
+    std::string warning;
+};
+
+struct WaypointPathAudit {
+    bool success{false};
+    float totalDistance{0.0f};
+    float estimatedDurationSec{0.0f};
+    std::vector<WaypointPathStep> steps;
+    std::vector<std::string> warnings;
 };
 
 class WaypointGraph {
@@ -136,17 +161,21 @@ public:
         size_t totalModified{0};
     };
 
-    WaypointAnalysisStats AnalyzeGraph(const class BSPFile* bsp = nullptr, GameMod mod = GameMod::Standard);
+    WaypointAnalysisStats AnalyzeGraph(const class BSPFile* bsp = nullptr, GameMod mod = GameMod::Standard, WaypointProgressCallback progressCb = nullptr);
 
     // E-Bot Waypoint Utilities & Optimization
     size_t DeleteOrphanNodes();
     size_t FixWaypoints(const class BSPFile* bsp = nullptr);
     void CalculateWayzone(uint32_t nodeId, const class BSPFile* bsp);
-    size_t CalculateAllWayzones(const class BSPFile* bsp);
+    size_t CalculateAllWayzones(const class BSPFile* bsp, WaypointProgressCallback progressCb = nullptr);
     bool ValidateNodes(std::vector<std::string>* outWarnings = nullptr);
 
-    WaypointOptimizeStats OptimizeGraph(const class BSPFile* bsp = nullptr, const WaypointOptimizeOptions& options = WaypointOptimizeOptions());
-    WaypointParkourStats GenerateParkour(const class BSPFile* bsp = nullptr, const WaypointParkourOptions& options = WaypointParkourOptions());
+    WaypointOptimizeStats OptimizeGraph(const class BSPFile* bsp = nullptr, const WaypointOptimizeOptions& options = WaypointOptimizeOptions(), WaypointProgressCallback progressCb = nullptr);
+    WaypointParkourStats GenerateParkour(const class BSPFile* bsp = nullptr, const WaypointParkourOptions& options = WaypointParkourOptions(), WaypointProgressCallback progressCb = nullptr);
+
+    // Pathfinding & Traversal Audit
+    bool FindPath(uint32_t startId, uint32_t goalId, std::vector<uint32_t>& outPath, float* outTotalCost = nullptr) const;
+    WaypointPathAudit AuditPath(const std::vector<uint32_t>& path, const class BSPFile* bsp = nullptr) const;
 
 private:
     std::vector<WaypointNode> m_nodes;

@@ -9,6 +9,10 @@
 #include <cmath>
 #include <algorithm>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 // --- Bot Waypoint System Implementation ---
 
 void EditorScene::SetShowWaypoints(bool show) {
@@ -65,9 +69,157 @@ void EditorScene::ToggleShowParkourJumpArcs() {
     ShowToast(m_showParkourJumpArcs ? "Parkour Jump Arcs: Visible" : "Parkour Jump Arcs: Hidden");
 }
 
-void EditorScene::SelectWaypoint(uint32_t id) {
-    m_selectedWaypointId = id;
+void EditorScene::SelectWaypoint(uint32_t id, bool addToSelection) {
+    if (!addToSelection) {
+        m_selectedWaypointIds.clear();
+        m_selectedWaypointId = id;
+        if (id != 0) {
+            m_selectedWaypointIds.insert(id);
+        }
+    } else {
+        if (id != 0) {
+            if (m_selectedWaypointIds.find(id) != m_selectedWaypointIds.end()) {
+                m_selectedWaypointIds.erase(id);
+                if (m_selectedWaypointId == id) {
+                    m_selectedWaypointId = m_selectedWaypointIds.empty() ? 0 : *m_selectedWaypointIds.begin();
+                }
+            } else {
+                m_selectedWaypointIds.insert(id);
+                m_selectedWaypointId = id;
+            }
+        }
+    }
     RebuildWaypointRenderer();
+}
+
+void EditorScene::DeselectWaypoint(uint32_t id) {
+    m_selectedWaypointIds.erase(id);
+    if (m_selectedWaypointId == id) {
+        m_selectedWaypointId = m_selectedWaypointIds.empty() ? 0 : *m_selectedWaypointIds.begin();
+    }
+    RebuildWaypointRenderer();
+}
+
+void EditorScene::SelectAllWaypoints() {
+    m_selectedWaypointIds.clear();
+    for (const auto& node : m_waypoints.GetNodes()) {
+        m_selectedWaypointIds.insert(node.id);
+    }
+    if (!m_waypoints.IsEmpty()) {
+        m_selectedWaypointId = m_waypoints.GetNodes().front().id;
+    }
+    RebuildWaypointRenderer();
+    ShowToast("Selected all " + std::to_string(m_selectedWaypointIds.size()) + " waypoints");
+}
+
+void EditorScene::ClearWaypointSelection() {
+    m_selectedWaypointId = 0;
+    m_selectedWaypointIds.clear();
+    RebuildWaypointRenderer();
+}
+
+void EditorScene::InvertWaypointSelection() {
+    std::unordered_set<uint32_t> inverted;
+    for (const auto& node : m_waypoints.GetNodes()) {
+        if (m_selectedWaypointIds.find(node.id) == m_selectedWaypointIds.end()) {
+            inverted.insert(node.id);
+        }
+    }
+    m_selectedWaypointIds = std::move(inverted);
+    m_selectedWaypointId = m_selectedWaypointIds.empty() ? 0 : *m_selectedWaypointIds.begin();
+    RebuildWaypointRenderer();
+    ShowToast("Inverted selection (" + std::to_string(m_selectedWaypointIds.size()) + " selected)");
+}
+
+void EditorScene::BoxSelectWaypoints(const std::vector<uint32_t>& pickedIds, bool additive, bool subtractive) {
+    if (!additive && !subtractive) {
+        m_selectedWaypointIds.clear();
+    }
+    for (uint32_t id : pickedIds) {
+        if (subtractive) {
+            m_selectedWaypointIds.erase(id);
+        } else {
+            m_selectedWaypointIds.insert(id);
+        }
+    }
+    if (m_selectedWaypointIds.find(m_selectedWaypointId) == m_selectedWaypointIds.end()) {
+        m_selectedWaypointId = m_selectedWaypointIds.empty() ? 0 : *m_selectedWaypointIds.begin();
+    }
+    RebuildWaypointRenderer();
+    ShowToast("Box selected " + std::to_string(m_selectedWaypointIds.size()) + " waypoints");
+}
+
+void EditorScene::BatchSetWaypointFlags(uint32_t flag, bool setOrToggle) {
+    if (m_selectedWaypointIds.empty()) return;
+    for (uint32_t id : m_selectedWaypointIds) {
+        WaypointNode* node = m_waypoints.GetNodeByID(id);
+        if (node) {
+            if (setOrToggle) node->flags |= flag;
+            else node->flags &= ~flag;
+        }
+    }
+    m_isModified = true;
+    RebuildWaypointRenderer();
+    ShowToast("Updated flags for " + std::to_string(m_selectedWaypointIds.size()) + " waypoints");
+}
+
+void EditorScene::BatchSetWaypointRadius(float radius) {
+    if (m_selectedWaypointIds.empty()) return;
+    for (uint32_t id : m_selectedWaypointIds) {
+        WaypointNode* node = m_waypoints.GetNodeByID(id);
+        if (node) node->radius = radius;
+    }
+    m_isModified = true;
+    RebuildWaypointRenderer();
+    ShowToast("Set radius = " + std::to_string((int)radius) + " for " + std::to_string(m_selectedWaypointIds.size()) + " waypoints");
+}
+
+void EditorScene::BatchDeleteWaypoints() {
+    if (m_selectedWaypointIds.empty()) {
+        DeleteSelectedWaypoint();
+        return;
+    }
+    size_t count = m_selectedWaypointIds.size();
+    for (uint32_t id : m_selectedWaypointIds) {
+        m_waypoints.RemoveNode(id);
+    }
+    m_selectedWaypointIds.clear();
+    m_selectedWaypointId = 0;
+    m_isModified = true;
+    RebuildWaypointRenderer();
+    ShowToast("Deleted " + std::to_string(count) + " waypoints");
+}
+
+void EditorScene::BatchConnectSelectedWaypoints(bool bidirectional) {
+    if (m_selectedWaypointIds.size() < 2) return;
+    std::vector<uint32_t> ids(m_selectedWaypointIds.begin(), m_selectedWaypointIds.end());
+    size_t connected = 0;
+    for (size_t i = 0; i + 1 < ids.size(); ++i) {
+        if (m_waypoints.ConnectNodes(ids[i], ids[i + 1], bidirectional, WPT_CONN_NONE)) {
+            connected++;
+        }
+    }
+    m_isModified = true;
+    RebuildWaypointRenderer();
+    ShowToast("Connected " + std::to_string(connected) + " links across selected waypoints");
+}
+
+void EditorScene::BatchSnapWaypointsToFloor() {
+    if (m_selectedWaypointIds.empty() || !HasBSP()) return;
+    size_t snapped = 0;
+    for (uint32_t id : m_selectedWaypointIds) {
+        WaypointNode* node = m_waypoints.GetNodeByID(id);
+        if (node) {
+            Vector3 ground;
+            if (m_bsp->GetGround(node->origin + Vector3(0, 0, 18.0f), &ground, 500.0f)) {
+                node->origin = ground + Vector3(0, 0, 18.0f);
+                snapped++;
+            }
+        }
+    }
+    m_isModified = true;
+    RebuildWaypointRenderer();
+    ShowToast("Snapped " + std::to_string(snapped) + " waypoints to floor");
 }
 
 WaypointNode* EditorScene::GetSelectedWaypoint() {
@@ -145,14 +297,39 @@ size_t EditorScene::ConvertWaypointsToNav() {
 }
 
 void EditorScene::RebuildWaypointRenderer() {
-    if (m_waypoints.IsEmpty()) {
+    if (m_waypoints.IsEmpty() && !m_penToolActive && !m_ghostBotActive) {
         m_waypointRenderer.Clear();
     } else {
         m_waypointRenderer.SetShowRadii(m_showWaypointRadii);
         m_waypointRenderer.SetShowDirection(m_showWaypointDirection);
         m_waypointRenderer.SetShowConnections(m_showWaypointConnections);
         m_waypointRenderer.SetShowParkourArcs(m_showParkourJumpArcs);
-        m_waypointRenderer.BuildFromGraph(m_waypoints, m_selectedWaypointId);
+
+        const Vector3* penStart = nullptr;
+        const Vector3* penEnd = nullptr;
+        if (m_penToolActive && m_penRubberbandValid && m_penLastWaypointId != 0) {
+            const WaypointNode* lastWp = m_waypoints.GetNodeByID(m_penLastWaypointId);
+            if (lastWp) {
+                penStart = &lastWp->origin;
+                penEnd = &m_penRubberbandTarget;
+            }
+        }
+
+        const Vector3* botPosPtr = m_ghostBotActive ? &m_ghostBotPos : nullptr;
+        const std::vector<uint32_t>* botPathPtr = m_ghostBotActive ? &m_ghostBotPath : nullptr;
+
+        m_waypointRenderer.BuildFromGraph(
+            m_waypoints,
+            m_selectedWaypointId,
+            0,
+            &m_selectedWaypointIds,
+            penStart,
+            penEnd,
+            m_penRubberbandClear,
+            botPathPtr,
+            botPosPtr,
+            m_ghostBotYaw
+        );
     }
 }
 
@@ -240,6 +417,163 @@ void EditorScene::UpdateWaypointGeneration() {
                       std::to_string(m_pendingGenResult.durationSeconds).substr(0, 4) + "s!");
         } else {
             ShowToast("Waypoint generation failed: " + m_waypointGenProgress.errorMessage);
+        }
+    }
+}
+
+bool EditorScene::StartAsyncOptimizeWaypoints(const WaypointGraph::WaypointOptimizeOptions& options) {
+    if (m_waypoints.IsEmpty()) {
+        ShowToast("Cannot optimize: No waypoints in graph!");
+        return false;
+    }
+    if (m_waypointTaskProgress.isRunning.load()) {
+        ShowToast("Another waypoint task is already running!");
+        return false;
+    }
+    if (m_waypointTaskThread.joinable()) {
+        m_waypointTaskThread.join();
+    }
+
+    m_waypointTaskProgress.isRunning.store(true);
+    m_waypointTaskProgress.progress.store(0.0f);
+    m_waypointTaskProgress.taskName = "Optimizing Waypoint Topology & Geometry";
+    m_waypointTaskProgress.statusMessage = "Starting optimizer passes...";
+    m_waypointTaskProgress.completed = false;
+    m_waypointTaskProgress.success = false;
+    m_waypointTaskProgress.resultSummary.clear();
+
+    m_waypointTaskThread = std::thread([this, options]() {
+        auto progressCb = [this](float p, const std::string& msg) {
+            m_waypointTaskProgress.progress.store(p);
+            std::lock_guard<std::mutex> lock(m_waypointTaskMutex);
+            m_waypointTaskProgress.statusMessage = msg;
+        };
+
+        auto stats = m_waypoints.OptimizeGraph(HasBSP() ? &GetBSP() : nullptr, options, progressCb);
+
+        {
+            std::lock_guard<std::mutex> lock(m_waypointTaskMutex);
+            m_lastOptimizeStats = stats;
+            m_waypointTaskProgress.durationSeconds = stats.durationSeconds;
+            m_waypointTaskProgress.resultSummary = "Optimized graph: " + std::to_string(stats.totalModified) + " adjustments made (" +
+                std::to_string(stats.overlappingMerged) + " merged, " +
+                std::to_string(stats.collinearPruned) + " collinear pruned, " +
+                std::to_string(stats.blockedLinksPruned) + " blocked pruned).";
+            m_waypointTaskProgress.success = true;
+            m_waypointTaskProgress.progress.store(1.0f);
+            m_waypointTaskProgress.completed = true;
+            m_waypointTaskProgress.isRunning.store(false);
+        }
+    });
+    return true;
+}
+
+bool EditorScene::StartAsyncGenerateParkour(const WaypointGraph::WaypointParkourOptions& options) {
+    if (m_waypoints.IsEmpty()) {
+        ShowToast("Cannot generate parkour: No waypoints in graph!");
+        return false;
+    }
+    if (m_waypointTaskProgress.isRunning.load()) {
+        ShowToast("Another waypoint task is already running!");
+        return false;
+    }
+    if (m_waypointTaskThread.joinable()) {
+        m_waypointTaskThread.join();
+    }
+
+    m_waypointTaskProgress.isRunning.store(true);
+    m_waypointTaskProgress.progress.store(0.0f);
+    m_waypointTaskProgress.taskName = "Generating Parkour Jump Links";
+    m_waypointTaskProgress.statusMessage = "Simulating jump trajectories...";
+    m_waypointTaskProgress.completed = false;
+    m_waypointTaskProgress.success = false;
+    m_waypointTaskProgress.resultSummary.clear();
+
+    m_waypointTaskThread = std::thread([this, options]() {
+        auto progressCb = [this](float p, const std::string& msg) {
+            m_waypointTaskProgress.progress.store(p);
+            std::lock_guard<std::mutex> lock(m_waypointTaskMutex);
+            m_waypointTaskProgress.statusMessage = msg;
+        };
+
+        auto stats = m_waypoints.GenerateParkour(HasBSP() ? &GetBSP() : nullptr, options, progressCb);
+
+        {
+            std::lock_guard<std::mutex> lock(m_waypointTaskMutex);
+            m_lastParkourStats = stats;
+            m_waypointTaskProgress.durationSeconds = stats.durationSeconds;
+            m_waypointTaskProgress.resultSummary = "Parkour: Created " + std::to_string(stats.totalParkourLinks) + " jump links (" +
+                std::to_string(stats.jumpUpsCreated) + " crate climbs, " +
+                std::to_string(stats.gapJumpsCreated) + " chasm leaps, " +
+                std::to_string(stats.dropJumpsCreated) + " drops)!";
+            m_waypointTaskProgress.success = true;
+            m_waypointTaskProgress.progress.store(1.0f);
+            m_waypointTaskProgress.completed = true;
+            m_waypointTaskProgress.isRunning.store(false);
+        }
+    });
+    return true;
+}
+
+bool EditorScene::StartAsyncAutoAnalyzeWaypoints() {
+    if (m_waypoints.IsEmpty()) {
+        ShowToast("Cannot analyze: No waypoints in graph!");
+        return false;
+    }
+    if (m_waypointTaskProgress.isRunning.load()) {
+        ShowToast("Another waypoint task is already running!");
+        return false;
+    }
+    if (m_waypointTaskThread.joinable()) {
+        m_waypointTaskThread.join();
+    }
+
+    m_waypointTaskProgress.isRunning.store(true);
+    m_waypointTaskProgress.progress.store(0.0f);
+    m_waypointTaskProgress.taskName = "Automated Waypoint Analysis";
+    m_waypointTaskProgress.statusMessage = "Analyzing node sightlines & clearances...";
+    m_waypointTaskProgress.completed = false;
+    m_waypointTaskProgress.success = false;
+    m_waypointTaskProgress.resultSummary.clear();
+
+    m_waypointTaskThread = std::thread([this]() {
+        auto progressCb = [this](float p, const std::string& msg) {
+            m_waypointTaskProgress.progress.store(p);
+            std::lock_guard<std::mutex> lock(m_waypointTaskMutex);
+            m_waypointTaskProgress.statusMessage = msg;
+        };
+
+        auto stats = m_waypoints.AnalyzeGraph(HasBSP() ? &GetBSP() : nullptr, m_waypoints.GetActiveMod(), progressCb);
+
+        {
+            std::lock_guard<std::mutex> lock(m_waypointTaskMutex);
+            m_lastAnalysisStats = stats;
+            m_waypointTaskProgress.durationSeconds = 0.0;
+            m_waypointTaskProgress.resultSummary = "Waypoint Analysis: " + std::to_string(stats.totalModified) + " nodes updated (" +
+                std::to_string(stats.crouchAssigned) + " crouch, " +
+                std::to_string(stats.jumpAssigned) + " jump, " +
+                std::to_string(stats.campAnglesCalculated) + " camp sightlines, " +
+                std::to_string(stats.blockedLinksPruned) + " blocked links pruned)!";
+            m_waypointTaskProgress.success = true;
+            m_waypointTaskProgress.progress.store(1.0f);
+            m_waypointTaskProgress.completed = true;
+            m_waypointTaskProgress.isRunning.store(false);
+        }
+    });
+    return true;
+}
+
+void EditorScene::UpdateWaypointTasks() {
+    if (m_waypointTaskProgress.completed) {
+        m_waypointTaskProgress.completed = false;
+        if (m_waypointTaskThread.joinable()) {
+            m_waypointTaskThread.join();
+        }
+
+        if (m_waypointTaskProgress.success) {
+            m_isModified = true;
+            RebuildWaypointRenderer();
+            ShowToast(m_waypointTaskProgress.resultSummary);
         }
     }
 }
@@ -636,4 +970,372 @@ void EditorScene::ChooseLoadBoth() {
 
 void EditorScene::DismissNavOrWptChoice() {
     m_showNavOrWptPrompt = false;
+}
+
+// --- Continuous Pen / Breadcrumb Path Tool ---
+
+void EditorScene::SetPenToolActive(bool active) {
+    m_penToolActive = active;
+    if (!active) {
+        EndPenStroke();
+    } else {
+        m_penLastWaypointId = m_selectedWaypointId;
+        m_penRubberbandValid = false;
+        ShowToast("Pen / Breadcrumb Tool Active: Click floor to place & auto-connect chain");
+    }
+    RebuildWaypointRenderer();
+}
+
+void EditorScene::EndPenStroke() {
+    m_penLastWaypointId = 0;
+    m_penRubberbandValid = false;
+    RebuildWaypointRenderer();
+}
+
+void EditorScene::UpdatePenRubberband(const Ray& ray) {
+    if (!m_penToolActive) {
+        m_penRubberbandValid = false;
+        return;
+    }
+    Vector3 hitPos;
+    if (ScenePicker::PickBSPFloor(*this, ray, &hitPos)) {
+        m_penRubberbandValid = true;
+        m_penRubberbandTarget = hitPos + Vector3(0.0f, 0.0f, 18.0f);
+        if (m_penLastWaypointId != 0) {
+            const WaypointNode* lastWp = m_waypoints.GetNodeByID(m_penLastWaypointId);
+            if (lastWp) {
+                m_penRubberbandDist = (m_penRubberbandTarget - lastWp->origin).Length();
+                if (m_bsp && m_bsp->IsLoaded()) {
+                    BSPTraceResult tr;
+                    m_bsp->TraceWorld(lastWp->origin + Vector3(0,0,36), m_penRubberbandTarget + Vector3(0,0,36), HULL_HUMAN, &tr);
+                    m_penRubberbandClear = (tr.fraction >= 0.95f && !tr.startsolid);
+                } else {
+                    m_penRubberbandClear = true;
+                }
+            }
+        }
+        RebuildWaypointRenderer();
+    } else {
+        if (m_penRubberbandValid) {
+            m_penRubberbandValid = false;
+            RebuildWaypointRenderer();
+        }
+    }
+}
+
+uint32_t EditorScene::OnPenClick(const Ray& ray) {
+    if (!m_penToolActive) return 0;
+
+    // Check if clicked an existing waypoint
+    float dist = 0.0f;
+    uint32_t hitWpt = ScenePicker::PickWaypoint(*this, ray, &dist);
+    if (hitWpt != 0) {
+        if (m_penLastWaypointId != 0 && m_penLastWaypointId != hitWpt) {
+            m_waypoints.ConnectNodes(m_penLastWaypointId, hitWpt, true, WPT_CONN_NONE);
+            m_isModified = true;
+        }
+        m_penLastWaypointId = hitWpt;
+        m_selectedWaypointId = hitWpt;
+        m_selectedWaypointIds.clear();
+        m_selectedWaypointIds.insert(hitWpt);
+        RebuildWaypointRenderer();
+        return hitWpt;
+    }
+
+    // Otherwise place new waypoint on floor
+    Vector3 floorHit;
+    if (!ScenePicker::PickBSPFloor(*this, ray, &floorHit)) {
+        return 0;
+    }
+
+    Vector3 spawnPos = floorHit + Vector3(0.0f, 0.0f, 18.0f);
+    WaypointNode* newNode = m_waypoints.AddNode(spawnPos, m_activeWaypointAddFlags, m_activeWaypointAddRadius);
+    if (!newNode) return 0;
+
+    uint32_t newId = newNode->id;
+    if (m_penLastWaypointId != 0) {
+        m_waypoints.ConnectNodes(m_penLastWaypointId, newId, true, WPT_CONN_NONE);
+    }
+
+    m_penLastWaypointId = newId;
+    m_selectedWaypointId = newId;
+    m_selectedWaypointIds.clear();
+    m_selectedWaypointIds.insert(newId);
+    m_isModified = true;
+    RebuildWaypointRenderer();
+    ShowToast("Pen placed Waypoint #" + std::to_string(newId));
+    return newId;
+}
+
+// --- Automatic Goal / Objective Snapping ---
+
+size_t EditorScene::SnapObjectivesFromEntities() {
+    if (!HasBSP()) {
+        ShowToast("No BSP loaded for objective snapping!");
+        return 0;
+    }
+
+    size_t objectivesHandled = 0;
+    const auto& entities = m_bsp->GetEntities();
+
+    auto FindOrCreateObjectiveWp = [&](const Vector3& origin, uint32_t flag) {
+        Vector3 floorPos = origin;
+        Vector3 ground;
+        if (m_bsp->GetGround(origin + Vector3(0, 0, 18.0f), &ground, 500.0f)) {
+            floorPos = ground + Vector3(0, 0, 18.0f);
+        }
+
+        int nearestIdx = m_waypoints.FindNearestNode(floorPos, 80.0f);
+        if (nearestIdx >= 0) {
+            WaypointNode& node = m_waypoints.GetNodes()[nearestIdx];
+            node.origin = floorPos;
+            node.flags |= flag;
+            objectivesHandled++;
+        } else {
+            WaypointNode* node = m_waypoints.AddNode(floorPos, flag, 48.0f);
+            if (node) {
+                int nearNeighbor = m_waypoints.FindNearestNode(floorPos, 250.0f);
+                if (nearNeighbor >= 0 && m_waypoints.GetNodes()[nearNeighbor].id != node->id) {
+                    m_waypoints.ConnectNodes(node->id, m_waypoints.GetNodes()[nearNeighbor].id, true, WPT_CONN_NONE);
+                }
+                objectivesHandled++;
+            }
+        }
+    };
+
+    for (const auto& ent : entities) {
+        std::string cls = ent.classname;
+        Vector3 org = ent.origin;
+
+        if (cls == "info_player_start") {
+            FindOrCreateObjectiveWp(org, WPT_FLAG_TEAM_CT);
+        } else if (cls == "info_player_deathmatch") {
+            FindOrCreateObjectiveWp(org, WPT_FLAG_TEAM_T);
+        } else if (cls == "func_bomb_target" || cls == "info_bomb_target") {
+            FindOrCreateObjectiveWp(org, WPT_FLAG_GOAL);
+        } else if (cls == "hostage_entity" || cls == "info_hostage_goal" || cls == "func_hostage_rescue") {
+            FindOrCreateObjectiveWp(org, WPT_FLAG_RESCUE | WPT_FLAG_GOAL);
+        } else if (cls == "func_vip_safetyzone" || cls == "info_vip_start") {
+            FindOrCreateObjectiveWp(org, WPT_FLAG_GOAL | WPT_FLAG_TEAM_CT);
+        } else if (cls == "armoury_entity") {
+            FindOrCreateObjectiveWp(org, WPT_FLAG_GOAL);
+        }
+    }
+
+    if (objectivesHandled > 0) {
+        m_isModified = true;
+        RebuildWaypointRenderer();
+        ShowToast("Snapped / Created " + std::to_string(objectivesHandled) + " Map Objectives from BSP Entities!");
+    } else {
+        ShowToast("No objective entities found to snap");
+    }
+
+    return objectivesHandled;
+}
+
+// --- Ladder Waypoint Assigning Tools ---
+
+size_t EditorScene::AssignLaddersFromBSP() {
+    if (!HasBSP()) {
+        ShowToast("No BSP loaded for ladder extraction!");
+        return 0;
+    }
+
+    auto ladderEnts = m_bsp->FindEntities("func_ladder");
+    if (ladderEnts.empty()) {
+        ShowToast("No func_ladder entities found in map");
+        return 0;
+    }
+
+    size_t created = 0;
+    for (const BSPEntity* ent : ladderEnts) {
+        std::string modelStr = ent->GetString("model");
+        if (modelStr.empty() || modelStr[0] != '*') continue;
+        int mIdx = std::atoi(modelStr.c_str() + 1);
+        const dmodel_t* mod = m_bsp->GetModel(mIdx);
+        if (!mod) continue;
+
+        Vector3 btm((mod->mins.x + mod->maxs.x) * 0.5f, (mod->mins.y + mod->maxs.y) * 0.5f, mod->mins.z + 18.0f);
+        Vector3 top((mod->mins.x + mod->maxs.x) * 0.5f, (mod->mins.y + mod->maxs.y) * 0.5f, mod->maxs.z);
+
+        WaypointNode* nodeBtm = m_waypoints.AddNode(btm, WPT_FLAG_LADDER, 0.0f);
+        WaypointNode* nodeTop = m_waypoints.AddNode(top, WPT_FLAG_LADDER, 0.0f);
+
+        if (nodeBtm && nodeTop) {
+            m_waypoints.ConnectNodes(nodeBtm->id, nodeTop->id, true, WPT_CONN_NONE);
+            created += 2;
+
+            int nearBtm = m_waypoints.FindNearestNode(btm, 180.0f);
+            if (nearBtm >= 0) {
+                uint32_t nbId = m_waypoints.GetNodes()[nearBtm].id;
+                if (nbId != nodeBtm->id && nbId != nodeTop->id) {
+                    m_waypoints.ConnectNodes(nodeBtm->id, nbId, true, WPT_CONN_NONE);
+                }
+            }
+
+            int nearTop = m_waypoints.FindNearestNode(top, 180.0f);
+            if (nearTop >= 0) {
+                uint32_t ntId = m_waypoints.GetNodes()[nearTop].id;
+                if (ntId != nodeBtm->id && ntId != nodeTop->id) {
+                    m_waypoints.ConnectNodes(nodeTop->id, ntId, true, WPT_CONN_NONE);
+                }
+            }
+        }
+    }
+
+    if (created > 0) {
+        m_isModified = true;
+        RebuildWaypointRenderer();
+        ShowToast("Created " + std::to_string(created) + " ladder waypoints from BSP func_ladder!");
+    }
+    return created;
+}
+
+bool EditorScene::CreateLadderPairFromSelected() {
+    if (m_selectedWaypointIds.size() != 2) {
+        ShowToast("Please select exactly 2 waypoints to form a ladder pair");
+        return false;
+    }
+    auto it = m_selectedWaypointIds.begin();
+    uint32_t idA = *it++;
+    uint32_t idB = *it;
+
+    WaypointNode* nA = m_waypoints.GetNodeByID(idA);
+    WaypointNode* nB = m_waypoints.GetNodeByID(idB);
+    if (!nA || !nB) return false;
+
+    nA->flags |= WPT_FLAG_LADDER;
+    nA->radius = 0.0f;
+    nB->flags |= WPT_FLAG_LADDER;
+    nB->radius = 0.0f;
+
+    m_waypoints.ConnectNodes(idA, idB, true, WPT_CONN_NONE);
+    m_isModified = true;
+    RebuildWaypointRenderer();
+    ShowToast("Created bidirectional Ladder Pair between #" + std::to_string(idA) + " and #" + std::to_string(idB));
+    return true;
+}
+
+// --- Ghost Bot Simulation & Path Auditing ---
+
+bool EditorScene::StartGhostBotSimulation(uint32_t startId, uint32_t goalId) {
+    if (startId == 0 || goalId == 0 || startId == goalId) {
+        ShowToast("Invalid Start / Goal waypoint IDs for simulation");
+        return false;
+    }
+
+    m_ghostBotStartId = startId;
+    m_ghostBotGoalId = goalId;
+    float cost = 0.0f;
+    if (!m_waypoints.FindPath(startId, goalId, m_ghostBotPath, &cost)) {
+        ShowToast("No reachable path found between Waypoint #" + std::to_string(startId) + " and #" + std::to_string(goalId));
+        m_ghostBotActive = false;
+        m_ghostBotPath.clear();
+        return false;
+    }
+
+    m_ghostBotAudit = m_waypoints.AuditPath(m_ghostBotPath, m_bsp.get());
+    m_ghostBotActive = true;
+    m_ghostBotPaused = false;
+    m_ghostBotCurrentStep = 0;
+    m_ghostBotStepProgress = 0.0f;
+
+    const WaypointNode* startNode = m_waypoints.GetNodeByID(startId);
+    if (startNode) {
+        m_ghostBotPos = startNode->origin;
+        if (m_ghostBotPath.size() >= 2) {
+            const WaypointNode* nextNode = m_waypoints.GetNodeByID(m_ghostBotPath[1]);
+            if (nextNode) {
+                Vector3 d = nextNode->origin - startNode->origin;
+                m_ghostBotYaw = std::atan2(d.y, d.x) * 180.0f / (float)M_PI;
+            }
+        }
+    }
+
+    RebuildWaypointRenderer();
+    ShowToast("Ghost Bot Simulation Started: " + std::to_string(m_ghostBotPath.size()) + " nodes (" +
+              std::to_string((int)m_ghostBotAudit.totalDistance) + "u distance)");
+    return true;
+}
+
+void EditorScene::StopGhostBotSimulation() {
+    m_ghostBotActive = false;
+    m_ghostBotPaused = false;
+    m_ghostBotPath.clear();
+    RebuildWaypointRenderer();
+    ShowToast("Ghost Bot Simulation Stopped");
+}
+
+void EditorScene::ResetGhostBotSimulation() {
+    m_ghostBotCurrentStep = 0;
+    m_ghostBotStepProgress = 0.0f;
+    if (!m_ghostBotPath.empty()) {
+        const WaypointNode* startNode = m_waypoints.GetNodeByID(m_ghostBotPath[0]);
+        if (startNode) m_ghostBotPos = startNode->origin;
+    }
+    RebuildWaypointRenderer();
+}
+
+void EditorScene::StepGhostBotSimulation() {
+    if (m_ghostBotPath.size() < 2) return;
+    m_ghostBotCurrentStep++;
+    if (m_ghostBotCurrentStep + 1 >= m_ghostBotPath.size()) {
+        if (m_ghostBotLoop) m_ghostBotCurrentStep = 0;
+        else m_ghostBotCurrentStep = m_ghostBotPath.size() - 2;
+    }
+    const WaypointNode* n = m_waypoints.GetNodeByID(m_ghostBotPath[m_ghostBotCurrentStep]);
+    if (n) m_ghostBotPos = n->origin;
+    RebuildWaypointRenderer();
+}
+
+void EditorScene::UpdateGhostBot(float dt) {
+    if (!m_ghostBotActive || m_ghostBotPaused || m_ghostBotPath.size() < 2) return;
+
+    if (m_ghostBotCurrentStep + 1 >= m_ghostBotPath.size()) {
+        if (m_ghostBotLoop) {
+            m_ghostBotCurrentStep = 0;
+            m_ghostBotStepProgress = 0.0f;
+            const WaypointNode* n0 = m_waypoints.GetNodeByID(m_ghostBotPath[0]);
+            if (n0) m_ghostBotPos = n0->origin;
+        } else {
+            m_ghostBotPaused = true;
+            return;
+        }
+    }
+
+    const WaypointNode* nCur = m_waypoints.GetNodeByID(m_ghostBotPath[m_ghostBotCurrentStep]);
+    const WaypointNode* nNext = m_waypoints.GetNodeByID(m_ghostBotPath[m_ghostBotCurrentStep + 1]);
+    if (!nCur || !nNext) return;
+
+    Vector3 segVec = nNext->origin - nCur->origin;
+    float segLen = segVec.Length();
+    if (segLen <= 1.0f) {
+        m_ghostBotCurrentStep++;
+        return;
+    }
+
+    float baseSpeed = 250.0f;
+    if (nNext->flags & WPT_FLAG_CROUCH) baseSpeed = 90.0f;
+    else if (nNext->flags & WPT_FLAG_LADDER) baseSpeed = 150.0f;
+
+    float moveSpeed = baseSpeed * m_ghostBotSpeedMultiplier;
+    float distToMove = moveSpeed * dt;
+
+    float currentDistAlongSeg = m_ghostBotStepProgress * segLen;
+    float newDist = currentDistAlongSeg + distToMove;
+
+    if (newDist >= segLen) {
+        m_ghostBotCurrentStep++;
+        m_ghostBotStepProgress = 0.0f;
+        m_ghostBotPos = nNext->origin;
+    } else {
+        m_ghostBotStepProgress = newDist / segLen;
+        m_ghostBotPos = nCur->origin + segVec * m_ghostBotStepProgress;
+    }
+
+    if (segVec.Length() > 0.1f) {
+        m_ghostBotYaw = std::atan2(segVec.y, segVec.x) * 180.0f / (float)M_PI;
+    }
+
+    RebuildWaypointRenderer();
 }

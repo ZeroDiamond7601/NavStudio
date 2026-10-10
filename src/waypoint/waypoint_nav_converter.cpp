@@ -44,6 +44,22 @@ WaypointNavConverter::ConvertStats WaypointNavConverter::NavToWaypoints(
             }
         }
 
+        // Objective flag mapping from Nav Place names
+        const std::string& place = area->GetPlaceName();
+        if (!place.empty()) {
+            std::string lowerPlace = place;
+            for (char& c : lowerPlace) c = static_cast<char>(std::tolower(c));
+            if (lowerPlace.find("bomb") != std::string::npos || lowerPlace.find("site") != std::string::npos) {
+                flags |= WPT_FLAG_GOAL;
+            } else if (lowerPlace.find("hostage") != std::string::npos || lowerPlace.find("rescue") != std::string::npos) {
+                flags |= WPT_FLAG_RESCUE;
+            } else if (lowerPlace.find("ctspawn") != std::string::npos || lowerPlace.find("ct_spawn") != std::string::npos) {
+                flags |= WPT_FLAG_TEAM_CT;
+            } else if (lowerPlace.find("tspawn") != std::string::npos || lowerPlace.find("terrorist") != std::string::npos) {
+                flags |= WPT_FLAG_TEAM_T;
+            }
+        }
+
         WaypointNode* node = outGraph.AddNode(center, flags, radius);
         if (node) {
             areaToWp[area->GetID()] = node->id;
@@ -93,8 +109,10 @@ WaypointNavConverter::ConvertStats WaypointNavConverter::NavToWaypoints(
                 uint16_t connFlags = WPT_CONN_NONE;
                 // Detect step elevation requiring a jump
                 float zDiff = adj->GetCenter().z - area->GetCenter().z;
-                if (zDiff > 18.0f && zDiff <= 45.0f) {
+                if (zDiff > 18.0f && zDiff <= 55.0f) {
                     connFlags |= WPT_CONN_JUMP;
+                } else if (adj->HasAttributes(NAV_ATTR_CROUCH) || area->HasAttributes(NAV_ATTR_CROUCH)) {
+                    connFlags |= WPT_CONN_CROUCH;
                 }
 
                 // Check if connection is bidirectional
@@ -106,12 +124,12 @@ WaypointNavConverter::ConvertStats WaypointNavConverter::NavToWaypoints(
         }
     }
 
-    // 3. Convert Ladders
+    // 3. Convert Ladders (Enforcing 0-radius for precise bot climbing)
     for (const NavLadder* ladder : nav.GetLadders()) {
         if (!ladder) continue;
 
-        WaypointNode* bottomNode = outGraph.AddNode(ladder->bottom, WPT_FLAG_LADDER, ladder->width * 0.5f);
-        WaypointNode* topNode = outGraph.AddNode(ladder->top, WPT_FLAG_LADDER, ladder->width * 0.5f);
+        WaypointNode* bottomNode = outGraph.AddNode(ladder->bottom, WPT_FLAG_LADDER, 0.0f);
+        WaypointNode* topNode = outGraph.AddNode(ladder->top, WPT_FLAG_LADDER, 0.0f);
 
         if (bottomNode && topNode) {
             outGraph.ConnectNodes(bottomNode->id, topNode->id, true, WPT_CONN_NONE);
@@ -176,6 +194,17 @@ size_t WaypointNavConverter::WaypointsToNav(
                 area->SetAttributes(area->GetAttributes() | NAV_ATTR_NO_JUMP);
             }
 
+            // Map place names from goal/spawn/rescue flags
+            if (node.flags & WPT_FLAG_GOAL) {
+                area->SetPlaceName("Bombsite");
+            } else if (node.flags & WPT_FLAG_RESCUE) {
+                area->SetPlaceName("HostageRescue");
+            } else if (node.flags & WPT_FLAG_TEAM_CT) {
+                area->SetPlaceName("CTSpawn");
+            } else if (node.flags & WPT_FLAG_TEAM_T) {
+                area->SetPlaceName("TSpawn");
+            }
+
             // Map sniper & camp flags back to hiding spots
             if (node.flags & WPT_FLAG_SNIPER) {
                 NavHidingSpot spot;
@@ -211,5 +240,44 @@ size_t WaypointNavConverter::WaypointsToNav(
         }
     }
 
+    // Convert ladder waypoint pairs into NavLadder structures
+    uint32_t ladderId = 1;
+    for (const auto& node : nodes) {
+        if (!(node.flags & WPT_FLAG_LADDER)) continue;
+
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            int16_t targetId = node.connections[c];
+            if (targetId <= 0) continue;
+            const WaypointNode* targetNode = graph.GetNodeByID(static_cast<uint32_t>(targetId));
+            if (!targetNode || !(targetNode->flags & WPT_FLAG_LADDER)) continue;
+
+            // Only process bottom-to-top pair to avoid duplicates
+            if (node.origin.z < targetNode->origin.z) {
+                NavLadder* ladder = new NavLadder();
+                ladder->id = ladderId++;
+                ladder->bottom = node.origin;
+                ladder->top = targetNode->origin;
+                ladder->length = targetNode->origin.z - node.origin.z;
+                ladder->width = std::max(32.0f, std::max(node.radius, targetNode->radius) * 2.0f);
+
+                Vector3 delta = targetNode->origin - node.origin;
+                if (std::abs(delta.x) > std::abs(delta.y)) {
+                    ladder->dir = (delta.x > 0) ? NAV_DIR_EAST : NAV_DIR_WEST;
+                } else {
+                    ladder->dir = (delta.y > 0) ? NAV_DIR_SOUTH : NAV_DIR_NORTH;
+                }
+
+                auto itB = wpToArea.find(node.id);
+                if (itB != wpToArea.end()) ladder->bottomArea = outNav.GetAreaByID(itB->second);
+
+                auto itT = wpToArea.find(targetNode->id);
+                if (itT != wpToArea.end()) ladder->topForwardArea = outNav.GetAreaByID(itT->second);
+
+                outNav.GetLadders().push_back(ladder);
+            }
+        }
+    }
+
+    outNav.RebuildGrid();
     return outNav.GetAreas().size();
 }

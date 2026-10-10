@@ -514,7 +514,20 @@ public:
     void ToggleShowParkourJumpArcs();
 
     uint32_t GetSelectedWaypointID() const { return m_selectedWaypointId; }
-    void SelectWaypoint(uint32_t id);
+    void SelectWaypoint(uint32_t id, bool addToSelection = false);
+    void DeselectWaypoint(uint32_t id);
+    void SelectAllWaypoints();
+    void ClearWaypointSelection();
+    void InvertWaypointSelection();
+    bool HasWaypointMultiSelection() const { return m_selectedWaypointIds.size() > 1; }
+    const std::unordered_set<uint32_t>& GetSelectedWaypointIDs() const { return m_selectedWaypointIds; }
+    void BoxSelectWaypoints(const std::vector<uint32_t>& pickedIds, bool additive = false, bool subtractive = false);
+    void BatchSetWaypointFlags(uint32_t flag, bool setOrToggle);
+    void BatchSetWaypointRadius(float radius);
+    void BatchDeleteWaypoints();
+    void BatchConnectSelectedWaypoints(bool bidirectional = true);
+    void BatchSnapWaypointsToFloor();
+
     WaypointNode* GetSelectedWaypoint();
     const WaypointNode* GetSelectedWaypoint() const;
 
@@ -526,7 +539,27 @@ public:
     void RebuildWaypointRenderer();
     WaypointGraph::WaypointAnalysisStats AutoAnalyzeWaypoints();
     WaypointGraph::WaypointOptimizeStats OptimizeWaypoints(const WaypointGraph::WaypointOptimizeOptions& options = WaypointGraph::WaypointOptimizeOptions());
-    WaypointGraph::WaypointParkourStats GenerateParkour(const WaypointGraph::WaypointParkourOptions& options = WaypointGraph::WaypointParkourOptions());
+    WaypointGraph::WaypointParkourStats GenerateParkour(const WaypointGraph::WaypointParkourOptions& options = WaypointParkourOptions());
+
+    // Asynchronous Waypoint Tasks & Progress Tracking
+    struct WaypointTaskProgress {
+        std::atomic<bool> isRunning{false};
+        std::atomic<float> progress{0.0f};
+        std::string taskName{"Idle"};
+        std::string statusMessage{"Idle"};
+        bool completed{false};
+        bool success{false};
+        double durationSeconds{0.0};
+        std::string resultSummary;
+    };
+    WaypointTaskProgress& GetWaypointTaskProgress() { return m_waypointTaskProgress; }
+    const WaypointTaskProgress& GetWaypointTaskProgress() const { return m_waypointTaskProgress; }
+    bool IsWaypointTaskRunning() const { return m_waypointTaskProgress.isRunning.load(); }
+
+    bool StartAsyncOptimizeWaypoints(const WaypointGraph::WaypointOptimizeOptions& options = WaypointGraph::WaypointOptimizeOptions());
+    bool StartAsyncGenerateParkour(const WaypointGraph::WaypointParkourOptions& options = WaypointGraph::WaypointParkourOptions());
+    bool StartAsyncAutoAnalyzeWaypoints();
+    void UpdateWaypointTasks();
 
     // Map Navigation Mode Selection Prompt (when map has both .nav and bot waypoints)
     bool HasPendingNavOrWptChoice() const { return m_showNavOrWptPrompt; }
@@ -561,6 +594,42 @@ public:
     void SnapSelectedWaypointToFloor();
     bool ConnectSelectedWaypointTo(uint32_t targetId, uint16_t connFlags = WPT_CONN_NONE, bool bidirectional = true);
     void DeleteSelectedWaypoint();
+
+    // Continuous Pen / Breadcrumb Path Tool
+    bool IsPenToolActive() const { return m_penToolActive; }
+    void SetPenToolActive(bool active);
+    void TogglePenTool() { SetPenToolActive(!m_penToolActive); }
+    void EndPenStroke();
+    uint32_t OnPenClick(const Ray& ray);
+    void UpdatePenRubberband(const Ray& ray);
+
+    // Automatic Goal / Objective Snapping
+    size_t SnapObjectivesFromEntities();
+
+    // Ladder Waypoint Assigning Tools
+    size_t AssignLaddersFromBSP();
+    bool CreateLadderPairFromSelected();
+
+    // Ghost Bot Simulation & Path Auditing
+    bool StartGhostBotSimulation(uint32_t startId, uint32_t goalId);
+    void StopGhostBotSimulation();
+    void TogglePauseGhostBot() { m_ghostBotPaused = !m_ghostBotPaused; }
+    void ResetGhostBotSimulation();
+    void StepGhostBotSimulation();
+    void UpdateGhostBot(float dt);
+    bool IsGhostBotActive() const { return m_ghostBotActive; }
+    bool IsGhostBotPaused() const { return m_ghostBotPaused; }
+    uint32_t GetGhostBotStartID() const { return m_ghostBotStartId; }
+    uint32_t GetGhostBotGoalID() const { return m_ghostBotGoalId; }
+    const std::vector<uint32_t>& GetGhostBotPath() const { return m_ghostBotPath; }
+    const WaypointPathAudit& GetGhostBotAudit() const { return m_ghostBotAudit; }
+    const Vector3& GetGhostBotPos() const { return m_ghostBotPos; }
+    float GetGhostBotYaw() const { return m_ghostBotYaw; }
+    size_t GetGhostBotCurrentStep() const { return m_ghostBotCurrentStep; }
+    void SetGhostBotSpeedMultiplier(float speed) { m_ghostBotSpeedMultiplier = speed; }
+    float GetGhostBotSpeedMultiplier() const { return m_ghostBotSpeedMultiplier; }
+    bool GetGhostBotLoop() const { return m_ghostBotLoop; }
+    void SetGhostBotLoop(bool loop) { m_ghostBotLoop = loop; }
 
     // Cache Waypoint & Linking (matching CS-EBOT in-game commands)
     void CacheWaypoint(uint32_t id = 0);
@@ -846,6 +915,7 @@ private:
     bool m_showWaypointConnections{true};
     bool m_showParkourJumpArcs{true};
     uint32_t m_selectedWaypointId{0};
+    std::unordered_set<uint32_t> m_selectedWaypointIds;
     EditorTargetMode m_targetMode{TARGET_NAVMESH};
     bool m_isAddWaypointMode{false};
     uint32_t m_cachedWaypointId{0};
@@ -853,6 +923,29 @@ private:
     float m_activeWaypointAddRadius{48.0f};
     bool m_autoConnectWaypoints{true};
     int m_waypointConnectType{2};
+
+    // Continuous Pen / Breadcrumb Tool state
+    bool m_penToolActive{false};
+    uint32_t m_penLastWaypointId{0};
+    bool m_penRubberbandValid{false};
+    Vector3 m_penRubberbandTarget;
+    bool m_penRubberbandClear{true};
+    float m_penRubberbandDist{0.0f};
+
+    // Ghost Bot Simulation state
+    bool m_ghostBotActive{false};
+    bool m_ghostBotPaused{false};
+    bool m_ghostBotLoop{true};
+    uint32_t m_ghostBotStartId{0};
+    uint32_t m_ghostBotGoalId{0};
+    std::vector<uint32_t> m_ghostBotPath;
+    WaypointPathAudit m_ghostBotAudit;
+    size_t m_ghostBotCurrentStep{0};
+    Vector3 m_ghostBotPos;
+    float m_ghostBotYaw{0.0f};
+    float m_ghostBotPitch{0.0f};
+    float m_ghostBotSpeedMultiplier{1.0f};
+    float m_ghostBotStepProgress{0.0f};
 
     // E-Bot Waypoint Generator thread state
     WaypointGenProgress m_waypointGenProgress;
@@ -867,6 +960,14 @@ private:
     std::string m_promptWptPath;
     size_t m_promptNavAreaCount{0};
     size_t m_promptWptNodeCount{0};
+
+    // Waypoint Background Tasks thread state
+    WaypointTaskProgress m_waypointTaskProgress;
+    std::thread m_waypointTaskThread;
+    std::mutex m_waypointTaskMutex;
+    WaypointGraph::WaypointOptimizeStats m_lastOptimizeStats;
+    WaypointGraph::WaypointParkourStats m_lastParkourStats;
+    WaypointGraph::WaypointAnalysisStats m_lastAnalysisStats;
 
     void PostGenerateOptimize();
 };

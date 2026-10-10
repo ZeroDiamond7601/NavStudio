@@ -30,9 +30,20 @@ void WaypointRenderer::Clear() {
     m_loaded = false;
 }
 
-bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selectedId, uint32_t hoveredId) {
+bool WaypointRenderer::BuildFromGraph(
+    const WaypointGraph& graph,
+    uint32_t selectedId,
+    uint32_t hoveredId,
+    const std::unordered_set<uint32_t>* selectedSet,
+    const Vector3* penPreviewStart,
+    const Vector3* penPreviewEnd,
+    bool penPreviewClear,
+    const std::vector<uint32_t>* ghostBotPath,
+    const Vector3* ghostBotPos,
+    float ghostBotYaw
+) {
     Clear();
-    if (graph.IsEmpty()) return false;
+    if (graph.IsEmpty() && !penPreviewStart && !ghostBotPos) return false;
 
     const auto& nodes = graph.GetNodes();
     m_nodeCount = nodes.size();
@@ -42,7 +53,7 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
     std::vector<uint32_t> indices;
 
     for (const auto& node : nodes) {
-        bool isSelected = (node.id == selectedId);
+        bool isSelected = (node.id == selectedId) || (selectedSet && selectedSet->find(node.id) != selectedSet->end());
         bool isHovered = (node.id == hoveredId);
 
         // Determine node colors according to exact CS-EBOT / GoldSrc bot color rules:
@@ -452,6 +463,95 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
                 }
             }
         }
+    }
+
+    // Continuous Pen / Breadcrumb Tool rubberband preview line
+    if (penPreviewStart && penPreviewEnd) {
+        float prR = penPreviewClear ? 0.1f : 1.0f;
+        float prG = penPreviewClear ? 1.0f : 0.2f;
+        float prB = 0.1f;
+        uint32_t base = static_cast<uint32_t>(vertices.size());
+        vertices.push_back({ penPreviewStart->x, penPreviewStart->y, penPreviewStart->z + 18.0f, 0,0,1, 0,0, prR, prG, prB, 1.0f });
+        vertices.push_back({ penPreviewEnd->x, penPreviewEnd->y, penPreviewEnd->z + 18.0f, 0,0,1, 0,0, prR, prG, prB, 1.0f });
+        indices.push_back(base + 0); indices.push_back(base + 1);
+
+        // Ground landing crosshair at preview end
+        float crossR = 12.0f;
+        uint32_t cBase = static_cast<uint32_t>(vertices.size());
+        vertices.push_back({ penPreviewEnd->x - crossR, penPreviewEnd->y, penPreviewEnd->z + 2.0f, 0,0,1, 0,0, prR, prG, prB, 0.9f });
+        vertices.push_back({ penPreviewEnd->x + crossR, penPreviewEnd->y, penPreviewEnd->z + 2.0f, 0,0,1, 0,0, prR, prG, prB, 0.9f });
+        vertices.push_back({ penPreviewEnd->x, penPreviewEnd->y - crossR, penPreviewEnd->z + 2.0f, 0,0,1, 0,0, prR, prG, prB, 0.9f });
+        vertices.push_back({ penPreviewEnd->x, penPreviewEnd->y + crossR, penPreviewEnd->z + 2.0f, 0,0,1, 0,0, prR, prG, prB, 0.9f });
+        indices.push_back(cBase + 0); indices.push_back(cBase + 1);
+        indices.push_back(cBase + 2); indices.push_back(cBase + 3);
+    }
+
+    // Ghost Bot simulated path trail
+    if (ghostBotPath && ghostBotPath->size() >= 2) {
+        for (size_t i = 0; i + 1 < ghostBotPath->size(); ++i) {
+            const WaypointNode* pA = graph.GetNodeByID((*ghostBotPath)[i]);
+            const WaypointNode* pB = graph.GetNodeByID((*ghostBotPath)[i + 1]);
+            if (pA && pB) {
+                uint32_t pBase = static_cast<uint32_t>(vertices.size());
+                // Glowing cyan / electric blue trail elevated above ground
+                vertices.push_back({ pA->origin.x, pA->origin.y, pA->origin.z + 16.0f, 0,0,1, 0,0, 0.0f, 0.95f, 1.0f, 1.0f });
+                vertices.push_back({ pB->origin.x, pB->origin.y, pB->origin.z + 16.0f, 0,0,1, 0,0, 0.0f, 0.95f, 1.0f, 1.0f });
+                indices.push_back(pBase + 0); indices.push_back(pBase + 1);
+            }
+        }
+    }
+
+    // Ghost Bot animated player avatar
+    if (ghostBotPos) {
+        Vector3 botPos = *ghostBotPos;
+        float botR = 16.0f;
+        float botH = 72.0f;
+        const int botSegs = 12;
+
+        for (int i = 0; i < botSegs; ++i) {
+            float ang = (float)i * 2.0f * (float)M_PI / (float)botSegs;
+            float nextAng = (float)(i + 1) * 2.0f * (float)M_PI / (float)botSegs;
+            float cx = std::cos(ang) * botR;
+            float cy = std::sin(ang) * botR;
+            float ncx = std::cos(nextAng) * botR;
+            float ncy = std::sin(nextAng) * botR;
+
+            // Feet ring
+            uint32_t segBase = static_cast<uint32_t>(vertices.size());
+            vertices.push_back({ botPos.x + cx, botPos.y + cy, botPos.z + 2.0f, 0,0,1, 0,0, 0.1f, 0.9f, 1.0f, 0.95f });
+            vertices.push_back({ botPos.x + ncx, botPos.y + ncy, botPos.z + 2.0f, 0,0,1, 0,0, 0.1f, 0.9f, 1.0f, 0.95f });
+            indices.push_back(segBase + 0); indices.push_back(segBase + 1);
+
+            // Waist ring
+            segBase = static_cast<uint32_t>(vertices.size());
+            vertices.push_back({ botPos.x + cx, botPos.y + cy, botPos.z + 36.0f, 0,0,1, 0,0, 0.1f, 0.9f, 1.0f, 0.75f });
+            vertices.push_back({ botPos.x + ncx, botPos.y + ncy, botPos.z + 36.0f, 0,0,1, 0,0, 0.1f, 0.9f, 1.0f, 0.75f });
+            indices.push_back(segBase + 0); indices.push_back(segBase + 1);
+
+            // Head ring
+            segBase = static_cast<uint32_t>(vertices.size());
+            vertices.push_back({ botPos.x + cx * 0.7f, botPos.y + cy * 0.7f, botPos.z + botH, 0,0,1, 0,0, 1.0f, 0.95f, 0.2f, 1.0f });
+            vertices.push_back({ botPos.x + ncx * 0.7f, botPos.y + ncy * 0.7f, botPos.z + botH, 0,0,1, 0,0, 1.0f, 0.95f, 0.2f, 1.0f });
+            indices.push_back(segBase + 0); indices.push_back(segBase + 1);
+
+            // Vertical rib lines
+            if (i % 3 == 0) {
+                segBase = static_cast<uint32_t>(vertices.size());
+                vertices.push_back({ botPos.x + cx, botPos.y + cy, botPos.z + 2.0f, 0,0,1, 0,0, 0.1f, 0.9f, 1.0f, 0.8f });
+                vertices.push_back({ botPos.x + cx, botPos.y + cy, botPos.z + botH, 0,0,1, 0,0, 0.1f, 0.9f, 1.0f, 0.8f });
+                indices.push_back(segBase + 0); indices.push_back(segBase + 1);
+            }
+        }
+
+        // Forward gaze line / crosshair (using ghostBotYaw)
+        float yawRad = ghostBotYaw * (float)M_PI / 180.0f;
+        Vector3 fwdDir(std::cos(yawRad), std::sin(yawRad), 0.0f);
+        Vector3 eyePos = botPos + Vector3(0, 0, botH - 8.0f);
+        Vector3 gazeTarget = eyePos + fwdDir * 32.0f;
+        uint32_t gBase = static_cast<uint32_t>(vertices.size());
+        vertices.push_back({ eyePos.x, eyePos.y, eyePos.z, 0,0,1, 0,0, 1.0f, 1.0f, 0.2f, 1.0f });
+        vertices.push_back({ gazeTarget.x, gazeTarget.y, gazeTarget.z, 0,0,1, 0,0, 1.0f, 1.0f, 0.2f, 1.0f });
+        indices.push_back(gBase + 0); indices.push_back(gBase + 1);
     }
 
     if (indices.empty()) return false;
