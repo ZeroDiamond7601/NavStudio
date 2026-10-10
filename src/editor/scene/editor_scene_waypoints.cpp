@@ -1105,7 +1105,23 @@ size_t EditorScene::SnapObjectivesFromEntities() {
 
     for (const auto& ent : entities) {
         std::string cls = ent.classname;
-        Vector3 org = ent.origin;
+        Vector3 org;
+        if (!ent.GetOrigin(org)) {
+            std::string modelStr = ent.GetString("model");
+            if (!modelStr.empty() && modelStr[0] == '*') {
+                int mIdx = std::atoi(modelStr.c_str() + 1);
+                const dmodel_t* mod = m_bsp->GetModel(mIdx);
+                if (mod) {
+                    org = Vector3((mod->mins.x + mod->maxs.x) * 0.5f,
+                                  (mod->mins.y + mod->maxs.y) * 0.5f,
+                                  (mod->mins.z + mod->maxs.z) * 0.5f);
+                } else {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+        }
 
         if (cls == "info_player_start") {
             FindOrCreateObjectiveWp(org, WPT_FLAG_TEAM_CT);
