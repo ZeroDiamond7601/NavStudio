@@ -3965,7 +3965,7 @@ void EditorUI::RenderAboutModal() {
 
     if (ImGui::BeginPopupModal("About NavStudio##AboutModal", &m_showAboutModal, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "NavStudio - GoldSrc BSP & NavMesh / Waypoint Editor");
-        ImGui::TextDisabled("Version 1.6.8.3 (Win32 / Linux)");
+        ImGui::TextDisabled("Version 1.7.0 (Win32 / Linux)");
         ImGui::Separator();
         ImGui::Spacing();
 
