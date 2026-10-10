@@ -799,7 +799,7 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                     m_showGenerateModal = true;
                     m_generateStatusText.clear();
                 }
-                if (ImGui::MenuItem("Batch Generate NavMeshes...", nullptr)) {
+                if (ImGui::MenuItem("Batch Mass-Produce Navigation (Nav & Waypoints)...", nullptr)) {
                     m_showBatchGenerateModal = true;
                 }
                 ImGui::EndMenu();
@@ -1006,6 +1006,10 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             if (ImGui::BeginMenu("Generation & Conversion")) {
                 if (ImGui::MenuItem("Generate CS-EBOT Waypoints (Auto)...", nullptr, false, scene.HasBSP())) {
                     m_showEBotGenModal = true;
+                }
+                if (ImGui::MenuItem("Batch Generate Bot Waypoints...", nullptr)) {
+                    m_batchTargetType = 1;
+                    m_showBatchGenerateModal = true;
                 }
                 if (ImGui::MenuItem("Convert NAV to Bot Waypoints...", nullptr, false, scene.HasNAV())) {
                     OpenNavToWaypointModal();
@@ -3367,7 +3371,7 @@ void EditorUI::RenderBSPGlobalInspector(EditorScene& scene) {
         m_showGenerateModal = true;
         m_generateStatusText.clear();
     }
-    if (ImGui::Button("Batch Generate NAVs...", ImVec2(-1, 26))) {
+    if (ImGui::Button("Batch Generate (Nav / Waypoints)...", ImVec2(-1, 26))) {
         m_showBatchGenerateModal = true;
     }
 }
@@ -6204,6 +6208,8 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
             { "Tool", "Bridge Between Edges", "B", [&]() { scene.ToggleBridgeMode(); } },
             { "Tool", "Connection Selection Mode", "Alt+C", [&]() { scene.ToggleConnectionSelectionMode(); } },
             { "Generate", "Auto-Generate NavMesh", "Ctrl+G", [&]() { if (scene.HasBSP()) m_showGenerateModal = true; } },
+            { "Generate", "Batch Mass-Produce (NavMeshes & Bot Waypoints)...", "", [&]() { m_showBatchGenerateModal = true; } },
+            { "Waypoints", "Batch Generate Bot Waypoints...", "", [&]() { m_batchTargetType = 1; m_showBatchGenerateModal = true; } },
             { "Generate", "Optimize Mesh (Coplanar Merge)", "", [&]() { if (scene.HasNAV()) { m_optimizeStats = scene.OptimizeMesh(cmdMgr, false); m_showOptimizeModal = true; } } },
             { "Generate", "Auto-Flag Obstacles (Crouch/Jump)", "", [&]() { if (scene.HasNAV()) { m_analyzerStats = scene.AutoAnalyzeFlags(cmdMgr, false); m_showAnalyzerModal = true; } } },
             { "View", "Snap View: Top (+Z)", "F2", [&]() { camera.SnapToPreset(0); } },
