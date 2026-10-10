@@ -939,7 +939,7 @@ static void ProcessInput(GLFWwindow* window, float deltaTime) {
 
 static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
     static std::string lastTitle = "";
-    std::string title = "NavStudio v1.6.4";
+    std::string title = "NavStudio v1.6.5";
     if (scene.HasBSP() || scene.HasNAV()) {
         std::string map = "";
         if (scene.HasBSP()) {
@@ -963,7 +963,7 @@ static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
 
 int main(int argc, char* argv[]) {
     std::printf("====================================================\n");
-    std::printf("  NavStudio v1.6.4\n");
+    std::printf("  NavStudio v1.6.5\n");
     std::printf("====================================================\n");
 
     if (!glfwInit()) {
@@ -991,6 +991,8 @@ int main(int argc, char* argv[]) {
     bool hasCustomCamAngles = false;
     float customPitch = -20.0f;
     float customYaw = 90.0f;
+    std::string customWptPath = "";
+    bool forceWaypointMode = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -1004,6 +1006,13 @@ int main(int argc, char* argv[]) {
             customEntities = std::atoi(argv[++i]);
         } else if (arg == "--select-area" && i + 1 < argc) {
             customSelectArea = static_cast<uint32_t>(std::atoi(argv[++i]));
+        } else if ((arg == "--waypoints" || arg == "--wpt") && i + 1 < argc) {
+            customWptPath = argv[++i];
+        } else if (arg == "--mode" && i + 1 < argc) {
+            std::string m = argv[++i];
+            if (m == "waypoints" || m == "wpt" || m == "ebot") {
+                forceWaypointMode = true;
+            }
         } else if (arg == "--cam-pos" && i + 3 < argc) {
             customCamPos.x = static_cast<float>(std::atof(argv[++i]));
             customCamPos.y = static_cast<float>(std::atof(argv[++i]));
@@ -1027,7 +1036,7 @@ int main(int argc, char* argv[]) {
         initialHeight = 1080;
     }
 
-    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.6.4", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.6.5", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "[Error] Failed to create GLFW window\n");
         glfwTerminate();
@@ -1094,6 +1103,14 @@ int main(int argc, char* argv[]) {
     // Load initial map if passed via arguments
     if (!argPath.empty()) {
         scene.StartAsyncLoad(argPath);
+    }
+
+    if (!customWptPath.empty()) {
+        scene.LoadWaypoints(customWptPath);
+    }
+    if (forceWaypointMode) {
+        scene.SetTargetMode(EditorScene::TARGET_WAYPOINTS);
+        scene.SetShowWaypoints(true);
     }
 
     glEnable(GL_DEPTH_TEST);

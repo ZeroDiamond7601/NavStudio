@@ -891,6 +891,8 @@ void EditorScene::StartAsyncLoad(const std::string& bspOrNavPath, const std::str
     m_loadCtx.errorMessage.clear();
     m_loadCtx.loadedBsp.reset();
     m_loadCtx.loadedNav.reset();
+    m_loadCtx.loadedWpt.reset();
+    m_loadCtx.targetWptPath.clear();
 
     std::string filename = bspOrNavPath;
     size_t lastSlash = filename.find_last_of("/\\");
@@ -962,6 +964,32 @@ void EditorScene::StartAsyncLoad(const std::string& bspOrNavPath, const std::str
                 }
             }
 
+            // Check for matching waypoint file (.ewp, .spt, .pwf, .wpt)
+            std::string baseWithoutExt = bspOrNavPath;
+            size_t dotPos = baseWithoutExt.find_last_of('.');
+            if (dotPos != std::string::npos) {
+                baseWithoutExt = baseWithoutExt.substr(0, dotPos);
+            }
+            std::string possibleWptPaths[] = {
+                baseWithoutExt + ".ewp",
+                baseWithoutExt + ".spt",
+                baseWithoutExt + ".pwf",
+                baseWithoutExt + ".wpt"
+            };
+            for (const auto& wPath : possibleWptPaths) {
+                std::ifstream testWpt(wPath.c_str(), std::ios::binary);
+                if (testWpt.good()) {
+                    testWpt.close();
+                    auto newWpt = std::make_unique<WaypointGraph>();
+                    if (newWpt->Load(wPath)) {
+                        std::lock_guard<std::mutex> lock(m_loadCtx.mutex);
+                        m_loadCtx.loadedWpt = std::move(newWpt);
+                        m_loadCtx.targetWptPath = wPath;
+                        break;
+                    }
+                }
+            }
+
             {
                 std::lock_guard<std::mutex> lock(m_loadCtx.mutex);
                 m_loadCtx.statusText = "Building GPU mesh buffers...";
@@ -991,6 +1019,43 @@ void EditorScene::StartAsyncLoad(const std::string& bspOrNavPath, const std::str
                 m_loadCtx.progress = 0.85f;
                 m_loadCtx.loadedNav = std::move(newNav);
                 m_loadCtx.targetNavPath = bspOrNavPath;
+                m_loadCtx.progress = 1.0f;
+                m_loadCtx.success = true;
+                m_loadCtx.finished = true;
+            }
+        } else if (lowerPath.length() >= 4 &&
+                   (lowerPath.compare(lowerPath.length() - 4, 4, ".ewp") == 0 ||
+                    lowerPath.compare(lowerPath.length() - 4, 4, ".pwf") == 0 ||
+                    lowerPath.compare(lowerPath.length() - 4, 4, ".spt") == 0 ||
+                    lowerPath.compare(lowerPath.length() - 4, 4, ".wpt") == 0)) {
+            // Direct waypoint file loading
+            auto newWpt = std::make_unique<WaypointGraph>();
+            if (!newWpt->Load(bspOrNavPath)) {
+                std::lock_guard<std::mutex> lock(m_loadCtx.mutex);
+                m_loadCtx.errorMessage = "Failed to load waypoint file: " + bspOrNavPath;
+                m_loadCtx.finished = true;
+                m_loadCtx.success = false;
+                return;
+            }
+
+            // Check for matching BSP map
+            std::string baseWithoutExt = bspOrNavPath.substr(0, bspOrNavPath.find_last_of('.'));
+            std::string bspMatch = baseWithoutExt + ".bsp";
+            std::ifstream testBsp(bspMatch.c_str(), std::ios::binary);
+            if (testBsp.good()) {
+                testBsp.close();
+                auto newBsp = std::make_unique<BSPFile>();
+                if (newBsp->Load(bspMatch)) {
+                    std::lock_guard<std::mutex> lock(m_loadCtx.mutex);
+                    m_loadCtx.loadedBsp = std::move(newBsp);
+                    m_loadCtx.targetBspPath = bspMatch;
+                }
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(m_loadCtx.mutex);
+                m_loadCtx.loadedWpt = std::move(newWpt);
+                m_loadCtx.targetWptPath = bspOrNavPath;
                 m_loadCtx.progress = 1.0f;
                 m_loadCtx.success = true;
                 m_loadCtx.finished = true;
@@ -1074,6 +1139,17 @@ void EditorScene::UpdateAsyncLoading(float deltaTime) {
                 m_hoveredAreaId = 0;
                 AddRecentFile(m_navPath);
                 RebuildNavRenderer();
+            }
+
+            if (m_loadCtx.loadedWpt) {
+                m_waypoints = std::move(*m_loadCtx.loadedWpt);
+                m_waypointPath = m_loadCtx.targetWptPath;
+                m_selectedWaypointId = 0;
+                m_cachedWaypointId = 0;
+                m_showWaypoints = true;
+                m_waypointRenderer.SetShowWaypoints(true);
+                RebuildWaypointRenderer();
+                AddRecentFile(m_waypointPath);
             }
 
             m_errorMessage.clear();

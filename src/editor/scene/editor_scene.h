@@ -35,12 +35,14 @@ struct AsyncLoadContext {
 
     std::string targetBspPath;
     std::string targetNavPath;
+    std::string targetWptPath;
     std::string filename;
     std::string statusText;
     std::string errorMessage;
 
     std::unique_ptr<BSPFile> loadedBsp;
     std::unique_ptr<NavMesh> loadedNav;
+    std::unique_ptr<WaypointGraph> loadedWpt;
     std::mutex mutex;
 
     float minDisplayTimer{0.0f};
