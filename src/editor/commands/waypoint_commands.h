@@ -184,7 +184,7 @@ public:
         auto* node = m_scene->GetWaypoints().GetNode(m_id);
         if (node) {
             node->origin = m_newPos;
-            if (m_scene->HasBSP()) m_scene->GetWaypoints().CalculateWayzone(m_id, m_scene->GetBSP());
+            if (m_scene->HasBSP()) m_scene->GetWaypoints().CalculateWayzone(m_id, &m_scene->GetBSP());
             m_scene->SetModified(true);
             m_scene->RebuildWaypointRenderer();
         }
@@ -195,7 +195,7 @@ public:
         auto* node = m_scene->GetWaypoints().GetNode(m_id);
         if (node) {
             node->origin = m_oldPos;
-            if (m_scene->HasBSP()) m_scene->GetWaypoints().CalculateWayzone(m_id, m_scene->GetBSP());
+            if (m_scene->HasBSP()) m_scene->GetWaypoints().CalculateWayzone(m_id, &m_scene->GetBSP());
             m_scene->SetModified(true);
             m_scene->RebuildWaypointRenderer();
         }
@@ -229,7 +229,7 @@ public:
             auto* node = graph.GetNode(entry.id);
             if (node) {
                 node->origin = entry.newPos;
-                if (m_scene->HasBSP()) graph.CalculateWayzone(entry.id, m_scene->GetBSP());
+                if (m_scene->HasBSP()) graph.CalculateWayzone(entry.id, &m_scene->GetBSP());
             }
         }
         m_scene->SetModified(true);
@@ -243,7 +243,7 @@ public:
             auto* node = graph.GetNode(entry.id);
             if (node) {
                 node->origin = entry.oldPos;
-                if (m_scene->HasBSP()) graph.CalculateWayzone(entry.id, m_scene->GetBSP());
+                if (m_scene->HasBSP()) graph.CalculateWayzone(entry.id, &m_scene->GetBSP());
             }
         }
         m_scene->SetModified(true);

@@ -14,6 +14,7 @@ struct Vector3 {
     inline float& operator[](int i) { return (&x)[i]; }
     inline const float& operator[](int i) const { return (&x)[i]; }
 
+    inline Vector3 operator-() const { return Vector3(-x, -y, -z); }
     inline Vector3 operator+(const Vector3& o) const { return Vector3(x + o.x, y + o.y, z + o.z); }
     inline Vector3 operator-(const Vector3& o) const { return Vector3(x - o.x, y - o.y, z - o.z); }
     inline Vector3 operator*(float s) const { return Vector3(x * s, y * s, z * s); }

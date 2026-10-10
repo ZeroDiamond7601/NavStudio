@@ -102,6 +102,9 @@ public:
     const WaypointNode* GetNode(uint32_t id) const { return GetNodeByID(id); }
     WaypointNode* GetNode(uint32_t id) { return GetNodeByID(id); }
 
+    uint32_t GetNextId() const { return m_nextId; }
+    void SetNextId(uint32_t nextId) { m_nextId = nextId; }
+
     // Node Operations
     WaypointNode* AddNode(const Vector3& origin, uint32_t flags = WPT_FLAG_NONE, float radius = 16.0f);
     WaypointNode* InsertNode(const WaypointNode& node);

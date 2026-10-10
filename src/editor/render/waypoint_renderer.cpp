@@ -467,7 +467,7 @@ bool WaypointRenderer::BuildFromGraph(
                 } else {
                     // Two-way link: draw dual opposing 3D arrows (forward at 65%, backward at 35%)
                     DrawArrowHead(startPt + (endPt - startPt) * 0.65f, fwd, side, 12.0f, 5.5f, lr, lg, lb, 1.0f);
-                    DrawArrowHead(startPt + (endPt - startPt) * 0.35f, -fwd, side, 12.0f, 5.5f, lr, lg, lb, 1.0f);
+                    DrawArrowHead(startPt + (endPt - startPt) * 0.35f, Vector3(-fwd.x, -fwd.y, -fwd.z), side, 12.0f, 5.5f, lr, lg, lb, 1.0f);
 
                     // Midpoint diamond
                     Vector3 mid = (startPt + endPt) * 0.5f;
