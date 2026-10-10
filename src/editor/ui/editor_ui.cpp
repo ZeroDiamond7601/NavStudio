@@ -424,6 +424,9 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     if (m_showWaypointOptimizeModal) {
         RenderWaypointOptimizeModal(scene, cmdMgr);
     }
+    if (m_showParkourModal) {
+        RenderParkourModal(scene, cmdMgr);
+    }
     if (scene.HasPendingNavOrWptChoice()) {
         RenderNavOrWaypointPromptModal(scene);
     }
@@ -774,6 +777,22 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             if (ImGui::MenuItem("Show Bot Waypoints", "F6", &showWpts)) {
                 scene.SetShowWaypoints(showWpts);
             }
+            bool showRadii = scene.GetShowWaypointRadii();
+            if (ImGui::MenuItem("Show Wayzone Radii", nullptr, &showRadii)) {
+                scene.SetShowWaypointRadii(showRadii);
+            }
+            bool showDir = scene.GetShowWaypointDirection();
+            if (ImGui::MenuItem("Show Aim Direction & Frustums", nullptr, &showDir)) {
+                scene.SetShowWaypointDirection(showDir);
+            }
+            bool showConns = scene.GetShowWaypointConnections();
+            if (ImGui::MenuItem("Show Connections & Chevrons", nullptr, &showConns)) {
+                scene.SetShowWaypointConnections(showConns);
+            }
+            bool showArcs = scene.GetShowParkourJumpArcs();
+            if (ImGui::MenuItem("Show Parkour Jump Arcs", nullptr, &showArcs)) {
+                scene.SetShowParkourJumpArcs(showArcs);
+            }
             bool isWptMode = scene.IsWaypointMode();
             if (ImGui::MenuItem("Waypoint Editing Mode", nullptr, &isWptMode)) {
                 scene.SetTargetMode(isWptMode ? EditorScene::TARGET_WAYPOINTS : EditorScene::TARGET_NAVMESH);
@@ -889,6 +908,9 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
 
             if (ImGui::BeginMenu("Fix & Optimize")) {
+                if (ImGui::MenuItem("Generate Parkour & Jump Paths...", "Alt+P", false, scene.HasWaypoints())) {
+                    m_showParkourModal = true;
+                }
                 if (ImGui::MenuItem("Optimize Waypoint Graph...", "Alt+O", false, scene.HasWaypoints())) {
                     m_showWaypointOptimizeModal = true;
                 }

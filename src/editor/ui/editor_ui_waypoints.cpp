@@ -184,6 +184,14 @@ void EditorUI::RenderWaypointInspector(EditorScene& scene, CommandManager& /*cmd
         }
 
         ImGui::SameLine();
+        bool crouchConn = (node->connectionFlags[i] & WPT_CONN_CROUCH) != 0;
+        if (ImGui::Checkbox("Crouch", &crouchConn)) {
+            if (crouchConn) node->connectionFlags[i] |= WPT_CONN_CROUCH;
+            else node->connectionFlags[i] &= ~WPT_CONN_CROUCH;
+            scene.RebuildWaypointRenderer();
+        }
+
+        ImGui::SameLine();
         if (ImGui::SmallButton("X")) {
             node->connections[i] = -1;
             node->connectionFlags[i] = 0;
@@ -532,6 +540,9 @@ void EditorUI::RenderEBotGenModal(EditorScene& scene, CommandManager& /*cmdMgr*/
                     if (progress.zombieCampsCreated > 0) {
                         ImGui::BulletText("Zombie Camps: %zu", progress.zombieCampsCreated);
                     }
+                    if (progress.parkourLinksCreated > 0) {
+                        ImGui::BulletText("Parkour Jump Links: %zu", progress.parkourLinksCreated);
+                    }
                 } else {
                     ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Generation Failed: %s", progress.errorMessage.c_str());
                 }
@@ -542,6 +553,9 @@ void EditorUI::RenderEBotGenModal(EditorScene& scene, CommandManager& /*cmdMgr*/
 
             ImGui::Text("Density & Geometry Options:");
             ImGui::SliderFloat("Node Spacing", &m_ebotGenOptions.nodeSpacing, 75.0f, 200.0f, "%.0f units");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Larger spacing (120-160u) with wide wayzone radii creates fewer nodes, saving pathfinding computation and reducing bot confusion.");
+            }
             ImGui::SliderFloat("Minimum Distance", &m_ebotGenOptions.minDistance, 40.0f, 150.0f, "%.0f units");
             ImGui::SliderFloat("Connection Radius", &m_ebotGenOptions.connectRadius, 100.0f, 260.0f, "%.0f units");
             ImGui::SliderFloat("Max Step Height", &m_ebotGenOptions.maxStepHeight, 8.0f, 32.0f, "%.0f units");
@@ -551,6 +565,7 @@ void EditorUI::RenderEBotGenModal(EditorScene& scene, CommandManager& /*cmdMgr*/
             ImGui::Spacing();
             ImGui::Checkbox("Link Ladder Entities (func_ladder)", &m_ebotGenOptions.generateLadders);
             ImGui::Checkbox("Analyze Sightlines & Camps / Sniper Spots", &m_ebotGenOptions.generateCamps);
+            ImGui::Checkbox("Generate Parkour & Ledge Jumps (Crates, Chasms, Drops)", &m_ebotGenOptions.generateParkour);
 
             ImGui::Spacing();
             const char* botNames[] = {
@@ -744,6 +759,64 @@ void EditorUI::RenderNavOrWaypointPromptModal(EditorScene& scene) {
         ImGui::Spacing();
         if (ImGui::Button("Cancel / Dismiss", ImVec2(-1, 22))) {
             scene.DismissNavOrWptChoice();
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderParkourModal(EditorScene& scene, CommandManager& /*cmdMgr*/) {
+    if (m_showParkourModal) {
+        ImGui::OpenPopup("Generate Parkour & Jump Paths##Modal");
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(480, 0), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("Generate Parkour & Jump Paths##Modal", &m_showParkourModal, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.2f, 1.0f), "Parkour & Jump Trajectory Generator");
+        ImGui::TextDisabled("Scans existing waypoints and 3D map geometry to detect jumpable crates, elevated ledges, chasm leaps, and safe drop-down shortcuts.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::Text("Parkour Detection Options:");
+        ImGui::SliderFloat("Max Jump Distance", &m_parkourOptions.maxJumpDist, 100.0f, 300.0f, "%.0f units");
+        ImGui::SliderFloat("Max Jump Height", &m_parkourOptions.maxJumpHeight, 20.0f, 65.0f, "%.0f units");
+        ImGui::SliderFloat("Safe Drop Height", &m_parkourOptions.maxDropHeight, 100.0f, 500.0f, "%.0f units");
+
+        ImGui::Spacing();
+        ImGui::Checkbox("Crate & Ledge Climbs (18u < dz <= 55u)", &m_parkourOptions.detectCrateClimbs);
+        ImGui::Checkbox("Chasm & Gap Leaps (Voids between platforms)", &m_parkourOptions.detectChasmLeaps);
+        ImGui::Checkbox("Drop-Down Shortcuts (Safe one-way drops)", &m_parkourOptions.detectDropShortcuts);
+        ImGui::Checkbox("Double-Jump Assists (Ledges 60u - 130u)", &m_parkourOptions.detectDoubleJumps);
+
+        if (m_parkourStats.totalParkourLinks > 0) {
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.3f, 1.0f), "Results (in %.3f seconds):", m_parkourStats.durationSeconds);
+            ImGui::BulletText("Total Parkour Links Created: %zu", m_parkourStats.totalParkourLinks);
+            ImGui::BulletText("Crate / Ledge Climbs: %zu", m_parkourStats.jumpUpsCreated);
+            ImGui::BulletText("Chasm / Gap Leaps: %zu", m_parkourStats.gapJumpsCreated);
+            ImGui::BulletText("Drop-Down Shortcuts: %zu", m_parkourStats.dropJumpsCreated);
+            if (m_parkourStats.doubleJumpsCreated > 0) {
+                ImGui::BulletText("Double-Jump Boosts: %zu", m_parkourStats.doubleJumpsCreated);
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Generate Parkour Paths", ImVec2(180, 28))) {
+            m_parkourStats = scene.GenerateParkour(m_parkourOptions);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Close", ImVec2(90, 28))) {
+            m_showParkourModal = false;
             ImGui::CloseCurrentPopup();
         }
 

@@ -497,6 +497,22 @@ public:
     void SetShowWaypoints(bool show);
     void ToggleShowWaypoints();
 
+    bool GetShowWaypointRadii() const { return m_showWaypointRadii; }
+    void SetShowWaypointRadii(bool show);
+    void ToggleShowWaypointRadii();
+
+    bool GetShowWaypointDirection() const { return m_showWaypointDirection; }
+    void SetShowWaypointDirection(bool show);
+    void ToggleShowWaypointDirection();
+
+    bool GetShowWaypointConnections() const { return m_showWaypointConnections; }
+    void SetShowWaypointConnections(bool show);
+    void ToggleShowWaypointConnections();
+
+    bool GetShowParkourJumpArcs() const { return m_showParkourJumpArcs; }
+    void SetShowParkourJumpArcs(bool show);
+    void ToggleShowParkourJumpArcs();
+
     uint32_t GetSelectedWaypointID() const { return m_selectedWaypointId; }
     void SelectWaypoint(uint32_t id);
     WaypointNode* GetSelectedWaypoint();
@@ -510,6 +526,7 @@ public:
     void RebuildWaypointRenderer();
     WaypointGraph::WaypointAnalysisStats AutoAnalyzeWaypoints();
     WaypointGraph::WaypointOptimizeStats OptimizeWaypoints(const WaypointGraph::WaypointOptimizeOptions& options = WaypointGraph::WaypointOptimizeOptions());
+    WaypointGraph::WaypointParkourStats GenerateParkour(const WaypointGraph::WaypointParkourOptions& options = WaypointGraph::WaypointParkourOptions());
 
     // Map Navigation Mode Selection Prompt (when map has both .nav and bot waypoints)
     bool HasPendingNavOrWptChoice() const { return m_showNavOrWptPrompt; }
@@ -823,12 +840,16 @@ private:
     WaypointGraph m_waypoints;
     WaypointRenderer m_waypointRenderer;
     bool m_showWaypoints{true};
+    bool m_showWaypointRadii{true};
+    bool m_showWaypointDirection{true};
+    bool m_showWaypointConnections{true};
+    bool m_showParkourJumpArcs{true};
     uint32_t m_selectedWaypointId{0};
     EditorTargetMode m_targetMode{TARGET_NAVMESH};
     bool m_isAddWaypointMode{false};
     uint32_t m_cachedWaypointId{0};
     uint32_t m_activeWaypointAddFlags{WPT_FLAG_CROSSING};
-    float m_activeWaypointAddRadius{32.0f};
+    float m_activeWaypointAddRadius{48.0f};
     bool m_autoConnectWaypoints{true};
     int m_waypointConnectType{2};
 

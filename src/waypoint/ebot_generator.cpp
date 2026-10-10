@@ -285,8 +285,13 @@ EBotGenerateResult EBotGenerator::Generate(
             uint32_t nearbyId = 0;
             float nearestDist = FindNearestInSpatialGrid(nodePos, options.minDistance, nearbyId);
 
-            if (nearestDist < options.minDistance) {
-                // Node already exists within threshold; connect if reachable
+            const WaypointNode* nearNode = nearbyId != 0 ? outGraph.GetNodeByID(nearbyId) : nullptr;
+            float effMinDist = (nearNode && nearNode->radius > 32.0f)
+                ? std::max(options.minDistance, nearNode->radius * 0.85f)
+                : options.minDistance;
+
+            if (nearestDist < effMinDist) {
+                // Node already exists within threshold or within existing wayzone; connect if reachable
                 if (nearbyId != 0 && nearbyId != currId) {
                     bool isBi = (std::abs(zDiff) <= options.maxStepHeight);
                     uint16_t cFlags = (zDiff > options.maxStepHeight) ? WPT_CONN_JUMP : WPT_CONN_NONE;
@@ -296,13 +301,14 @@ EBotGenerateResult EBotGenerator::Generate(
                 continue;
             }
 
-            // Spawn new node
+            // Spawn new node with adaptive wayzone radius
             uint32_t nodeFlags = WPT_FLAG_CROSSING;
             if (needCrouch) nodeFlags |= WPT_FLAG_CROUCH;
             if (zDiff > options.maxStepHeight) nodeFlags |= WPT_FLAG_JUMP;
 
-            WaypointNode* newNode = outGraph.AddNode(nodePos, nodeFlags, 24.0f);
+            WaypointNode* newNode = outGraph.AddNode(nodePos, nodeFlags, 32.0f);
             if (newNode) {
+                outGraph.CalculateWayzone(newNode->id, &bsp);
                 bool isBi = (zDiff >= -options.maxJumpHeight);
                 uint16_t cFlags = (zDiff > options.maxStepHeight) ? WPT_CONN_JUMP : WPT_CONN_NONE;
                 if (needCrouch) cFlags |= WPT_CONN_CROUCH;
@@ -371,8 +377,19 @@ EBotGenerateResult EBotGenerator::Generate(
     if (progress) progress(0.82f, "Auto-linking neighboring waypoints...");
     outGraph.AutoLinkNodes(options.connectRadius, &bsp);
 
-    // 5. Intelligent Graph Optimization (prunes co-linear corridor nodes, merges overlaps, fixes one-way links)
-    if (progress) progress(0.88f, "Optimizing graph topology and pruning redundant nodes...");
+    // 5. Parkour & Jump Paths Detection (crate climbs, gap leaps, drop shortcuts)
+    if (options.generateParkour) {
+        if (progress) progress(0.85f, "Generating parkour jump paths and ledge climbs...");
+        WaypointGraph::WaypointParkourOptions pOpt;
+        pOpt.maxJumpDist = options.connectRadius;
+        pOpt.maxJumpHeight = options.maxJumpHeight;
+        pOpt.maxDropHeight = options.maxDropHeight;
+        auto pStats = outGraph.GenerateParkour(&bsp, pOpt);
+        result.parkourLinksCreated = pStats.totalParkourLinks;
+    }
+
+    // 6. Intelligent Graph Optimization (prunes co-linear corridor nodes, merges overlaps, fixes one-way links)
+    if (progress) progress(0.89f, "Optimizing graph topology and pruning redundant nodes...");
     WaypointGraph::WaypointOptimizeOptions opt;
     opt.pruneCollinear = true;
     opt.collinearMaxAngle = 14.0f;

@@ -37,6 +37,12 @@ public:
     bool GetShowRadii() const { return m_showRadii; }
     void SetShowRadii(bool show) { m_showRadii = show; }
 
+    bool GetShowDirection() const { return m_showDirection; }
+    void SetShowDirection(bool show) { m_showDirection = show; }
+
+    bool GetShowParkourArcs() const { return m_showParkourArcs; }
+    void SetShowParkourArcs(bool show) { m_showParkourArcs = show; }
+
 private:
     GLuint m_lineVAO{0};
     GLuint m_lineVBO{0};
@@ -48,7 +54,9 @@ private:
 
     bool m_showWaypoints{true};
     bool m_showConnections{true};
-    bool m_showRadii{false};
+    bool m_showRadii{true};
+    bool m_showDirection{true};
+    bool m_showParkourArcs{true};
 };
 
 #endif // WAYPOINT_RENDERER_H

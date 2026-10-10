@@ -109,6 +109,7 @@ private:
     void RenderNavToWaypointModal(EditorScene& scene);
     void RenderEBotGenModal(EditorScene& scene, CommandManager& cmdMgr);
     void RenderWaypointOptimizeModal(EditorScene& scene, CommandManager& cmdMgr);
+    void RenderParkourModal(EditorScene& scene, CommandManager& cmdMgr);
     void RenderNavOrWaypointPromptModal(EditorScene& scene);
 
     bool m_marqueeActive{false};
@@ -193,8 +194,11 @@ private:
     bool m_showNavToWaypointModal{false};
     bool m_showEBotGenModal{false};
     bool m_showWaypointOptimizeModal{false};
+    bool m_showParkourModal{false};
     WaypointGraph::WaypointOptimizeOptions m_waypointOptOptions;
     WaypointGraph::WaypointOptimizeStats m_waypointOptStats;
+    WaypointGraph::WaypointParkourOptions m_parkourOptions;
+    WaypointGraph::WaypointParkourStats m_parkourStats;
     EBotGenerateOptions m_ebotGenOptions;
     int m_waypointExportBot{0}; // 0=EBot, 1=SyPB, 2=YaPB, 3=PODBot
     int m_waypointExportMod{0}; // 0=Standard, 1=ZombiePlague, 2=Deathmatch

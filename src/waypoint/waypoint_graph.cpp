@@ -748,3 +748,156 @@ WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile*
     return stats;
 }
 
+WaypointGraph::WaypointParkourStats WaypointGraph::GenerateParkour(const BSPFile* bsp, const WaypointParkourOptions& options) {
+    auto tStart = std::chrono::high_resolution_clock::now();
+    WaypointParkourStats stats;
+    if (m_nodes.empty()) return stats;
+
+    const float cellSize = options.maxJumpDist;
+    struct Hash3D {
+        int x, y, z;
+        bool operator==(const Hash3D& o) const { return x == o.x && y == o.y && z == o.z; }
+    };
+    struct Hasher3D {
+        size_t operator()(const Hash3D& k) const {
+            return (std::hash<int>()(k.x) * 73856093) ^
+                   (std::hash<int>()(k.y) * 19349663) ^
+                   (std::hash<int>()(k.z) * 83492791);
+        }
+    };
+    std::unordered_map<Hash3D, std::vector<size_t>, Hasher3D> grid;
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        int gx = static_cast<int>(std::floor(m_nodes[i].origin.x / cellSize));
+        int gy = static_cast<int>(std::floor(m_nodes[i].origin.y / cellSize));
+        int gz = static_cast<int>(std::floor(m_nodes[i].origin.z / cellSize));
+        grid[{gx, gy, gz}].push_back(i);
+    }
+
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        WaypointNode& nodeA = m_nodes[i];
+        int gx = static_cast<int>(std::floor(nodeA.origin.x / cellSize));
+        int gy = static_cast<int>(std::floor(nodeA.origin.y / cellSize));
+        int gz = static_cast<int>(std::floor(nodeA.origin.z / cellSize));
+
+        for (int dx = -1; dx <= 1; ++dx) {
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dzCell = -1; dzCell <= 1; ++dzCell) {
+                    auto it = grid.find({gx + dx, gy + dy, gz + dzCell});
+                    if (it == grid.end()) continue;
+
+                    for (size_t j : it->second) {
+                        if (i == j) continue;
+                        WaypointNode& nodeB = m_nodes[j];
+
+                        Vector3 diff = nodeB.origin - nodeA.origin;
+                        float dist2D = std::hypot(diff.x, diff.y);
+                        float dz = diff.z;
+
+                        if (dist2D < options.minJumpDist || dist2D > options.maxJumpDist) continue;
+
+                        // Case 1: Ledge / Crate Jump-Up (18u < dz <= maxJumpHeight)
+                        if (options.detectCrateClimbs && dz > 18.0f && dz <= options.maxJumpHeight && dist2D <= 180.0f) {
+                            if (!nodeA.HasConnectionTo(static_cast<int16_t>(nodeB.id))) {
+                                bool canJump = true;
+                                if (bsp && bsp->IsLoaded()) {
+                                    float apexZ = nodeB.origin.z + 28.0f;
+                                    Vector3 midPt = (nodeA.origin + nodeB.origin) * 0.5f;
+                                    midPt.z = apexZ;
+                                    BSPTraceResult tr1, tr2;
+                                    bsp->TraceWorld(nodeA.origin + Vector3(0.0f, 0.0f, 36.0f), midPt, HULL_POINT, &tr1);
+                                    bsp->TraceWorld(midPt, nodeB.origin + Vector3(0.0f, 0.0f, 36.0f), HULL_POINT, &tr2);
+                                    if (tr1.fraction < 0.95f || tr2.fraction < 0.95f || tr1.startsolid || tr2.startsolid) {
+                                        canJump = false;
+                                    }
+                                }
+
+                                if (canJump) {
+                                    uint16_t cflags = WPT_CONN_JUMP;
+                                    if (dz > 45.0f) cflags |= WPT_CONN_CROUCH;
+                                    nodeA.AddConnection(static_cast<int16_t>(nodeB.id), cflags);
+                                    nodeA.flags |= WPT_FLAG_JUMP;
+
+                                    if (dz <= options.maxDropHeight && !nodeB.HasConnectionTo(static_cast<int16_t>(nodeA.id))) {
+                                        nodeB.AddConnection(static_cast<int16_t>(nodeA.id), WPT_CONN_NONE);
+                                    }
+                                    ++stats.jumpUpsCreated;
+                                    ++stats.totalParkourLinks;
+                                }
+                            }
+                        }
+
+                        // Case 2: Chasm / Gap Jump across Voids (|dz| <= 36u, void below)
+                        if (options.detectChasmLeaps && std::abs(dz) <= 36.0f && dist2D >= 64.0f && dist2D <= options.maxJumpDist) {
+                            if (!nodeA.HasConnectionTo(static_cast<int16_t>(nodeB.id))) {
+                                bool isGap = false;
+                                if (bsp && bsp->IsLoaded()) {
+                                    Vector3 midPt = (nodeA.origin + nodeB.origin) * 0.5f;
+                                    BSPTraceResult floorTr;
+                                    bsp->TraceWorld(midPt + Vector3(0.0f, 0.0f, 10.0f), midPt - Vector3(0.0f, 0.0f, 180.0f), HULL_POINT, &floorTr);
+                                    if (floorTr.fraction >= 0.80f || (midPt.z - floorTr.endpos.z) > 48.0f) {
+                                        BSPTraceResult trA, trB;
+                                        Vector3 apexPt = midPt + Vector3(0.0f, 0.0f, 24.0f);
+                                        bsp->TraceWorld(nodeA.origin + Vector3(0.0f, 0.0f, 36.0f), apexPt, HULL_POINT, &trA);
+                                        bsp->TraceWorld(apexPt, nodeB.origin + Vector3(0.0f, 0.0f, 36.0f), HULL_POINT, &trB);
+                                        if (trA.fraction >= 0.95f && trB.fraction >= 0.95f && !trA.startsolid && !trB.startsolid) {
+                                            isGap = true;
+                                        }
+                                    }
+                                }
+
+                                if (isGap) {
+                                    nodeA.AddConnection(static_cast<int16_t>(nodeB.id), WPT_CONN_JUMP);
+                                    nodeB.AddConnection(static_cast<int16_t>(nodeA.id), WPT_CONN_JUMP);
+                                    nodeA.flags |= WPT_FLAG_JUMP;
+                                    nodeB.flags |= WPT_FLAG_JUMP;
+                                    ++stats.gapJumpsCreated;
+                                    stats.totalParkourLinks += 2;
+                                }
+                            }
+                        }
+
+                        // Case 3: Drop-Down Parkour Shortcut (-maxDropHeight <= dz < -45u)
+                        if (options.detectDropShortcuts && dz < -45.0f && dz >= -options.maxDropHeight && dist2D <= 160.0f) {
+                            if (!nodeA.HasConnectionTo(static_cast<int16_t>(nodeB.id))) {
+                                bool canDrop = true;
+                                if (bsp && bsp->IsLoaded()) {
+                                    BSPTraceResult losTr;
+                                    bsp->TraceWorld(nodeA.origin + Vector3(0.0f, 0.0f, 18.0f), nodeB.origin + Vector3(0.0f, 0.0f, 18.0f), HULL_POINT, &losTr);
+                                    if (losTr.fraction < 0.95f || losTr.startsolid) canDrop = false;
+                                }
+                                if (canDrop) {
+                                    nodeA.AddConnection(static_cast<int16_t>(nodeB.id), WPT_CONN_JUMP);
+                                    ++stats.dropJumpsCreated;
+                                    ++stats.totalParkourLinks;
+                                }
+                            }
+                        }
+
+                        // Case 4: Double Jump / Boost Assist
+                        if (options.detectDoubleJumps && dz > options.maxJumpHeight && dz <= 130.0f && dist2D <= 75.0f) {
+                            if (!nodeA.HasConnectionTo(static_cast<int16_t>(nodeB.id))) {
+                                bool canBoost = true;
+                                if (bsp && bsp->IsLoaded()) {
+                                    BSPTraceResult losTr;
+                                    bsp->TraceWorld(nodeA.origin + Vector3(0.0f, 0.0f, 36.0f), nodeB.origin + Vector3(0.0f, 0.0f, 36.0f), HULL_POINT, &losTr);
+                                    if (losTr.fraction < 0.90f || losTr.startsolid) canBoost = false;
+                                }
+                                if (canBoost) {
+                                    nodeA.AddConnection(static_cast<int16_t>(nodeB.id), WPT_CONN_DOUBLE);
+                                    nodeA.flags |= WPT_FLAG_DJUMP;
+                                    ++stats.doubleJumpsCreated;
+                                    ++stats.totalParkourLinks;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    auto tEnd = std::chrono::high_resolution_clock::now();
+    stats.durationSeconds = std::chrono::duration<double>(tEnd - tStart).count();
+    return stats;
+}
+

@@ -21,6 +21,50 @@ void EditorScene::ToggleShowWaypoints() {
     ShowToast(m_showWaypoints ? "Waypoints: Visible" : "Waypoints: Hidden");
 }
 
+void EditorScene::SetShowWaypointRadii(bool show) {
+    m_showWaypointRadii = show;
+    m_waypointRenderer.SetShowRadii(show);
+    RebuildWaypointRenderer();
+}
+
+void EditorScene::ToggleShowWaypointRadii() {
+    SetShowWaypointRadii(!m_showWaypointRadii);
+    ShowToast(m_showWaypointRadii ? "Waypoint Radii: Visible" : "Waypoint Radii: Hidden");
+}
+
+void EditorScene::SetShowWaypointDirection(bool show) {
+    m_showWaypointDirection = show;
+    m_waypointRenderer.SetShowDirection(show);
+    RebuildWaypointRenderer();
+}
+
+void EditorScene::ToggleShowWaypointDirection() {
+    SetShowWaypointDirection(!m_showWaypointDirection);
+    ShowToast(m_showWaypointDirection ? "Waypoint Direction & Frustums: Visible" : "Waypoint Direction: Hidden");
+}
+
+void EditorScene::SetShowWaypointConnections(bool show) {
+    m_showWaypointConnections = show;
+    m_waypointRenderer.SetShowConnections(show);
+    RebuildWaypointRenderer();
+}
+
+void EditorScene::ToggleShowWaypointConnections() {
+    SetShowWaypointConnections(!m_showWaypointConnections);
+    ShowToast(m_showWaypointConnections ? "Waypoint Connections: Visible" : "Waypoint Connections: Hidden");
+}
+
+void EditorScene::SetShowParkourJumpArcs(bool show) {
+    m_showParkourJumpArcs = show;
+    m_waypointRenderer.SetShowParkourArcs(show);
+    RebuildWaypointRenderer();
+}
+
+void EditorScene::ToggleShowParkourJumpArcs() {
+    SetShowParkourJumpArcs(!m_showParkourJumpArcs);
+    ShowToast(m_showParkourJumpArcs ? "Parkour Jump Arcs: Visible" : "Parkour Jump Arcs: Hidden");
+}
+
 void EditorScene::SelectWaypoint(uint32_t id) {
     m_selectedWaypointId = id;
     RebuildWaypointRenderer();
@@ -104,6 +148,10 @@ void EditorScene::RebuildWaypointRenderer() {
     if (m_waypoints.IsEmpty()) {
         m_waypointRenderer.Clear();
     } else {
+        m_waypointRenderer.SetShowRadii(m_showWaypointRadii);
+        m_waypointRenderer.SetShowDirection(m_showWaypointDirection);
+        m_waypointRenderer.SetShowConnections(m_showWaypointConnections);
+        m_waypointRenderer.SetShowParkourArcs(m_showParkourJumpArcs);
         m_waypointRenderer.BuildFromGraph(m_waypoints, m_selectedWaypointId);
     }
 }
@@ -205,7 +253,7 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
         return 0;
     }
 
-    float spacing = (m_gridSize >= 32.0f && m_gridSize <= 128.0f) ? m_gridSize : 60.0f;
+    float spacing = (m_gridSize >= 80.0f && m_gridSize <= 256.0f) ? m_gridSize : 135.0f;
     float snapDist = spacing;
 
     // Snapped seed coordinate
@@ -287,12 +335,34 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
             }
         }
 
+        Vector3 candOrigin = groundPos + Vector3(0.0f, 0.0f, 18.0f);
+
+        // Radius-aware spatial suppression: if candidate location is already covered by a nearby node's wayzone with clear LOS, skip
+        bool coveredByExisting = false;
+        for (uint32_t exId : newWaypointIds) {
+            const WaypointNode* ex = m_waypoints.GetNodeByID(exId);
+            if (!ex) continue;
+            float d = (ex->origin - candOrigin).Length();
+            float checkDist = std::max(snapDist * 0.75f, ex->radius * 1.10f);
+            if (d < checkDist && std::abs(ex->origin.z - candOrigin.z) <= 36.0f) {
+                BSPTraceResult losTr;
+                m_bsp->TraceWorld(candOrigin, ex->origin, HULL_POINT, &losTr);
+                if (losTr.fraction >= 0.95f && !losTr.startsolid) {
+                    coveredByExisting = true;
+                    break;
+                }
+            }
+        }
+        if (coveredByExisting) {
+            continue;
+        }
+
         uint32_t flags = m_activeWaypointAddFlags;
         if (!canStand && canCrouch) {
             flags |= WPT_FLAG_CROUCH;
         }
 
-        WaypointNode* node = m_waypoints.AddNode(groundPos + Vector3(0.0f, 0.0f, 18.0f), flags, m_activeWaypointAddRadius);
+        WaypointNode* node = m_waypoints.AddNode(candOrigin, flags, 32.0f);
         if (node) {
             newWaypointIds.push_back(node->id);
 
@@ -304,7 +374,7 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
 
                 Vector3 diff = other->origin - node->origin;
                 float dsq = diff.Dot(diff);
-                if (dsq <= (snapDist * 1.55f) * (snapDist * 1.55f) && std::abs(diff.z) <= 45.0f) {
+                if (dsq <= (snapDist * 1.65f) * (snapDist * 1.65f) && std::abs(diff.z) <= 45.0f) {
                     // Check line of sight
                     BSPTraceResult losTr;
                     m_bsp->TraceWorld(node->origin + Vector3(0.0f, 0.0f, 10.0f),
@@ -318,7 +388,7 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
                 }
             }
 
-            // Calculate optimal wayzone radius
+            // Calculate optimal wayzone radius immediately based on radial world geometry
             m_waypoints.CalculateWayzone(node->id, m_bsp.get());
         }
 
@@ -340,14 +410,41 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
     }
 
     if (!newWaypointIds.empty()) {
+        // Run Parkour detection on newly flooded waypoints
+        m_waypoints.GenerateParkour(m_bsp.get());
+
+        // Optimize graph to prune redundant straight corridor nodes and merge overlaps
+        WaypointGraph::WaypointOptimizeOptions opt;
+        opt.mergeOverlapping = true;
+        opt.mergeDistance = 35.0f;
+        opt.pruneCollinear = true;
+        opt.collinearMaxAngle = 16.0f;
+        opt.recalculateWayzones = true;
+        m_waypoints.OptimizeGraph(m_bsp.get(), opt);
+
         m_showWaypoints = true;
         m_waypointRenderer.SetShowWaypoints(true);
         RebuildWaypointRenderer();
         m_isModified = true;
-        ShowToast("Waypoint Flood-Fill created " + std::to_string(newWaypointIds.size()) + " waypoints!");
+        ShowToast("Waypoint Flood-Fill created " + std::to_string(newWaypointIds.size()) + " waypoints with wide wayzones!");
     }
 
     return newWaypointIds.size();
+}
+
+WaypointGraph::WaypointParkourStats EditorScene::GenerateParkour(const WaypointGraph::WaypointParkourOptions& options) {
+    if (m_waypoints.IsEmpty()) {
+        ShowToast("No waypoints loaded to generate parkour!");
+        return WaypointGraph::WaypointParkourStats();
+    }
+    auto stats = m_waypoints.GenerateParkour(m_bsp.get(), options);
+    RebuildWaypointRenderer();
+    m_isModified = true;
+    ShowToast("Parkour: Created " + std::to_string(stats.totalParkourLinks) + " jump links (" +
+              std::to_string(stats.jumpUpsCreated) + " crate climbs, " +
+              std::to_string(stats.gapJumpsCreated) + " chasm leaps, " +
+              std::to_string(stats.dropJumpsCreated) + " drops)!");
+    return stats;
 }
 
 uint32_t EditorScene::OnAddWaypointClick(const Ray& ray) {

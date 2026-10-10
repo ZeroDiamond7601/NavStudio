@@ -31,10 +31,32 @@ struct WaypointOptimizeStats {
     double durationSeconds{0.0};
 };
 
+struct WaypointParkourOptions {
+    float maxJumpDist{220.0f};
+    float minJumpDist{30.0f};
+    float maxJumpHeight{55.0f};
+    float maxDropHeight{250.0f};
+    bool detectCrateClimbs{true};
+    bool detectChasmLeaps{true};
+    bool detectDropShortcuts{true};
+    bool detectDoubleJumps{true};
+};
+
+struct WaypointParkourStats {
+    size_t jumpUpsCreated{0};
+    size_t gapJumpsCreated{0};
+    size_t dropJumpsCreated{0};
+    size_t doubleJumpsCreated{0};
+    size_t totalParkourLinks{0};
+    double durationSeconds{0.0};
+};
+
 class WaypointGraph {
 public:
     using WaypointOptimizeOptions = ::WaypointOptimizeOptions;
     using WaypointOptimizeStats = ::WaypointOptimizeStats;
+    using WaypointParkourOptions = ::WaypointParkourOptions;
+    using WaypointParkourStats = ::WaypointParkourStats;
 
     WaypointGraph();
     ~WaypointGraph() = default;
@@ -124,6 +146,7 @@ public:
     bool ValidateNodes(std::vector<std::string>* outWarnings = nullptr);
 
     WaypointOptimizeStats OptimizeGraph(const class BSPFile* bsp = nullptr, const WaypointOptimizeOptions& options = WaypointOptimizeOptions());
+    WaypointParkourStats GenerateParkour(const class BSPFile* bsp = nullptr, const WaypointParkourOptions& options = WaypointParkourOptions());
 
 private:
     std::vector<WaypointNode> m_nodes;

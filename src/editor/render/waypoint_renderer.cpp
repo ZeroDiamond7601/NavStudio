@@ -155,26 +155,87 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
         indices.push_back(cBase + 2); indices.push_back(cBase + 3);
         indices.push_back(cBase + 4); indices.push_back(cBase + 5);
 
-        // 3. Ground Projection Circle (Tolerance radius)
-        float rad = (m_showRadii || isSelected) ? std::max(8.0f, node.radius) : 8.0f;
-        int segments = isSelected ? 16 : 8;
-        uint32_t circleBase = static_cast<uint32_t>(vertices.size());
-        float circleAlpha = isSelected ? 0.9f : 0.45f;
-
-        for (int s = 0; s < segments; ++s) {
-            float theta = (2.0f * static_cast<float>(M_PI) * s) / segments;
-            float cx = node.origin.x + std::cos(theta) * rad;
-            float cy = node.origin.y + std::sin(theta) * rad;
-            vertices.push_back({ cx, cy, node.origin.z + 1.0f, 0,0,1, 0,0, r, g, b, circleAlpha });
+        // 3. Player Head Silhouette Ring (At Top of Pillar)
+        {
+            float headZ = topPt.z;
+            float headRad = isSelected ? 12.0f : 8.0f;
+            const int hSegs = 8;
+            uint32_t headBase = static_cast<uint32_t>(vertices.size());
+            for (int s = 0; s < hSegs; ++s) {
+                float theta = (2.0f * static_cast<float>(M_PI) * s) / hSegs;
+                float hx = node.origin.x + std::cos(theta) * headRad;
+                float hy = node.origin.y + std::sin(theta) * headRad;
+                vertices.push_back({ hx, hy, headZ, 0,0,1, 0,0, fr, fg, fb, isSelected ? 1.0f : 0.65f });
+            }
+            for (int s = 0; s < hSegs; ++s) {
+                indices.push_back(headBase + s);
+                indices.push_back(headBase + ((s + 1) % hSegs));
+            }
         }
 
-        for (int s = 0; s < segments; ++s) {
-            indices.push_back(circleBase + s);
-            indices.push_back(circleBase + ((s + 1) % segments));
+        // 4. Ground Tolerance Wayzone Disc & Precision Markers
+        if (m_showRadii || isSelected) {
+            float rad = node.radius;
+            if (rad > 0.0f) {
+                float effRad = std::max(12.0f, rad);
+                int segments = isSelected ? 24 : 16;
+                uint32_t circleBase = static_cast<uint32_t>(vertices.size());
+                float circleAlpha = isSelected ? 0.90f : 0.40f;
+
+                for (int s = 0; s < segments; ++s) {
+                    float theta = (2.0f * static_cast<float>(M_PI) * s) / segments;
+                    float cx = node.origin.x + std::cos(theta) * effRad;
+                    float cy = node.origin.y + std::sin(theta) * effRad;
+                    vertices.push_back({ cx, cy, node.origin.z + 1.0f, 0,0,1, 0,0, r, g, b, circleAlpha });
+                }
+
+                for (int s = 0; s < segments; ++s) {
+                    indices.push_back(circleBase + s);
+                    indices.push_back(circleBase + ((s + 1) % segments));
+                }
+
+                // 4 Cardinal Spokes (Crosshairs) connecting center to circle perimeter
+                uint32_t spokeBase = static_cast<uint32_t>(vertices.size());
+                vertices.push_back({ node.origin.x - effRad, node.origin.y, node.origin.z + 1.0f, 0,0,1, 0,0, r, g, b, circleAlpha * 0.6f });
+                vertices.push_back({ node.origin.x + effRad, node.origin.y, node.origin.z + 1.0f, 0,0,1, 0,0, r, g, b, circleAlpha * 0.6f });
+                vertices.push_back({ node.origin.x, node.origin.y - effRad, node.origin.z + 1.0f, 0,0,1, 0,0, r, g, b, circleAlpha * 0.6f });
+                vertices.push_back({ node.origin.x, node.origin.y + effRad, node.origin.z + 1.0f, 0,0,1, 0,0, r, g, b, circleAlpha * 0.6f });
+                indices.push_back(spokeBase + 0); indices.push_back(spokeBase + 1);
+                indices.push_back(spokeBase + 2); indices.push_back(spokeBase + 3);
+
+                // Concentric inner ring for wide wayzones (radius >= 48u)
+                if (effRad >= 48.0f) {
+                    float innerRad = effRad * 0.5f;
+                    int iSegs = 12;
+                    uint32_t innerBase = static_cast<uint32_t>(vertices.size());
+                    for (int s = 0; s < iSegs; ++s) {
+                        float theta = (2.0f * static_cast<float>(M_PI) * s) / iSegs;
+                        float cx = node.origin.x + std::cos(theta) * innerRad;
+                        float cy = node.origin.y + std::sin(theta) * innerRad;
+                        vertices.push_back({ cx, cy, node.origin.z + 1.0f, 0,0,1, 0,0, r, g, b, circleAlpha * 0.35f });
+                    }
+                    for (int s = 0; s < iSegs; ++s) {
+                        indices.push_back(innerBase + s);
+                        indices.push_back(innerBase + ((s + 1) % iSegs));
+                    }
+                }
+            } else {
+                // Strict zero-radius precision waypoint (e.g. ladder, jump takeoff): draw red/amber precision diamond
+                float dSz = isSelected ? 10.0f : 6.0f;
+                uint32_t dBase = static_cast<uint32_t>(vertices.size());
+                vertices.push_back({ node.origin.x - dSz, node.origin.y, node.origin.z + 1.0f, 0,0,1, 0,0, 1.0f, 0.2f, 0.2f, 0.85f });
+                vertices.push_back({ node.origin.x, node.origin.y + dSz, node.origin.z + 1.0f, 0,0,1, 0,0, 1.0f, 0.2f, 0.2f, 0.85f });
+                vertices.push_back({ node.origin.x + dSz, node.origin.y, node.origin.z + 1.0f, 0,0,1, 0,0, 1.0f, 0.2f, 0.2f, 0.85f });
+                vertices.push_back({ node.origin.x, node.origin.y - dSz, node.origin.z + 1.0f, 0,0,1, 0,0, 1.0f, 0.2f, 0.2f, 0.85f });
+                indices.push_back(dBase + 0); indices.push_back(dBase + 1);
+                indices.push_back(dBase + 1); indices.push_back(dBase + 2);
+                indices.push_back(dBase + 2); indices.push_back(dBase + 3);
+                indices.push_back(dBase + 3); indices.push_back(dBase + 0);
+            }
         }
 
-        // 4. Camp / Sniper Aim Direction Vector & 3D Vision Frustum
-        if (node.flags & (WPT_FLAG_CAMP | WPT_FLAG_SNIPER | WPT_FLAG_ZMHMCAMP | WPT_FLAG_HMCAMPMESH)) {
+        // 5. Camp / Sniper Aim Direction Vector & 3D Vision Frustum
+        if (m_showDirection && (node.flags & (WPT_FLAG_CAMP | WPT_FLAG_SNIPER | WPT_FLAG_ZMHMCAMP | WPT_FLAG_HMCAMPMESH))) {
             float yawRad = node.campYaw * static_cast<float>(M_PI) / 180.0f;
             float pitchRad = node.campPitch * static_cast<float>(M_PI) / 180.0f;
 
@@ -184,46 +245,63 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
                 std::sin(pitchRad)
             );
 
-            float coneDist = isSelected ? 64.0f : 40.0f;
-            Vector3 aimEnd = pos + aimDir * coneDist;
+            float coneDist = isSelected ? 72.0f : 48.0f;
+            Vector3 eyePos = node.origin + Vector3(0.0f, 0.0f, pillarHeight * 0.75f);
+            Vector3 aimEnd = eyePos + aimDir * coneDist;
+
             uint32_t aimBase = static_cast<uint32_t>(vertices.size());
-            vertices.push_back({ pos.x, pos.y, pos.z, 0,0,1, 0,0, 1.0f, 1.0f, 0.0f, 1.0f });
+            vertices.push_back({ eyePos.x, eyePos.y, eyePos.z, 0,0,1, 0,0, 1.0f, 0.9f, 0.1f, 1.0f });
             vertices.push_back({ aimEnd.x, aimEnd.y, aimEnd.z, 0,0,1, 0,0, 1.0f, 0.2f, 0.2f, 1.0f });
             indices.push_back(aimBase + 0);
             indices.push_back(aimBase + 1);
 
-            // 3D View Frustum Cone (4 edge rays + base loop)
+            // 3D View Frustum Cone (4 edge rays + rectangular end frame + crosshairs)
             Vector3 worldUp(0, 0, 1);
             Vector3 right = aimDir.Cross(worldUp);
             if (right.Length() < 0.01f) right = Vector3(1, 0, 0);
             else right = right.Normalized();
             Vector3 up = right.Cross(aimDir).Normalized();
 
-            float coneSpread = coneDist * 0.35f;
+            float coneSpread = coneDist * 0.38f;
             Vector3 cTL = aimEnd - right * coneSpread + up * coneSpread;
             Vector3 cTR = aimEnd + right * coneSpread + up * coneSpread;
             Vector3 cBR = aimEnd + right * coneSpread - up * coneSpread;
             Vector3 cBL = aimEnd - right * coneSpread - up * coneSpread;
 
             uint32_t fBase = static_cast<uint32_t>(vertices.size());
-            float fAlpha = isSelected ? 0.75f : 0.40f;
-            vertices.push_back({ cTL.x, cTL.y, cTL.z, 0,0,1, 0,0, 0.3f, 0.9f, 1.0f, fAlpha });
-            vertices.push_back({ cTR.x, cTR.y, cTR.z, 0,0,1, 0,0, 0.3f, 0.9f, 1.0f, fAlpha });
-            vertices.push_back({ cBR.x, cBR.y, cBR.z, 0,0,1, 0,0, 0.3f, 0.9f, 1.0f, fAlpha });
-            vertices.push_back({ cBL.x, cBL.y, cBL.z, 0,0,1, 0,0, 0.3f, 0.9f, 1.0f, fAlpha });
+            float fAlpha = isSelected ? 0.85f : 0.45f;
+            vertices.push_back({ cTL.x, cTL.y, cTL.z, 0,0,1, 0,0, 0.2f, 0.9f, 1.0f, fAlpha });
+            vertices.push_back({ cTR.x, cTR.y, cTR.z, 0,0,1, 0,0, 0.2f, 0.9f, 1.0f, fAlpha });
+            vertices.push_back({ cBR.x, cBR.y, cBR.z, 0,0,1, 0,0, 0.2f, 0.9f, 1.0f, fAlpha });
+            vertices.push_back({ cBL.x, cBL.y, cBL.z, 0,0,1, 0,0, 0.2f, 0.9f, 1.0f, fAlpha });
 
+            // 4 corner rays from eye
             indices.push_back(aimBase + 0); indices.push_back(fBase + 0);
             indices.push_back(aimBase + 0); indices.push_back(fBase + 1);
             indices.push_back(aimBase + 0); indices.push_back(fBase + 2);
             indices.push_back(aimBase + 0); indices.push_back(fBase + 3);
 
+            // End frame perimeter
             indices.push_back(fBase + 0); indices.push_back(fBase + 1);
             indices.push_back(fBase + 1); indices.push_back(fBase + 2);
             indices.push_back(fBase + 2); indices.push_back(fBase + 3);
             indices.push_back(fBase + 3); indices.push_back(fBase + 0);
+
+            // Center crosshairs on the end frame
+            Vector3 topMid = (cTL + cTR) * 0.5f;
+            Vector3 botMid = (cBL + cBR) * 0.5f;
+            Vector3 leftMid = (cTL + cBL) * 0.5f;
+            Vector3 rightMid = (cTR + cBR) * 0.5f;
+            uint32_t xhairBase = static_cast<uint32_t>(vertices.size());
+            vertices.push_back({ topMid.x, topMid.y, topMid.z, 0,0,1, 0,0, 1.0f, 0.4f, 0.4f, fAlpha * 0.75f });
+            vertices.push_back({ botMid.x, botMid.y, botMid.z, 0,0,1, 0,0, 1.0f, 0.4f, 0.4f, fAlpha * 0.75f });
+            vertices.push_back({ leftMid.x, leftMid.y, leftMid.z, 0,0,1, 0,0, 1.0f, 0.4f, 0.4f, fAlpha * 0.75f });
+            vertices.push_back({ rightMid.x, rightMid.y, rightMid.z, 0,0,1, 0,0, 1.0f, 0.4f, 0.4f, fAlpha * 0.75f });
+            indices.push_back(xhairBase + 0); indices.push_back(xhairBase + 1);
+            indices.push_back(xhairBase + 2); indices.push_back(xhairBase + 3);
         }
 
-        // 5. Outgoing Path Connection Links (Exact CS-EBOT Link Beam Colors)
+        // 6. Outgoing Path Connection Links (Enhanced Direction Chevrons & Parkour Arcs)
         if (m_showConnections) {
             for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
                 int16_t targetId = node.connections[c];
@@ -232,7 +310,6 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
                 const WaypointNode* target = graph.GetNodeByID(static_cast<uint32_t>(targetId));
                 if (!target) continue;
 
-                // Don't draw link twice if bidirectional and targetId < node.id
                 bool targetHasReverse = target->HasConnectionTo(static_cast<int16_t>(node.id));
                 if (targetHasReverse && target->id < node.id) continue;
 
@@ -240,68 +317,140 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
                 Vector3 endPt   = target->origin + Vector3(0.0f, 0.0f, 10.0f);
 
                 // CS-EBOT Connection Beam Colors:
-                // Jumping: Red (255, 0, 0)
-                // Double Jump: Blue (0, 0, 255)
-                // Visible: Green (0, 255, 0)
-                // Bothways / 2-Way: Yellow (255, 255, 0)
-                // Oneway Outgoing: White (250, 250, 250)
-                float lr = 0.98f, lg = 0.98f, lb = 0.98f, la = 0.90f; // Default Oneway: White
+                // Jumping: Crimson Red (255, 30, 20)
+                // Double Jump: Electric Blue (30, 160, 255)
+                // Visible: Emerald Green (30, 255, 60)
+                // Crouch: Safety Orange (255, 150, 10)
+                // Bothways / 2-Way: Golden Yellow (255, 230, 40)
+                // Oneway Outgoing: Crisp White (250, 250, 250)
+                float lr = 0.98f, lg = 0.98f, lb = 0.98f, la = 0.90f;
 
+                // Case A: Parkour Jump Arcs
                 if (node.connectionFlags[c] & WPT_CONN_JUMP) {
-                    lr = 1.0f; lg = 0.0f; lb = 0.0f; // Red: Jumping
-                    // Render multi-segment parabolic jump arc
-                    const int arcSegments = 8;
-                    float apexHeight = std::max(startPt.z, endPt.z) + 32.0f;
-                    uint32_t arcBase = static_cast<uint32_t>(vertices.size());
-                    for (int s = 0; s <= arcSegments; ++s) {
-                        float t = static_cast<float>(s) / arcSegments;
-                        float px = startPt.x + (endPt.x - startPt.x) * t;
-                        float py = startPt.y + (endPt.y - startPt.y) * t;
-                        float baseZ = startPt.z + (endPt.z - startPt.z) * t;
-                        float pz = baseZ + 4.0f * (apexHeight - std::max(startPt.z, endPt.z)) * t * (1.0f - t);
-                        vertices.push_back({ px, py, pz, 0,0,1, 0,0, lr, lg, lb, la });
+                    lr = 1.0f; lg = 0.15f; lb = 0.10f; // Red: Jumping
+                    if (m_showParkourArcs) {
+                        const int arcSegments = 12;
+                        float apexDelta = std::max(28.0f, (endPt.z > startPt.z ? (endPt.z - startPt.z) + 18.0f : 32.0f));
+                        float apexHeight = std::max(startPt.z, endPt.z) + apexDelta;
+                        uint32_t arcBase = static_cast<uint32_t>(vertices.size());
+                        Vector3 apexPt;
+
+                        for (int s = 0; s <= arcSegments; ++s) {
+                            float t = static_cast<float>(s) / arcSegments;
+                            float px = startPt.x + (endPt.x - startPt.x) * t;
+                            float py = startPt.y + (endPt.y - startPt.y) * t;
+                            float baseZ = startPt.z + (endPt.z - startPt.z) * t;
+                            float pz = baseZ + 4.0f * (apexHeight - std::max(startPt.z, endPt.z)) * t * (1.0f - t);
+                            if (s == arcSegments / 2) apexPt = Vector3(px, py, pz);
+                            vertices.push_back({ px, py, pz, 0,0,1, 0,0, lr, lg, lb, la });
+                        }
+                        for (int s = 0; s < arcSegments; ++s) {
+                            indices.push_back(arcBase + s);
+                            indices.push_back(arcBase + s + 1);
+                        }
+
+                        // Vertical apex guideline to floor
+                        uint32_t apexBase = static_cast<uint32_t>(vertices.size());
+                        float groundApexZ = (startPt.z + endPt.z) * 0.5f;
+                        vertices.push_back({ apexPt.x, apexPt.y, apexPt.z, 0,0,1, 0,0, lr, lg, lb, 0.40f });
+                        vertices.push_back({ apexPt.x, apexPt.y, groundApexZ, 0,0,1, 0,0, lr, lg, lb, 0.40f });
+                        indices.push_back(apexBase + 0); indices.push_back(apexBase + 1);
+
+                        // Landing target disc on ground at endPt
+                        float lRad = 10.0f;
+                        int lSegs = 10;
+                        uint32_t landBase = static_cast<uint32_t>(vertices.size());
+                        for (int s = 0; s < lSegs; ++s) {
+                            float theta = (2.0f * static_cast<float>(M_PI) * s) / lSegs;
+                            vertices.push_back({ endPt.x + std::cos(theta) * lRad, endPt.y + std::sin(theta) * lRad, endPt.z - 8.0f, 0,0,1, 0,0, lr, lg, lb, 0.70f });
+                        }
+                        for (int s = 0; s < lSegs; ++s) {
+                            indices.push_back(landBase + s);
+                            indices.push_back(landBase + ((s + 1) % lSegs));
+                        }
+                        // Landing target inner cross
+                        uint32_t lxBase = static_cast<uint32_t>(vertices.size());
+                        vertices.push_back({ endPt.x - lRad, endPt.y, endPt.z - 8.0f, 0,0,1, 0,0, lr, lg, lb, 0.60f });
+                        vertices.push_back({ endPt.x + lRad, endPt.y, endPt.z - 8.0f, 0,0,1, 0,0, lr, lg, lb, 0.60f });
+                        vertices.push_back({ endPt.x, endPt.y - lRad, endPt.z - 8.0f, 0,0,1, 0,0, lr, lg, lb, 0.60f });
+                        vertices.push_back({ endPt.x, endPt.y + lRad, endPt.z - 8.0f, 0,0,1, 0,0, lr, lg, lb, 0.60f });
+                        indices.push_back(lxBase + 0); indices.push_back(lxBase + 1);
+                        indices.push_back(lxBase + 2); indices.push_back(lxBase + 3);
+                        continue;
                     }
-                    for (int s = 0; s < arcSegments; ++s) {
-                        indices.push_back(arcBase + s);
-                        indices.push_back(arcBase + s + 1);
-                    }
-                    continue;
                 } else if (node.connectionFlags[c] & WPT_CONN_DOUBLE) {
-                    lr = 0.0f; lg = 0.0f; lb = 1.0f; // Blue: Double-jump
+                    lr = 0.15f; lg = 0.65f; lb = 1.0f; // Electric Blue: Double-jump
                 } else if (node.connectionFlags[c] & WPT_CONN_VISIBLE) {
-                    lr = 0.0f; lg = 1.0f; lb = 0.0f; // Green: Line of sight clear
+                    lr = 0.15f; lg = 1.0f; lb = 0.30f; // Green: Line of sight clear
                 } else if (node.connectionFlags[c] & WPT_CONN_CROUCH) {
-                    lr = 1.0f; lg = 0.65f; lb = 0.0f; // Orange: Crouch ducking connection
+                    lr = 1.0f; lg = 0.58f; lb = 0.05f; // Orange: Crouch ducking connection
                 } else if (targetHasReverse) {
-                    lr = 1.0f; lg = 1.0f; lb = 0.0f; // Yellow: Two-way bothways
+                    lr = 1.0f; lg = 0.90f; lb = 0.15f; // Yellow: Two-way bothways
                 }
 
+                // Render main link line
                 uint32_t lBase = static_cast<uint32_t>(vertices.size());
                 vertices.push_back({ startPt.x, startPt.y, startPt.z, 0,0,1, 0,0, lr, lg, lb, la });
                 vertices.push_back({ endPt.x, endPt.y, endPt.z, 0,0,1, 0,0, lr, lg, lb, la });
                 indices.push_back(lBase + 0);
                 indices.push_back(lBase + 1);
 
-                // If one-way link, draw directional arrow head
+                Vector3 fwd = (endPt - startPt).Normalized();
+                Vector3 worldUp(0, 0, 1);
+                Vector3 side = fwd.Cross(worldUp);
+                if (side.Length() < 0.01f) side = Vector3(1, 0, 0);
+                else side = side.Normalized();
+
+                // Directional markers along the link:
                 if (!targetHasReverse) {
-                    Vector3 fwd = (endPt - startPt).Normalized();
-                    Vector3 up(0, 0, 1);
-                    Vector3 side = fwd.Cross(up).Normalized();
+                    // One-way link: draw 2 forward-pointing chevrons along path (at 38% and 72%)
+                    const float fractions[2] = { 0.38f, 0.72f };
+                    for (int f = 0; f < 2; ++f) {
+                        Vector3 mid = startPt + (endPt - startPt) * fractions[f];
+                        Vector3 a1 = mid - fwd * 9.0f + side * 5.0f;
+                        Vector3 a2 = mid - fwd * 9.0f - side * 5.0f;
+                        uint32_t arrBase = static_cast<uint32_t>(vertices.size());
+                        vertices.push_back({ mid.x, mid.y, mid.z, 0,0,1, 0,0, lr, lg, lb, 1.0f });
+                        vertices.push_back({ a1.x, a1.y, a1.z, 0,0,1, 0,0, lr, lg, lb, 1.0f });
+                        vertices.push_back({ a2.x, a2.y, a2.z, 0,0,1, 0,0, lr, lg, lb, 1.0f });
+                        indices.push_back(arrBase + 0); indices.push_back(arrBase + 1);
+                        indices.push_back(arrBase + 0); indices.push_back(arrBase + 2);
+                    }
+                } else {
+                    // Two-way link: draw bidirectional diamond at link midpoint
                     Vector3 mid = (startPt + endPt) * 0.5f;
-
-                    Vector3 a1 = mid - fwd * 8.0f + side * 4.0f;
-                    Vector3 a2 = mid - fwd * 8.0f - side * 4.0f;
-
-                    uint32_t arrBase = static_cast<uint32_t>(vertices.size());
-                    vertices.push_back({ mid.x, mid.y, mid.z, 0,0,1, 0,0, lr, lg, lb, 1.0f });
-                    vertices.push_back({ a1.x, a1.y, a1.z, 0,0,1, 0,0, lr, lg, lb, 1.0f });
-                    vertices.push_back({ a2.x, a2.y, a2.z, 0,0,1, 0,0, lr, lg, lb, 1.0f });
-
-                    indices.push_back(arrBase + 0); indices.push_back(arrBase + 1);
-                    indices.push_back(arrBase + 0); indices.push_back(arrBase + 2);
+                    Vector3 dFwd = mid + fwd * 6.0f;
+                    Vector3 dBack = mid - fwd * 6.0f;
+                    Vector3 dRight = mid + side * 4.5f;
+                    Vector3 dLeft = mid - side * 4.5f;
+                    uint32_t dBase = static_cast<uint32_t>(vertices.size());
+                    vertices.push_back({ dFwd.x, dFwd.y, dFwd.z, 0,0,1, 0,0, lr, lg, lb, 0.85f });
+                    vertices.push_back({ dRight.x, dRight.y, dRight.z, 0,0,1, 0,0, lr, lg, lb, 0.85f });
+                    vertices.push_back({ dBack.x, dBack.y, dBack.z, 0,0,1, 0,0, lr, lg, lb, 0.85f });
+                    vertices.push_back({ dLeft.x, dLeft.y, dLeft.z, 0,0,1, 0,0, lr, lg, lb, 0.85f });
+                    indices.push_back(dBase + 0); indices.push_back(dBase + 1);
+                    indices.push_back(dBase + 1); indices.push_back(dBase + 2);
+                    indices.push_back(dBase + 2); indices.push_back(dBase + 3);
+                    indices.push_back(dBase + 3); indices.push_back(dBase + 0);
                 }
-            }
-        }
+
+                // If crouch connection, draw crawl clearance frame portal at midpoint
+                if (node.connectionFlags[c] & WPT_CONN_CROUCH) {
+                    Vector3 mid = (startPt + endPt) * 0.5f;
+                    Vector3 pBL = mid - side * 14.0f;
+                    Vector3 pBR = mid + side * 14.0f;
+                    Vector3 pTL = pBL + Vector3(0.0f, 0.0f, 28.0f);
+                    Vector3 pTR = pBR + Vector3(0.0f, 0.0f, 28.0f);
+                    uint32_t pBase = static_cast<uint32_t>(vertices.size());
+                    vertices.push_back({ pBL.x, pBL.y, pBL.z, 0,0,1, 0,0, 1.0f, 0.60f, 0.05f, 0.70f });
+                    vertices.push_back({ pTL.x, pTL.y, pTL.z, 0,0,1, 0,0, 1.0f, 0.60f, 0.05f, 0.70f });
+                    vertices.push_back({ pTR.x, pTR.y, pTR.z, 0,0,1, 0,0, 1.0f, 0.60f, 0.05f, 0.70f });
+                    vertices.push_back({ pBR.x, pBR.y, pBR.z, 0,0,1, 0,0, 1.0f, 0.60f, 0.05f, 0.70f });
+                    indices.push_back(pBase + 0); indices.push_back(pBase + 1);
+                    indices.push_back(pBase + 1); indices.push_back(pBase + 2);
+                    indices.push_back(pBase + 2); indices.push_back(pBase + 3);
+                    indices.push_back(pBase + 3); indices.push_back(pBase + 0);
+                }
     }
 
     if (indices.empty()) return false;
