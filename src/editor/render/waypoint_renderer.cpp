@@ -173,7 +173,7 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
             indices.push_back(circleBase + ((s + 1) % segments));
         }
 
-        // 4. Camp / Sniper Aim Direction Vector
+        // 4. Camp / Sniper Aim Direction Vector & 3D Vision Frustum
         if (node.flags & (WPT_FLAG_CAMP | WPT_FLAG_SNIPER | WPT_FLAG_ZMHMCAMP | WPT_FLAG_HMCAMPMESH)) {
             float yawRad = node.campYaw * static_cast<float>(M_PI) / 180.0f;
             float pitchRad = node.campPitch * static_cast<float>(M_PI) / 180.0f;
@@ -184,12 +184,43 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
                 std::sin(pitchRad)
             );
 
-            Vector3 aimEnd = pos + aimDir * 32.0f;
+            float coneDist = isSelected ? 64.0f : 40.0f;
+            Vector3 aimEnd = pos + aimDir * coneDist;
             uint32_t aimBase = static_cast<uint32_t>(vertices.size());
             vertices.push_back({ pos.x, pos.y, pos.z, 0,0,1, 0,0, 1.0f, 1.0f, 0.0f, 1.0f });
             vertices.push_back({ aimEnd.x, aimEnd.y, aimEnd.z, 0,0,1, 0,0, 1.0f, 0.2f, 0.2f, 1.0f });
             indices.push_back(aimBase + 0);
             indices.push_back(aimBase + 1);
+
+            // 3D View Frustum Cone (4 edge rays + base loop)
+            Vector3 worldUp(0, 0, 1);
+            Vector3 right = aimDir.Cross(worldUp);
+            if (right.Length() < 0.01f) right = Vector3(1, 0, 0);
+            else right = right.Normalized();
+            Vector3 up = right.Cross(aimDir).Normalized();
+
+            float coneSpread = coneDist * 0.35f;
+            Vector3 cTL = aimEnd - right * coneSpread + up * coneSpread;
+            Vector3 cTR = aimEnd + right * coneSpread + up * coneSpread;
+            Vector3 cBR = aimEnd + right * coneSpread - up * coneSpread;
+            Vector3 cBL = aimEnd - right * coneSpread - up * coneSpread;
+
+            uint32_t fBase = static_cast<uint32_t>(vertices.size());
+            float fAlpha = isSelected ? 0.75f : 0.40f;
+            vertices.push_back({ cTL.x, cTL.y, cTL.z, 0,0,1, 0,0, 0.3f, 0.9f, 1.0f, fAlpha });
+            vertices.push_back({ cTR.x, cTR.y, cTR.z, 0,0,1, 0,0, 0.3f, 0.9f, 1.0f, fAlpha });
+            vertices.push_back({ cBR.x, cBR.y, cBR.z, 0,0,1, 0,0, 0.3f, 0.9f, 1.0f, fAlpha });
+            vertices.push_back({ cBL.x, cBL.y, cBL.z, 0,0,1, 0,0, 0.3f, 0.9f, 1.0f, fAlpha });
+
+            indices.push_back(aimBase + 0); indices.push_back(fBase + 0);
+            indices.push_back(aimBase + 0); indices.push_back(fBase + 1);
+            indices.push_back(aimBase + 0); indices.push_back(fBase + 2);
+            indices.push_back(aimBase + 0); indices.push_back(fBase + 3);
+
+            indices.push_back(fBase + 0); indices.push_back(fBase + 1);
+            indices.push_back(fBase + 1); indices.push_back(fBase + 2);
+            indices.push_back(fBase + 2); indices.push_back(fBase + 3);
+            indices.push_back(fBase + 3); indices.push_back(fBase + 0);
         }
 
         // 5. Outgoing Path Connection Links (Exact CS-EBOT Link Beam Colors)
@@ -218,6 +249,23 @@ bool WaypointRenderer::BuildFromGraph(const WaypointGraph& graph, uint32_t selec
 
                 if (node.connectionFlags[c] & WPT_CONN_JUMP) {
                     lr = 1.0f; lg = 0.0f; lb = 0.0f; // Red: Jumping
+                    // Render multi-segment parabolic jump arc
+                    const int arcSegments = 8;
+                    float apexHeight = std::max(startPt.z, endPt.z) + 32.0f;
+                    uint32_t arcBase = static_cast<uint32_t>(vertices.size());
+                    for (int s = 0; s <= arcSegments; ++s) {
+                        float t = static_cast<float>(s) / arcSegments;
+                        float px = startPt.x + (endPt.x - startPt.x) * t;
+                        float py = startPt.y + (endPt.y - startPt.y) * t;
+                        float baseZ = startPt.z + (endPt.z - startPt.z) * t;
+                        float pz = baseZ + 4.0f * (apexHeight - std::max(startPt.z, endPt.z)) * t * (1.0f - t);
+                        vertices.push_back({ px, py, pz, 0,0,1, 0,0, lr, lg, lb, la });
+                    }
+                    for (int s = 0; s < arcSegments; ++s) {
+                        indices.push_back(arcBase + s);
+                        indices.push_back(arcBase + s + 1);
+                    }
+                    continue;
                 } else if (node.connectionFlags[c] & WPT_CONN_DOUBLE) {
                     lr = 0.0f; lg = 0.0f; lb = 1.0f; // Blue: Double-jump
                 } else if (node.connectionFlags[c] & WPT_CONN_VISIBLE) {

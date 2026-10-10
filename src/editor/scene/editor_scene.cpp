@@ -1132,6 +1132,8 @@ void EditorScene::UpdateAsyncLoading(float deltaTime) {
                 }
             }
 
+            bool hasBothNavAndWpt = (m_loadCtx.loadedNav != nullptr && m_loadCtx.loadedWpt != nullptr);
+
             if (m_loadCtx.loadedNav) {
                 m_nav = std::move(m_loadCtx.loadedNav);
                 m_navPath = m_loadCtx.targetNavPath;
@@ -1150,6 +1152,15 @@ void EditorScene::UpdateAsyncLoading(float deltaTime) {
                 m_waypointRenderer.SetShowWaypoints(true);
                 RebuildWaypointRenderer();
                 AddRecentFile(m_waypointPath);
+            }
+
+            if (hasBothNavAndWpt) {
+                m_showNavOrWptPrompt = true;
+                m_promptBspName = m_bsp ? m_bsp->GetMapName() : "Map";
+                m_promptNavPath = m_navPath;
+                m_promptWptPath = m_waypointPath;
+                m_promptNavAreaCount = m_nav ? m_nav->GetAreaCount() : 0;
+                m_promptWptNodeCount = m_waypoints.GetNodeCount();
             }
 
             m_errorMessage.clear();

@@ -497,3 +497,45 @@ void EditorScene::TeleportCameraToWaypoint(uint32_t id, Camera& camera) {
         ShowToast("Teleported camera to Waypoint #" + std::to_string(id));
     }
 }
+
+WaypointGraph::WaypointOptimizeStats EditorScene::OptimizeWaypoints(const WaypointGraph::WaypointOptimizeOptions& options) {
+    if (m_waypoints.IsEmpty()) {
+        ShowToast("Cannot optimize: No waypoints in graph!");
+        return WaypointGraph::WaypointOptimizeStats();
+    }
+
+    auto stats = m_waypoints.OptimizeGraph(HasBSP() ? &GetBSP() : nullptr, options);
+    RebuildWaypointRenderer();
+    m_isModified = true;
+
+    std::string msg = "Optimized graph: " + std::to_string(stats.totalModified) + " adjustments made (" +
+                      std::to_string(stats.overlappingMerged) + " merged, " +
+                      std::to_string(stats.collinearPruned) + " collinear pruned, " +
+                      std::to_string(stats.blockedLinksPruned) + " blocked pruned).";
+    ShowToast(msg);
+    return stats;
+}
+
+void EditorScene::ChooseLoadNavOnly() {
+    m_showNavOrWptPrompt = false;
+    SetTargetMode(TARGET_NAVMESH);
+    SetShowWaypoints(false);
+    ShowToast("Active Mode: Valve Navigation Mesh (.nav)");
+}
+
+void EditorScene::ChooseLoadWptOnly() {
+    m_showNavOrWptPrompt = false;
+    SetTargetMode(TARGET_WAYPOINTS);
+    SetShowWaypoints(true);
+    ShowToast("Active Mode: Bot Waypoints Graph");
+}
+
+void EditorScene::ChooseLoadBoth() {
+    m_showNavOrWptPrompt = false;
+    SetShowWaypoints(true);
+    ShowToast("Dual Navigation Layers Loaded (NavMesh + Waypoints)");
+}
+
+void EditorScene::DismissNavOrWptChoice() {
+    m_showNavOrWptPrompt = false;
+}

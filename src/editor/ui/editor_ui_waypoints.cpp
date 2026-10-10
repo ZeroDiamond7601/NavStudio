@@ -312,6 +312,9 @@ void EditorUI::RenderWaypointGlobalInspector(EditorScene& scene, CommandManager&
         scene.ShowToast("Pruned / fixed " + std::to_string(fixed) + " invalid links!");
         scene.RebuildWaypointRenderer();
     }
+    if (ImGui::Button("Optimize Waypoint Graph...", ImVec2(-1, 24))) {
+        m_showWaypointOptimizeModal = true;
+    }
     if (ImGui::Button("Export Bot Waypoints...", ImVec2(-1, 24))) {
         m_showWaypointExportModal = true;
     }
@@ -598,3 +601,153 @@ void EditorUI::RenderEBotGenModal(EditorScene& scene, CommandManager& /*cmdMgr*/
         ImGui::EndPopup();
     }
 }
+
+void EditorUI::RenderWaypointOptimizeModal(EditorScene& scene, CommandManager& /*cmdMgr*/) {
+    if (m_showWaypointOptimizeModal) {
+        ImGui::OpenPopup("Optimize Bot Waypoint Graph##Modal");
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(540, 520), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("Optimize Bot Waypoint Graph##Modal", &m_showWaypointOptimizeModal, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1.0f), "Waypoint Topology & Geometry Optimizer");
+        ImGui::TextDisabled("Prunes redundant corridor waypoints, merges overlapping nodes, restores one-way ground links, and validates line-of-sight.");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (m_waypointOptStats.durationSeconds > 0.0) {
+            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.3f, 1.0f), "Last Optimization Completed in %.3f seconds!", m_waypointOptStats.durationSeconds);
+            ImGui::BulletText("Overlapping Nodes Merged: %zu", m_waypointOptStats.overlappingMerged);
+            ImGui::BulletText("Collinear Corridor Nodes Pruned: %zu", m_waypointOptStats.collinearPruned);
+            ImGui::BulletText("Blocked Collision Links Pruned: %zu", m_waypointOptStats.blockedLinksPruned);
+            ImGui::BulletText("One-Way Flat Links Restored to 2-Way: %zu", m_waypointOptStats.oneWayLinksFixed);
+            ImGui::BulletText("Dead-End Orphan Nodes Removed: %zu", m_waypointOptStats.orphansRemoved);
+            ImGui::BulletText("Wayzone Radii Recalculated: %zu", m_waypointOptStats.wayzonesCalculated);
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+        }
+
+        ImGui::Text("Optimization Rules & Passes:");
+        ImGui::Checkbox("Merge Overlapping Nodes", &m_waypointOptOptions.mergeOverlapping);
+        if (m_waypointOptOptions.mergeOverlapping) {
+            ImGui::SliderFloat("Merge Distance Threshold", &m_waypointOptOptions.mergeDistance, 10.0f, 50.0f, "%.0f units");
+        }
+
+        ImGui::Spacing();
+        ImGui::Checkbox("Prune Co-linear Redundant Nodes (Corridors)", &m_waypointOptOptions.pruneCollinear);
+        if (m_waypointOptOptions.pruneCollinear) {
+            ImGui::SliderFloat("Angle Tolerance Deviation", &m_waypointOptOptions.collinearMaxAngle, 5.0f, 30.0f, "%.0f deg");
+        }
+
+        ImGui::Spacing();
+        ImGui::Checkbox("Prune Blocked Links (BSP Collision Traces)", &m_waypointOptOptions.pruneBlockedLinks);
+        ImGui::Checkbox("Restore Flat Ground One-Way Links to Two-Way", &m_waypointOptOptions.fixOneWayLinks);
+        ImGui::Checkbox("Eliminate Disconnected Orphan Islands", &m_waypointOptOptions.pruneOrphans);
+        ImGui::Checkbox("Recalculate Optimal Wayzone Radii (Raycasts)", &m_waypointOptOptions.recalculateWayzones);
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Run Optimizer Now", ImVec2(160, 28))) {
+            if (scene.HasWaypoints()) {
+                m_waypointOptStats = scene.OptimizeWaypoints(m_waypointOptOptions);
+            } else {
+                scene.ShowToast("No waypoints loaded in graph!");
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Close", ImVec2(90, 28))) {
+            m_showWaypointOptimizeModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+void EditorUI::RenderNavOrWaypointPromptModal(EditorScene& scene) {
+    if (scene.HasPendingNavOrWptChoice()) {
+        ImGui::OpenPopup("Select Navigation Mode##Modal");
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(560, 360), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("Select Navigation Mode##Modal", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        std::string mapName = scene.GetPromptBspName();
+        if (mapName.empty()) mapName = "Current Map";
+
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.2f, 1.0f), "Multiple Navigation Data Files Found for %s", mapName.c_str());
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextWrapped("The BSP map has both a Valve Navigation Mesh (.nav) and Bot Waypoints available on disk. Which navigation layer would you like to edit?");
+        ImGui::Spacing();
+
+        // Card 1: Valve NavMesh
+        ImGui::BeginChild("##NavCard", ImVec2(250, 110), true);
+        ImGui::TextColored(ImVec4(0.2f, 0.7f, 1.0f, 1.0f), "[ Valve Navigation Mesh ]");
+        ImGui::BulletText("Areas: %zu", scene.GetPromptNavAreaCount());
+        ImGui::BulletText("Format: Valve .NAV");
+        std::string navFile = scene.GetPromptNavPath();
+        size_t nSlash = navFile.find_last_of("/\\");
+        if (nSlash != std::string::npos) navFile = navFile.substr(nSlash + 1);
+        ImGui::TextDisabled("File: %s", navFile.c_str());
+        ImGui::EndChild();
+
+        ImGui::SameLine();
+
+        // Card 2: Bot Waypoints
+        ImGui::BeginChild("##WptCard", ImVec2(250, 110), true);
+        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "[ Bot Waypoint Graph ]");
+        ImGui::BulletText("Waypoints: %zu", scene.GetPromptWptNodeCount());
+        ImGui::BulletText("Format: CS-EBOT / SyPB / YaPB");
+        std::string wptFile = scene.GetPromptWptPath();
+        size_t wSlash = wptFile.find_last_of("/\\");
+        if (wSlash != std::string::npos) wptFile = wptFile.substr(wSlash + 1);
+        ImGui::TextDisabled("File: %s", wptFile.c_str());
+        ImGui::EndChild();
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // Action Buttons
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.45f, 0.85f, 1.0f));
+        if (ImGui::Button("Load NavMesh Only (.nav)", ImVec2(165, 30))) {
+            scene.ChooseLoadNavOnly();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopStyleColor();
+
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.50f, 0.15f, 1.0f));
+        if (ImGui::Button("Load Waypoints Only", ImVec2(165, 30))) {
+            scene.ChooseLoadWptOnly();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopStyleColor();
+
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.70f, 0.35f, 1.0f));
+        if (ImGui::Button("Load Both (Dual Layer)", ImVec2(175, 30))) {
+            scene.ChooseLoadBoth();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopStyleColor();
+
+        ImGui::Spacing();
+        if (ImGui::Button("Cancel / Dismiss", ImVec2(-1, 22))) {
+            scene.DismissNavOrWptChoice();
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+

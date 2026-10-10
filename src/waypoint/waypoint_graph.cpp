@@ -6,6 +6,7 @@
 #include <cmath>
 #include <algorithm>
 #include <fstream>
+#include <chrono>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -499,3 +500,250 @@ bool WaypointGraph::ValidateNodes(std::vector<std::string>* outWarnings) {
 
     return allValid;
 }
+
+WaypointGraph::WaypointOptimizeStats WaypointGraph::OptimizeGraph(const BSPFile* bsp, const WaypointOptimizeOptions& options) {
+    WaypointOptimizeStats stats;
+    auto tStart = std::chrono::high_resolution_clock::now();
+
+    if (m_nodes.empty()) return stats;
+
+    // Pass 1: Merge Overlapping Nodes (closer than mergeDistance)
+    if (options.mergeOverlapping && options.mergeDistance > 0.0f) {
+        float mergeDistSq = options.mergeDistance * options.mergeDistance;
+        std::unordered_set<uint32_t> toDelete;
+
+        for (size_t i = 0; i < m_nodes.size(); ++i) {
+            uint32_t keepId = m_nodes[i].id;
+            if (toDelete.count(keepId)) continue;
+            Vector3 keepPos = m_nodes[i].origin;
+
+            for (size_t j = i + 1; j < m_nodes.size(); ++j) {
+                uint32_t checkId = m_nodes[j].id;
+                if (toDelete.count(checkId)) continue;
+
+                Vector3 diff = m_nodes[j].origin - keepPos;
+                if (diff.Dot(diff) < mergeDistSq) {
+                    // Don't merge if they have incompatible objective flags
+                    uint32_t critFlags = WPT_FLAG_GOAL | WPT_FLAG_RESCUE | WPT_FLAG_LADDER;
+                    if ((m_nodes[i].flags & critFlags) && (m_nodes[j].flags & critFlags) &&
+                        (m_nodes[i].flags & critFlags) != (m_nodes[j].flags & critFlags)) {
+                        continue;
+                    }
+
+                    // Merge flags and max radius
+                    m_nodes[i].flags |= m_nodes[j].flags;
+                    m_nodes[i].radius = std::max(m_nodes[i].radius, m_nodes[j].radius);
+
+                    // Transfer outgoing connections from j to i
+                    for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+                        int16_t target = m_nodes[j].connections[c];
+                        if (target > 0 && target != static_cast<int16_t>(keepId)) {
+                            m_nodes[i].AddConnection(target, m_nodes[j].connectionFlags[c]);
+                        }
+                    }
+
+                    // Redirect incoming connections pointing to checkId to point to keepId
+                    for (auto& n : m_nodes) {
+                        if (n.id == checkId || n.id == keepId) continue;
+                        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+                            if (n.connections[c] == static_cast<int16_t>(checkId)) {
+                                n.connections[c] = static_cast<int16_t>(keepId);
+                            }
+                        }
+                    }
+
+                    toDelete.insert(checkId);
+                    stats.overlappingMerged++;
+                }
+            }
+        }
+
+        if (!toDelete.empty()) {
+            m_nodes.erase(std::remove_if(m_nodes.begin(), m_nodes.end(), [&](const WaypointNode& n) {
+                return toDelete.count(n.id) > 0;
+            }), m_nodes.end());
+            // Clean any remaining self-references or references to deleted
+            for (auto& n : m_nodes) {
+                for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+                    if (n.connections[c] == static_cast<int16_t>(n.id) || toDelete.count(static_cast<uint32_t>(n.connections[c]))) {
+                        n.connections[c] = -1;
+                        n.connectionFlags[c] = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    // Pass 2: Prune Blocked Connections using BSP Collision Traces
+    if (options.pruneBlockedLinks && bsp && bsp->IsLoaded()) {
+        for (auto& n : m_nodes) {
+            for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+                int16_t targetId = n.connections[c];
+                if (targetId <= 0) continue;
+
+                const WaypointNode* target = GetNodeByID(static_cast<uint32_t>(targetId));
+                if (!target) {
+                    n.connections[c] = -1;
+                    n.connectionFlags[c] = 0;
+                    stats.blockedLinksPruned++;
+                    continue;
+                }
+
+                // If jump or ladder link, allow higher clearance
+                if (n.connectionFlags[c] & (WPT_CONN_JUMP | WPT_CONN_DOUBLE)) continue;
+                if ((n.flags & WPT_FLAG_LADDER) || (target->flags & WPT_FLAG_LADDER)) continue;
+
+                Vector3 start = n.origin + Vector3(0.0f, 0.0f, 18.0f);
+                Vector3 end = target->origin + Vector3(0.0f, 0.0f, 18.0f);
+                BSPTraceResult tr;
+                if (bsp->TraceWorld(start, end, HULL_POINT, &tr)) {
+                    if (tr.fraction < 0.95f || tr.startsolid || tr.allsolid) {
+                        n.connections[c] = -1;
+                        n.connectionFlags[c] = 0;
+                        stats.blockedLinksPruned++;
+                    }
+                }
+            }
+        }
+    }
+
+    // Pass 3: Fix Flat-Ground One-Way Links
+    if (options.fixOneWayLinks) {
+        for (size_t i = 0; i < m_nodes.size(); ++i) {
+            uint32_t fromId = m_nodes[i].id;
+            Vector3 fromPos = m_nodes[i].origin;
+
+            for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+                int16_t targetId = m_nodes[i].connections[c];
+                if (targetId <= 0) continue;
+
+                WaypointNode* targetNode = GetNodeByID(static_cast<uint32_t>(targetId));
+                if (!targetNode) continue;
+
+                // If target doesn't connect back to us
+                if (!targetNode->HasConnectionTo(static_cast<int16_t>(fromId))) {
+                    float zDiff = std::abs(fromPos.z - targetNode->origin.z);
+                    // If flat walkable surface and not an intentional jump drop
+                    if (zDiff <= 18.0f && !(m_nodes[i].connectionFlags[c] & WPT_CONN_JUMP)) {
+                        bool losOk = true;
+                        if (bsp && bsp->IsLoaded()) {
+                            BSPTraceResult tr;
+                            bsp->TraceWorld(targetNode->origin + Vector3(0.0f, 0.0f, 18.0f),
+                                            fromPos + Vector3(0.0f, 0.0f, 18.0f),
+                                            HULL_POINT, &tr);
+                            if (tr.fraction < 0.95f || tr.startsolid || tr.allsolid) losOk = false;
+                        }
+                        if (losOk) {
+                            if (targetNode->AddConnection(static_cast<int16_t>(fromId), m_nodes[i].connectionFlags[c])) {
+                                stats.oneWayLinksFixed++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Pass 4: Prune Redundant Co-linear Nodes along straight corridors
+    if (options.pruneCollinear) {
+        float cosTol = std::cos(options.collinearMaxAngle * (3.14159265f / 180.0f));
+        std::unordered_set<uint32_t> collinearToDelete;
+
+        for (const auto& mid : m_nodes) {
+            // Never prune nodes with tactical / mission objectives
+            uint32_t preserveFlags = WPT_FLAG_GOAL | WPT_FLAG_RESCUE | WPT_FLAG_CAMP |
+                                     WPT_FLAG_SNIPER | WPT_FLAG_LADDER | WPT_FLAG_USEBUTTON |
+                                     WPT_FLAG_ZMHMCAMP | WPT_FLAG_HMCAMPMESH;
+            if (mid.flags & preserveFlags) continue;
+
+            // Check if node has exactly two active connections (pass-through)
+            std::vector<int16_t> activeConns;
+            for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+                if (mid.connections[c] > 0) activeConns.push_back(mid.connections[c]);
+            }
+
+            if (activeConns.size() == 2) {
+                uint32_t idA = static_cast<uint32_t>(activeConns[0]);
+                uint32_t idC = static_cast<uint32_t>(activeConns[1]);
+                if (collinearToDelete.count(idA) || collinearToDelete.count(idC)) continue;
+
+                WaypointNode* nodeA = GetNodeByID(idA);
+                WaypointNode* nodeC = GetNodeByID(idC);
+                if (!nodeA || !nodeC || idA == idC) continue;
+
+                Vector3 dir1 = (mid.origin - nodeA->origin);
+                Vector3 dir2 = (nodeC->origin - mid.origin);
+                float len1 = dir1.Length();
+                float len2 = dir2.Length();
+
+                if (len1 > 1.0f && len2 > 1.0f && (len1 + len2) <= 320.0f) {
+                    dir1 = dir1 * (1.0f / len1);
+                    dir2 = dir2 * (1.0f / len2);
+                    float dot = dir1.Dot(dir2);
+
+                    if (dot >= cosTol) {
+                        // Check if line of sight exists directly from A to C
+                        bool canBypass = true;
+                        if (bsp && bsp->IsLoaded()) {
+                            BSPTraceResult tr;
+                            bsp->TraceWorld(nodeA->origin + Vector3(0.0f, 0.0f, 18.0f),
+                                            nodeC->origin + Vector3(0.0f, 0.0f, 18.0f),
+                                            HULL_POINT, &tr);
+                            if (tr.fraction < 0.95f || tr.startsolid || tr.allsolid) {
+                                canBypass = false;
+                            }
+                        }
+
+                        if (canBypass) {
+                            // Link A directly to C
+                            bool aHasRev = nodeA->HasConnectionTo(static_cast<int16_t>(mid.id));
+                            bool cHasRev = nodeC->HasConnectionTo(static_cast<int16_t>(mid.id));
+
+                            nodeA->RemoveConnection(static_cast<int16_t>(mid.id));
+                            nodeC->RemoveConnection(static_cast<int16_t>(mid.id));
+
+                            nodeA->AddConnection(static_cast<int16_t>(idC), WPT_CONN_NONE);
+                            if (aHasRev && cHasRev) {
+                                nodeC->AddConnection(static_cast<int16_t>(idA), WPT_CONN_NONE);
+                            }
+
+                            collinearToDelete.insert(mid.id);
+                            stats.collinearPruned++;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!collinearToDelete.empty()) {
+            m_nodes.erase(std::remove_if(m_nodes.begin(), m_nodes.end(), [&](const WaypointNode& n) {
+                return collinearToDelete.count(n.id) > 0;
+            }), m_nodes.end());
+            for (auto& n : m_nodes) {
+                for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+                    if (collinearToDelete.count(static_cast<uint32_t>(n.connections[c]))) {
+                        n.connections[c] = -1;
+                        n.connectionFlags[c] = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    // Pass 5: Prune Dead-End Orphans
+    if (options.pruneOrphans) {
+        stats.orphansRemoved = DeleteOrphanNodes();
+    }
+
+    // Pass 6: Recalculate Optimal Wayzone Radii
+    if (options.recalculateWayzones) {
+        stats.wayzonesCalculated = CalculateAllWayzones(bsp);
+    }
+
+    auto tEnd = std::chrono::high_resolution_clock::now();
+    stats.durationSeconds = std::chrono::duration<double>(tEnd - tStart).count();
+    stats.totalModified = stats.overlappingMerged + stats.collinearPruned + stats.blockedLinksPruned + stats.oneWayLinksFixed + stats.orphansRemoved;
+
+    return stats;
+}
+

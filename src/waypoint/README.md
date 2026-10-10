@@ -107,5 +107,34 @@ The whole-map waypoint generator (`ebot_generator.cpp`) operates in an asynchron
    - Sorts candidate neighbor nodes by Euclidean distance.
    - Validates horizontal and vertical step limits and verifies line-of-sight clearance via `BSPFile::TraceWorld`.
 
-5. **Tactical Sightline Analysis**:
+5. **Graph Optimization Passes**:
+   - Executes redundant collinear corridor simplification, merges close overlapping nodes, restores bidirectional flat ground links, prunes obstructed walls, and recalculates optimal wayzone clearance radii.
+
+6. **Tactical Sightline Analysis**:
    - Analyzes open areas, chokepoints, and vantage perches to assign camping pitch/yaw angles and sniper flags.
+
+---
+
+## Graph Optimizer (`OptimizeGraph`)
+
+The waypoint optimizer (`waypoint_graph.cpp` and modal UI in NavStudio) provides comprehensive topology repair for existing graphs:
+
+- **Collinear Simplification**: Prunes redundant intermediate pass-through nodes along straight hallways within angular tolerance (`collinearMaxAngle`) when direct line-of-sight clearance exists between endpoints.
+- **Overlapping Node Merge**: Merges nodes within `mergeDistance` (default 25 units), transferring outgoing connections and redirecting incoming links to eliminate double-placed nodes.
+- **Line-of-Sight Clearance**: Runs raycast traces against BSP geometry and prunes invalid connections blocked by solid geometry.
+- **Flat Ground Two-Way Restoration**: Identifies one-way links on flat surfaces (delta Z <= 18 units) and restores bidirectional navigation.
+- **Orphan Pruning**: Deletes disconnected nodes with zero incoming and outgoing links.
+- **Wayzone Recalculation**: Traces 8-directional raycasts against world brushes to calculate the maximum safe movement tolerance zone (`radius`) for bots.
+
+---
+
+## Dual Navigation Format Prompting
+
+When a BSP map is opened and matching navigation data exists on disk for both:
+1. Valve Navigation Mesh (`.nav`)
+2. Bot Waypoints (`.ewp`, `.spt`, `.pwf`, `.wpt`)
+
+NavStudio presents an interactive modal prompting the mapper to choose their active editing mode:
+- **Valve Navigation Mesh**: Focuses on polygonal NavAreas, hiding spots, and connections.
+- **Bot Waypoints**: Focuses on topological point graph, tactical flags, and jump arcs.
+- **Dual Layer Mode**: Loads both layers simultaneously for cross-format inspection and alignment.

@@ -509,6 +509,21 @@ public:
     size_t ConvertWaypointsToNav();
     void RebuildWaypointRenderer();
     WaypointGraph::WaypointAnalysisStats AutoAnalyzeWaypoints();
+    WaypointGraph::WaypointOptimizeStats OptimizeWaypoints(const WaypointGraph::WaypointOptimizeOptions& options = WaypointGraph::WaypointOptimizeOptions());
+
+    // Map Navigation Mode Selection Prompt (when map has both .nav and bot waypoints)
+    bool HasPendingNavOrWptChoice() const { return m_showNavOrWptPrompt; }
+    void SetPendingNavOrWptChoice(bool show) { m_showNavOrWptPrompt = show; }
+    const std::string& GetPromptBspName() const { return m_promptBspName; }
+    const std::string& GetPromptNavPath() const { return m_promptNavPath; }
+    const std::string& GetPromptWptPath() const { return m_promptWptPath; }
+    size_t GetPromptNavAreaCount() const { return m_promptNavAreaCount; }
+    size_t GetPromptWptNodeCount() const { return m_promptWptNodeCount; }
+
+    void ChooseLoadNavOnly();
+    void ChooseLoadWptOnly();
+    void ChooseLoadBoth();
+    void DismissNavOrWptChoice();
 
     enum EditorTargetMode {
         TARGET_NAVMESH = 0,
@@ -823,6 +838,13 @@ private:
     WaypointGraph m_pendingGeneratedGraph;
     EBotGenerateResult m_pendingGenResult;
     std::mutex m_waypointGenMutex;
+    // Nav vs Waypoint loading prompt state
+    bool m_showNavOrWptPrompt{false};
+    std::string m_promptBspName;
+    std::string m_promptNavPath;
+    std::string m_promptWptPath;
+    size_t m_promptNavAreaCount{0};
+    size_t m_promptWptNodeCount{0};
 
     void PostGenerateOptimize();
 };

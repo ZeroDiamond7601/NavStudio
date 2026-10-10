@@ -421,6 +421,12 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     if (m_showEBotGenModal) {
         RenderEBotGenModal(scene, cmdMgr);
     }
+    if (m_showWaypointOptimizeModal) {
+        RenderWaypointOptimizeModal(scene, cmdMgr);
+    }
+    if (scene.HasPendingNavOrWptChoice()) {
+        RenderNavOrWaypointPromptModal(scene);
+    }
     RenderToastHUD(scene);
 }
 
@@ -883,6 +889,10 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
 
             if (ImGui::BeginMenu("Fix & Optimize")) {
+                if (ImGui::MenuItem("Optimize Waypoint Graph...", "Alt+O", false, scene.HasWaypoints())) {
+                    m_showWaypointOptimizeModal = true;
+                }
+                ImGui::Separator();
                 if (ImGui::MenuItem("Fix Waypoints (CS-EBOT: Prune Jumps & LOS)", nullptr, false, scene.HasWaypoints() && scene.HasBSP())) {
                     size_t fixed = scene.GetWaypoints().FixWaypoints(&scene.GetBSP());
                     scene.RebuildWaypointRenderer();

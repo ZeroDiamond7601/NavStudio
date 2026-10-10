@@ -103,24 +103,29 @@ EBotGenerateResult EBotGenerator::Generate(
         }
     }
 
-    // Fast 2D spatial hash grid for O(1) proximity queries
+    // Fast 3D spatial hash grid for O(1) proximity queries (prevents multi-level floor grouping)
     struct SpatialKey {
-        int gx, gy;
-        bool operator==(const SpatialKey& o) const { return gx == o.gx && gy == o.gy; }
+        int gx, gy, gz;
+        bool operator==(const SpatialKey& o) const { return gx == o.gx && gy == o.gy && gz == o.gz; }
     };
     struct SpatialHash {
         size_t operator()(const SpatialKey& k) const {
-            return std::hash<int>()(k.gx) ^ (std::hash<int>()(k.gy) << 16);
+            size_t h = std::hash<int>()(k.gx);
+            h ^= std::hash<int>()(k.gy) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= std::hash<int>()(k.gz) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            return h;
         }
     };
 
     std::unordered_map<SpatialKey, std::vector<uint32_t>, SpatialHash> spatialGrid;
     float cellSize = options.nodeSpacing > 0.0f ? options.nodeSpacing : 60.0f;
+    float cellZSize = 72.0f; // Multi-level floor vertical hull height
 
     auto AddToSpatialGrid = [&](uint32_t nodeId, const Vector3& pos) {
         int gx = static_cast<int>(std::floor(pos.x / cellSize));
         int gy = static_cast<int>(std::floor(pos.y / cellSize));
-        spatialGrid[{gx, gy}].push_back(nodeId);
+        int gz = static_cast<int>(std::floor(pos.z / cellZSize));
+        spatialGrid[{gx, gy, gz}].push_back(nodeId);
     };
 
     auto FindNearestInSpatialGrid = [&](const Vector3& pos, float maxRadius, uint32_t& outId) -> float {
@@ -128,19 +133,23 @@ EBotGenerateResult EBotGenerator::Generate(
         int maxGx = static_cast<int>(std::floor((pos.x + maxRadius) / cellSize));
         int minGy = static_cast<int>(std::floor((pos.y - maxRadius) / cellSize));
         int maxGy = static_cast<int>(std::floor((pos.y + maxRadius) / cellSize));
+        int minGz = static_cast<int>(std::floor((pos.z - maxRadius) / cellZSize));
+        int maxGz = static_cast<int>(std::floor((pos.z + maxRadius) / cellZSize));
         float bestDist = 999999.0f;
         outId = 0;
         for (int gx = minGx; gx <= maxGx; ++gx) {
             for (int gy = minGy; gy <= maxGy; ++gy) {
-                auto it = spatialGrid.find({gx, gy});
-                if (it != spatialGrid.end()) {
-                    for (uint32_t id : it->second) {
-                        const WaypointNode* n = outGraph.GetNodeByID(id);
-                        if (n) {
-                            float d = (n->origin - pos).Length();
-                            if (d < bestDist) {
-                                bestDist = d;
-                                outId = id;
+                for (int gz = minGz; gz <= maxGz; ++gz) {
+                    auto it = spatialGrid.find({gx, gy, gz});
+                    if (it != spatialGrid.end()) {
+                        for (uint32_t id : it->second) {
+                            const WaypointNode* n = outGraph.GetNodeByID(id);
+                            if (n) {
+                                float d = (n->origin - pos).Length();
+                                if (d < bestDist) {
+                                    bestDist = d;
+                                    outId = id;
+                                }
                             }
                         }
                     }
@@ -357,16 +366,18 @@ EBotGenerateResult EBotGenerator::Generate(
     if (progress) progress(0.82f, "Auto-linking neighboring waypoints...");
     outGraph.AutoLinkNodes(options.connectRadius, &bsp);
 
-    // 5. Line-of-sight validation and link pruning
-    if (progress) progress(0.88f, "Pruning blocked pathways and validating geometry...");
-    outGraph.FixWaypoints(&bsp);
-    outGraph.DeleteOrphanNodes();
-
-    // 6. Calculate optimal wayzones for all nodes
-    if (progress) progress(0.92f, "Calculating wayzone radii...");
-    for (const auto& node : outGraph.GetNodes()) {
-        outGraph.CalculateWayzone(node.id, &bsp);
-    }
+    // 5. Intelligent Graph Optimization (prunes co-linear corridor nodes, merges overlaps, fixes one-way links)
+    if (progress) progress(0.88f, "Optimizing graph topology and pruning redundant nodes...");
+    WaypointGraph::WaypointOptimizeOptions opt;
+    opt.pruneCollinear = true;
+    opt.collinearMaxAngle = 14.0f;
+    opt.mergeOverlapping = true;
+    opt.mergeDistance = options.minDistance * 0.45f;
+    opt.fixOneWayLinks = true;
+    opt.pruneBlockedLinks = true;
+    opt.pruneOrphans = true;
+    opt.recalculateWayzones = true;
+    outGraph.OptimizeGraph(&bsp, opt);
 
     // 7. Automated Tactical and Camp Sightline Analysis
     if (options.generateCamps) {
