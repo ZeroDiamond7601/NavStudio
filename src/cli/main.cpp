@@ -11,6 +11,7 @@
 #include "../waypoint/waypoint_graph.h"
 #include "../waypoint/waypoint_nav_converter.h"
 #include "../waypoint/ebot_generator.h"
+#include "editor/version.h"
 
 static void PrintHelp() {
     std::cout << "Usage:\n";
@@ -642,7 +643,7 @@ static int HandleGenerateWaypoints(int argc, char* argv[]) {
 
 int main(int argc, char* argv[]) {
     std::cout << "=========================================================\n";
-    std::cout << " NavStudio CLI v1.6.1 - CS 1.6 BSP & NAV Tool\n";
+    std::cout << " NavStudio CLI v" << NAVSTUDIO_VERSION_STRING << " - CS 1.6 BSP & NAV Tool\n";
     std::cout << "=========================================================\n\n";
 
     if (argc < 2) {

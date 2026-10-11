@@ -14,6 +14,7 @@
 #include "editor/render/shader.h"
 #include "editor/render/editor_shaders.h"
 #include "editor/res/app_icon_data.h"
+#include "editor/version.h"
 
 #include <cstdio>
 #include <iostream>
@@ -1141,7 +1142,7 @@ static void ProcessInput(GLFWwindow* window, float deltaTime) {
 
 static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
     static std::string lastTitle = "";
-    std::string title = "NavStudio v1.6.1";
+    std::string title = std::string("NavStudio v") + NAVSTUDIO_VERSION_STRING;
     if (scene.HasBSP() || scene.HasNAV() || scene.HasWaypoints()) {
         std::string map = "";
         if (scene.HasBSP()) {
@@ -1171,7 +1172,7 @@ static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
 
 int main(int argc, char* argv[]) {
     std::printf("====================================================\n");
-    std::printf("  NavStudio v1.6.1\n");
+    std::printf("  NavStudio v%s\n", NAVSTUDIO_VERSION_STRING);
     std::printf("====================================================\n");
 
     if (!glfwInit()) {
@@ -1247,7 +1248,7 @@ int main(int argc, char* argv[]) {
         initialHeight = 1080;
     }
 
-    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "NavStudio v1.6.1", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, (std::string("NavStudio v") + NAVSTUDIO_VERSION_STRING).c_str(), nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "[Error] Failed to create GLFW window\n");
         glfwTerminate();
