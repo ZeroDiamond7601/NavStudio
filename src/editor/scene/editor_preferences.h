@@ -27,6 +27,8 @@ struct EditorPreferences {
     bool showTooltips{true};
     float statusToastDuration{3.0f};
     int maxRecentFiles{10};
+    bool checkForUpdatesOnStartup{true};
+    int64_t lastUpdateCheckTimestamp{0};
 
     // Precision Nudge & Gizmo Defaults
     float defaultLinearNudgeStep{16.0f};
@@ -134,6 +136,8 @@ struct EditorPreferences {
         showTooltips = true;
         statusToastDuration = 3.0f;
         maxRecentFiles = 10;
+        checkForUpdatesOnStartup = true;
+        lastUpdateCheckTimestamp = 0;
 
         defaultLinearNudgeStep = 16.0f;
         defaultAngularNudgeStep = 15.0f;
@@ -241,6 +245,8 @@ struct EditorPreferences {
                 else if (key == "showTooltips") showTooltips = (val == "1" || val == "true");
                 else if (key == "statusToastDuration") statusToastDuration = std::stof(val);
                 else if (key == "maxRecentFiles") maxRecentFiles = std::stoi(val);
+                else if (key == "checkForUpdatesOnStartup") checkForUpdatesOnStartup = (val == "1" || val == "true");
+                else if (key == "lastUpdateCheckTimestamp") lastUpdateCheckTimestamp = std::stoll(val);
                 else if (key == "defaultLinearNudgeStep") defaultLinearNudgeStep = std::stof(val);
                 else if (key == "defaultAngularNudgeStep") defaultAngularNudgeStep = std::stof(val);
                 else if (key == "showGizmoNudgeHUD") showGizmoNudgeHUD = (val == "1" || val == "true");
@@ -340,6 +346,8 @@ struct EditorPreferences {
         file << "showTooltips=" << (showTooltips ? "1" : "0") << "\n";
         file << "statusToastDuration=" << statusToastDuration << "\n";
         file << "maxRecentFiles=" << maxRecentFiles << "\n";
+        file << "checkForUpdatesOnStartup=" << (checkForUpdatesOnStartup ? "1" : "0") << "\n";
+        file << "lastUpdateCheckTimestamp=" << lastUpdateCheckTimestamp << "\n";
         file << "defaultLinearNudgeStep=" << defaultLinearNudgeStep << "\n";
         file << "defaultAngularNudgeStep=" << defaultAngularNudgeStep << "\n";
         file << "showGizmoNudgeHUD=" << (showGizmoNudgeHUD ? "1" : "0") << "\n";

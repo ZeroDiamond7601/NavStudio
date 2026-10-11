@@ -4,6 +4,7 @@
 #include "editor/scene/editor_scene.h"
 #include "editor/camera/camera.h"
 #include "editor/commands/command.h"
+#include "editor/ui/update_checker.h"
 #include <string>
 
 class EditorUI {
@@ -52,6 +53,8 @@ public:
     void OpenTutorialModal() { m_showTutorialModal = true; m_tutorialCurrentStep = 0; }
     void OpenHelpModal() { m_showHelpModal = true; }
     void ToggleTutorialModal() { m_showTutorialModal = !m_showTutorialModal; }
+    void CheckForUpdates(bool isManual = true) { m_updateChecker.CheckForUpdates(isManual); }
+    void OpenUpdateModal() { m_updateChecker.OpenModal(); }
     void SetMarqueeBox(bool active, float startX, float startY, float curX, float curY) {
         m_marqueeActive = active;
         m_marqueeStartX = startX;
@@ -246,6 +249,10 @@ private:
     int m_batchSourceType{0}; // 0 = Direct BSP Geometry (E-Bot Engine), 1 = Convert from existing .nav
     bool m_batchCalcWayzones{true};
     EBotGenerateOptions m_batchEBotOptions;
+
+    // Update Checker
+    UpdateChecker m_updateChecker;
+    bool m_startupUpdateChecked{false};
 };
 
 #endif // EDITOR_UI_H

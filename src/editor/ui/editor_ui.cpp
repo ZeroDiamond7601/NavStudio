@@ -1,5 +1,6 @@
 #include "editor/ui/editor_ui.h"
 #include <imgui.h>
+#include "editor/version.h"
 #include "editor/commands/nav_commands.h"
 #include "editor/ui/file_dialog.h"
 #include "waypoint/ebot_generator.h"
@@ -235,6 +236,19 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     ImGuiIO& io = ImGui::GetIO();
     m_mouseOverUI = io.WantCaptureMouse;
 
+    // Check for updates on startup if enabled (cooldown 24h)
+    if (!m_startupUpdateChecked) {
+        m_startupUpdateChecked = true;
+        if (scene.GetPreferences().checkForUpdatesOnStartup) {
+            m_updateChecker.CheckForUpdates(false, &scene.GetPreferences().lastUpdateCheckTimestamp, true);
+        }
+    }
+
+    if (m_updateChecker.HasPendingNotification()) {
+        m_updateChecker.ClearNotification();
+        scene.ShowToast("New NavStudio update available: v" + m_updateChecker.GetLatestRelease().version + " (Help -> Check for Updates)", 5.0f);
+    }
+
     // Handle global shortcuts when not typing into input fields
     if (!io.WantTextInput) {
         if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_O, false)) {
@@ -466,6 +480,7 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
     if (scene.IsWaypointTaskRunning()) {
         RenderWaypointTaskModal(scene);
     }
+    m_updateChecker.RenderModal();
     RenderToastHUD(scene);
 }
 
@@ -1277,6 +1292,11 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
             if (ImGui::MenuItem("Controls & Shortcuts Cheatsheet...", "Shift+F1")) {
                 m_showHelpModal = true;
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Check for Updates...")) {
+                m_updateChecker.CheckForUpdates(true, &scene.GetPreferences().lastUpdateCheckTimestamp, false);
+                scene.GetPreferences().Save();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("About NavStudio...")) {
@@ -3969,7 +3989,11 @@ void EditorUI::RenderAboutModal() {
 
     if (ImGui::BeginPopupModal("About NavStudio##AboutModal", &m_showAboutModal, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextColored(ImVec4(0.3f, 0.85f, 1.0f, 1.0f), "NavStudio - GoldSrc BSP & NavMesh / Waypoint Editor");
-        ImGui::TextDisabled("Version 1.6.1 (Win32 / Linux)");
+        ImGui::TextDisabled("Version %s (Win32 / Linux)", NAVSTUDIO_VERSION_STRING);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Check for Updates...")) {
+            m_updateChecker.CheckForUpdates(true);
+        }
         ImGui::Separator();
         ImGui::Spacing();
 
@@ -4091,6 +4115,24 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
                 ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Undo History:");
                 ImGui::SliderInt("Max Undo History Steps", &prefs.maxUndoSteps, 10, 500, "%d steps");
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Limits RAM usage for large mesh editing sessions");
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Application Updates:");
+                ImGui::Checkbox("Check for Updates on Startup (Every 24h)", &prefs.checkForUpdatesOnStartup);
+                ImGui::SameLine();
+                if (ImGui::Button("Check Now##PrefsCheckNow")) {
+                    m_updateChecker.CheckForUpdates(true, &prefs.lastUpdateCheckTimestamp, false);
+                }
+                if (prefs.lastUpdateCheckTimestamp > 0) {
+                    time_t t = static_cast<time_t>(prefs.lastUpdateCheckTimestamp);
+                    char buf[64];
+                    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", localtime(&t));
+                    ImGui::TextDisabled("Last update check: %s", buf);
+                } else {
+                    ImGui::TextDisabled("Last update check: Never");
+                }
 
                 ImGui::EndChild();
                 ImGui::EndTabItem();
@@ -6238,6 +6280,7 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
             { "Preferences", "Open Preferences", "Ctrl+,", [&]() { OpenPreferences(); } },
             { "Help", "Quick Start Interactive Tutorial", "F1", [&]() { OpenTutorialModal(); } },
             { "Help", "Controls & Shortcuts Cheatsheet", "Shift+F1", [&]() { OpenHelpModal(); } },
+            { "Help", "Check for Updates from GitHub", "", [&]() { m_updateChecker.CheckForUpdates(true, &scene.GetPreferences().lastUpdateCheckTimestamp, false); scene.GetPreferences().Save(); } },
             { "Help", "About NavStudio (Author & GitHub)", "", [&]() { m_showAboutModal = true; } }
         };
 
