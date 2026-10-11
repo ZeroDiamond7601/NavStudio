@@ -207,25 +207,40 @@ void DevConsole::ExecuteCommand(const std::string& cmdLine, EditorScene& scene, 
     } else if (cmd == "status") {
         AddLog(LogLevel::System, "--- NavStudio Runtime Status ---");
         AddLog(LogLevel::Info, "  Map:        %s", scene.HasBSP() ? scene.GetBSPName().c_str() : "[None]");
-        AddLog(LogLevel::Info, "  NavMesh:    %zu areas, %zu ladders (Modified: %s)",
-               scene.GetNAV().GetAreas().size(), scene.GetLadderCount(),
-               (scene.IsModified() || cmdMgr.HasUnsavedChanges()) ? "Yes" : "No");
-        AddLog(LogLevel::Info, "  Waypoints:  %zu nodes, %zu links",
-               scene.GetWaypoints().GetNodes().size(), scene.GetWaypoints().GetConnections().size());
+        if (scene.HasNAV()) {
+            AddLog(LogLevel::Info, "  NavMesh:    %zu areas, %zu ladders (Modified: %s)",
+                   scene.GetNAV().GetAreas().size(), scene.GetLadderCount(),
+                   (scene.IsModified() || cmdMgr.HasUnsavedChanges()) ? "Yes" : "No");
+        } else {
+            AddLog(LogLevel::Info, "  NavMesh:    [None]");
+        }
+        if (scene.HasWaypoints()) {
+            AddLog(LogLevel::Info, "  Waypoints:  %zu nodes, %zu links",
+                   scene.GetWaypoints().GetNodes().size(), scene.GetWaypoints().GetTotalConnectionCount());
+        } else {
+            AddLog(LogLevel::Info, "  Waypoints:  [None]");
+        }
         Vector3 pos = camera.GetPosition();
         AddLog(LogLevel::Info, "  Camera:     (%.1f, %.1f, %.1f)", pos.x, pos.y, pos.z);
     } else if (cmd == "stats") {
         AddLog(LogLevel::System, "--- Scene Statistics ---");
         if (scene.HasBSP()) {
-            AddLog(LogLevel::Info, "  BSP Models:    %zu", scene.GetBSP().GetModels().size());
-            AddLog(LogLevel::Info, "  BSP Entities:  %zu", scene.GetBSP().GetEntities().size());
+            AddLog(LogLevel::Info, "  BSP Models:    %d", scene.GetBSP().GetModelCount());
+            AddLog(LogLevel::Info, "  BSP Entities:  %d", scene.GetBSP().GetEntityCount());
+            AddLog(LogLevel::Info, "  BSP Faces:     %d", scene.GetBSP().GetFaceCount());
         }
         if (scene.HasNAV()) {
+            size_t hidingCount = 0;
+            for (const auto* area : scene.GetNAV().GetAreas()) {
+                if (area) hidingCount += area->GetHidingSpots().size();
+            }
             AddLog(LogLevel::Info, "  NAV Areas:     %zu", scene.GetNAV().GetAreas().size());
-            AddLog(LogLevel::Info, "  NAV Hiding:    %zu", scene.GetNAV().GetHidingSpots().size());
+            AddLog(LogLevel::Info, "  NAV Ladders:   %zu", scene.GetLadderCount());
+            AddLog(LogLevel::Info, "  NAV Hiding:    %zu", hidingCount);
         }
         if (scene.HasWaypoints()) {
             AddLog(LogLevel::Info, "  Bot Nodes:     %zu", scene.GetWaypoints().GetNodes().size());
+            AddLog(LogLevel::Info, "  Bot Links:     %zu", scene.GetWaypoints().GetTotalConnectionCount());
         }
     } else if (cmd == "diagnostics") {
         if (scene.HasNAV()) {

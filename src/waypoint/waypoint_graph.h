@@ -93,6 +93,13 @@ public:
     void Clear();
     bool IsEmpty() const { return m_nodes.empty(); }
     size_t GetNodeCount() const { return m_nodes.size(); }
+    size_t GetTotalConnectionCount() const {
+        size_t count = 0;
+        for (const auto& node : m_nodes) {
+            count += static_cast<size_t>(node.GetConnectionCount());
+        }
+        return count;
+    }
 
     const std::vector<WaypointNode>& GetNodes() const { return m_nodes; }
     std::vector<WaypointNode>& GetNodes() { return m_nodes; }

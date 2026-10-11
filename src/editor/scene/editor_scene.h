@@ -565,6 +565,7 @@ public:
     const WaypointNode* GetSelectedWaypoint() const;
 
     bool LoadWaypoints(const std::string& path);
+    bool SaveWaypoints();
     bool SaveWaypoints(const std::string& path, BotType bot, GameMod mod);
     void UnloadWaypoints();
     bool ConvertNavToWaypoints(BotType bot, GameMod mod);

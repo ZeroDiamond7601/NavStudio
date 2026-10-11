@@ -289,6 +289,14 @@ bool EditorScene::LoadWaypoints(const std::string& path) {
     return false;
 }
 
+bool EditorScene::SaveWaypoints() {
+    if (m_waypointPath.empty()) {
+        ShowToast("No waypoint file path set to save!");
+        return false;
+    }
+    return SaveWaypoints(m_waypointPath, m_waypoints.GetActiveBot(), m_waypoints.GetActiveMod());
+}
+
 bool EditorScene::SaveWaypoints(const std::string& path, BotType bot, GameMod mod) {
     if (m_waypoints.Save(path, bot, mod)) {
         m_waypointPath = path;
