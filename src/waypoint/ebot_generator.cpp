@@ -297,7 +297,10 @@ EBotGenerateResult EBotGenerator::Generate(
                     if (!isDiagonal || !options.pruneCrossingLinks) {
                         bool isBi = (std::abs(zDiff) <= options.maxStepHeight);
                         uint16_t cFlags = (zDiff > options.maxStepHeight) ? WPT_CONN_JUMP : WPT_CONN_NONE;
-                        if (needCrouch) cFlags |= WPT_CONN_CROUCH;
+                        const WaypointNode* currNode = outGraph.GetNodeByID(currId);
+                        if (needCrouch || (currNode && (currNode->flags & WPT_FLAG_CROUCH)) || (nearNode && (nearNode->flags & WPT_FLAG_CROUCH))) {
+                            cFlags |= WPT_CONN_CROUCH;
+                        }
                         outGraph.ConnectNodes(currId, nearbyId, isBi, cFlags);
                     }
                 }
@@ -306,15 +309,33 @@ EBotGenerateResult EBotGenerator::Generate(
 
             // Spawn new node with adaptive wayzone radius
             uint32_t nodeFlags = WPT_FLAG_CROSSING;
-            if (needCrouch) nodeFlags |= WPT_FLAG_CROUCH;
+            if (needCrouch) {
+                nodeFlags |= WPT_FLAG_CROUCH;
+                // Tight vent / duct detection: if width < 56u in any axis, enforce 1 bot at a time
+                Vector3 midPos = nodePos;
+                BSPTraceResult trX1, trX2, trY1, trY2;
+                bsp.TraceWorld(midPos, midPos + Vector3(36.0f, 0.0f, 0.0f), HULL_POINT, &trX1);
+                bsp.TraceWorld(midPos, midPos - Vector3(36.0f, 0.0f, 0.0f), HULL_POINT, &trX2);
+                bsp.TraceWorld(midPos, midPos + Vector3(0.0f, 36.0f, 0.0f), HULL_POINT, &trY1);
+                bsp.TraceWorld(midPos, midPos - Vector3(0.0f, 36.0f, 0.0f), HULL_POINT, &trY2);
+                float widthX = trX1.endpos.x - trX2.endpos.x;
+                float widthY = trY1.endpos.y - trY2.endpos.y;
+                if (widthX < 56.0f || widthY < 56.0f) {
+                    nodeFlags |= WPT_FLAG_ONLYONE;
+                }
+            }
             if (zDiff > options.maxStepHeight) nodeFlags |= WPT_FLAG_JUMP;
 
-            WaypointNode* newNode = outGraph.AddNode(nodePos, nodeFlags, 32.0f);
+            float initRadius = needCrouch ? 0.0f : 32.0f;
+            WaypointNode* newNode = outGraph.AddNode(nodePos, nodeFlags, initRadius);
             if (newNode) {
                 outGraph.CalculateWayzone(newNode->id, &bsp);
                 bool isBi = (zDiff >= -options.maxJumpHeight);
                 uint16_t cFlags = (zDiff > options.maxStepHeight) ? WPT_CONN_JUMP : WPT_CONN_NONE;
-                if (needCrouch) cFlags |= WPT_CONN_CROUCH;
+                const WaypointNode* currNode = outGraph.GetNodeByID(currId);
+                if (needCrouch || (currNode && (currNode->flags & WPT_FLAG_CROUCH))) {
+                    cFlags |= WPT_CONN_CROUCH;
+                }
                 outGraph.ConnectNodes(currId, newNode->id, isBi, cFlags);
                 AddToSpatialGrid(newNode->id, nodePos);
                 openQueue.push(newNode->id);

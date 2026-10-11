@@ -3,7 +3,7 @@
 [![CI & Build](https://github.com/ZeroDiamond7601/NavStudio/actions/workflows/build.yml/badge.svg)](https://github.com/ZeroDiamond7601/NavStudio/actions)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20(x86)%20%7C%20Linux-brightgreen.svg)]()
-[![Release](https://img.shields.io/badge/Version-v1.6.0.1-orange.svg)](https://github.com/ZeroDiamond7601/NavStudio/releases)
+[![Release](https://img.shields.io/badge/Version-v1.6.1-orange.svg)](https://github.com/ZeroDiamond7601/NavStudio/releases)
 
 **NavStudio** is a standalone, hardware-accelerated 3D desktop visualizer, navigation mesh editor, and verification suite for **GoldSrc** (`.bsp` v30) maps and **Counter-Strike 1.6 / Condition Zero** (`.nav` v4 & v5) navigation meshes.
 
@@ -17,6 +17,12 @@ It provides real-time OpenGL 3.3 Core rendering with Dear ImGui docking, Valve H
   <img src="docs/images/navstudio_viewport_textured.png" alt="NavStudio 3D Textured Viewport & Transform Gizmo" width="95%" />
   <br />
   <em>Real-time GoldSrc BSP rendering with WAD3 textures, navigation area selection, 3D multi-axis transform gizmo, directional connection flow, and docked Property Inspector.</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/navstudio_bot_waypoints.png" alt="Bot Waypoint Graph & Inspector" width="95%" />
+  <br />
+  <em>Bot Waypoint System (F6) showing whole-map waypoint network, walkable floor linkages, spawn archetypes, and docked Bot Waypoint Inspector with real-time metrics.</em>
 </p>
 
 <p align="center">

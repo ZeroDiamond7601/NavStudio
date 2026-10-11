@@ -96,6 +96,10 @@ bool WaypointGraph::ConnectNodes(uint32_t fromId, uint32_t toId, bool bidirectio
     WaypointNode* to = GetNodeByID(toId);
     if (!from || !to || fromId == toId) return false;
 
+    if ((from->flags & WPT_FLAG_CROUCH) || (to->flags & WPT_FLAG_CROUCH)) {
+        connFlags |= WPT_CONN_CROUCH;
+    }
+
     bool ok1 = from->AddConnection(static_cast<int16_t>(toId), connFlags);
     bool ok2 = true;
     if (bidirectional) {
@@ -193,6 +197,9 @@ size_t WaypointGraph::AutoLinkNodes(float maxDist, const BSPFile* bsp) {
             }
 
             uint16_t cFlags = (cand.dz > 18.0f) ? WPT_CONN_JUMP : WPT_CONN_NONE;
+            if ((from.flags & WPT_FLAG_CROUCH) || (toNode->flags & WPT_FLAG_CROUCH)) {
+                cFlags |= WPT_CONN_CROUCH;
+            }
             if (ConnectNodes(from.id, cand.id, true, cFlags)) {
                 ++created;
             }
@@ -209,28 +216,59 @@ WaypointGraph::WaypointAnalysisStats WaypointGraph::AnalyzeGraph(const BSPFile* 
     bool hasBsp = (bsp && bsp->IsLoaded());
     size_t scanned = 0;
 
-    for (auto& node : m_nodes) {
+    // Fast lookup from nodeId -> index
+    std::unordered_map<uint32_t, size_t> idToIndex;
+    idToIndex.reserve(m_nodes.size());
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        idToIndex[m_nodes[i].id] = i;
+    }
+
+    // =========================================================================
+    // PASS 1: Node & Connection Physical Geometry (Headroom, Crouch, Step Jumps)
+    // =========================================================================
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        auto& node = m_nodes[i];
         if (progressCb && (scanned % 50 == 0 || scanned + 1 == m_nodes.size())) {
-            float frac = static_cast<float>(scanned) / static_cast<float>(m_nodes.size());
+            float frac = (static_cast<float>(scanned) / static_cast<float>(m_nodes.size())) * 0.45f;
             char buf[64];
-            std::snprintf(buf, sizeof(buf), "Analyzing node %zu / %zu (%.0f%%)", scanned + 1, m_nodes.size(), frac * 100.0f);
+            std::snprintf(buf, sizeof(buf), "Analyzing geometry %zu / %zu (%.0f%%)", scanned + 1, m_nodes.size(), frac * 100.0f);
             progressCb(frac, buf);
         }
         scanned++;
         bool nodeModified = false;
 
-        // 1. BSP Geometry Analysis: Headroom / Crouch (CS-EBOT & NavMesh style)
+        // 1. BSP Geometry Analysis: Headroom / Crouch / Tight Vents
         if (hasBsp) {
-            Vector3 start(node.origin.x, node.origin.y, node.origin.z + 4.0f);
+            Vector3 start(node.origin.x, node.origin.y, node.origin.z + 2.0f);
             Vector3 end(node.origin.x, node.origin.y, node.origin.z + 74.0f);
             BSPTraceResult tr;
             if (bsp->TraceWorld(start, end, HULL_POINT, &tr)) {
                 if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f) {
                     float clearance = tr.endpos.z - node.origin.z;
-                    if (clearance < 72.0f && clearance >= 24.0f) {
+                    if (clearance < 68.0f && clearance >= 24.0f) {
                         if (!(node.flags & WPT_FLAG_CROUCH)) {
                             node.flags |= WPT_FLAG_CROUCH;
                             stats.crouchAssigned++;
+                            nodeModified = true;
+                        }
+
+                        // Duct/vent lateral width check: if narrow (< 56u), enforce 1-bot-at-a-time
+                        Vector3 midPos(node.origin.x, node.origin.y, node.origin.z + 18.0f);
+                        BSPTraceResult trX1, trX2, trY1, trY2;
+                        bsp->TraceWorld(midPos, midPos + Vector3(36.0f, 0.0f, 0.0f), HULL_POINT, &trX1);
+                        bsp->TraceWorld(midPos, midPos - Vector3(36.0f, 0.0f, 0.0f), HULL_POINT, &trX2);
+                        bsp->TraceWorld(midPos, midPos + Vector3(0.0f, 36.0f, 0.0f), HULL_POINT, &trY1);
+                        bsp->TraceWorld(midPos, midPos - Vector3(0.0f, 36.0f, 0.0f), HULL_POINT, &trY2);
+                        float widthX = trX1.endpos.x - trX2.endpos.x;
+                        float widthY = trY1.endpos.y - trY2.endpos.y;
+                        if (widthX < 56.0f || widthY < 56.0f) {
+                            if (!(node.flags & WPT_FLAG_ONLYONE)) {
+                                node.flags |= WPT_FLAG_ONLYONE;
+                                nodeModified = true;
+                            }
+                        }
+                        if (node.radius > 0.0f) {
+                            node.radius = 0.0f; // strictly constrain radius inside crouch ducts
                             nodeModified = true;
                         }
                     }
@@ -250,8 +288,306 @@ WaypointGraph::WaypointAnalysisStats WaypointGraph::AnalyzeGraph(const BSPFile* 
                     }
                 }
             }
+        }
 
-            // Line-of-sight & Camp / Sniper aim optimizer (YaPB style radial sightline analysis)
+        // 2. Link & Connection Analysis: Step jumps, crouch ducking, and wall blockage
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            int16_t targetId = node.connections[c];
+            if (targetId < 0) continue;
+
+            auto it = idToIndex.find(static_cast<uint32_t>(targetId));
+            if (it == idToIndex.end()) {
+                node.connections[c] = -1;
+                node.connectionFlags[c] = 0;
+                stats.blockedLinksPruned++;
+                nodeModified = true;
+                continue;
+            }
+
+            WaypointNode& target = m_nodes[it->second];
+
+            // Step elevation requiring jump
+            float dz = target.origin.z - node.origin.z;
+            if (dz > 18.0f && dz <= 45.0f) {
+                if (!(node.flags & WPT_FLAG_JUMP)) {
+                    node.flags |= WPT_FLAG_JUMP;
+                    stats.jumpAssigned++;
+                    nodeModified = true;
+                }
+                node.connectionFlags[c] |= WPT_CONN_JUMP;
+            }
+
+            // Crouch ducking connection: if either endpoint requires crouching, tag connection
+            if ((node.flags & WPT_FLAG_CROUCH) || (target.flags & WPT_FLAG_CROUCH)) {
+                if (!(node.connectionFlags[c] & WPT_CONN_CROUCH)) {
+                    node.connectionFlags[c] |= WPT_CONN_CROUCH;
+                    nodeModified = true;
+                }
+            }
+
+            // Path blockage check (YaPB clean_paths_on_finish)
+            if (hasBsp) {
+                Vector3 p1 = node.origin + Vector3(0.0f, 0.0f, 18.0f);
+                Vector3 p2 = target.origin + Vector3(0.0f, 0.0f, 18.0f);
+                BSPTraceResult trPath;
+                if (bsp->TraceWorld(p1, p2, HULL_POINT, &trPath)) {
+                    if (!trPath.startsolid && !trPath.allsolid && trPath.fraction < 0.92f) {
+                        node.connections[c] = -1;
+                        node.connectionFlags[c] = 0;
+                        stats.blockedLinksPruned++;
+                        nodeModified = true;
+                    }
+                }
+            }
+        }
+
+        if (nodeModified) stats.totalModified++;
+    }
+
+    // Propagate reverse connection crouch flags
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        auto& node = m_nodes[i];
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            int16_t targetId = node.connections[c];
+            if (targetId < 0) continue;
+            if (node.connectionFlags[c] & WPT_CONN_CROUCH) {
+                auto it = idToIndex.find(static_cast<uint32_t>(targetId));
+                if (it != idToIndex.end()) {
+                    auto& target = m_nodes[it->second];
+                    for (int rc = 0; rc < WPT_MAX_CONNECTIONS; ++rc) {
+                        if (target.connections[rc] == static_cast<int16_t>(node.id)) {
+                            target.connectionFlags[rc] |= WPT_CONN_CROUCH;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // PASS 2: Tactical Hiding Spots & Zombie Plague Defense Clusters
+    // =========================================================================
+    if (progressCb) progressCb(0.50f, "Analyzing tactical defense camps & hiding spots...");
+
+    // Helper: calculate active connections count for each node
+    std::vector<int> activeConns(m_nodes.size(), 0);
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            if (m_nodes[i].connections[c] >= 0) activeConns[i]++;
+        }
+    }
+
+    // A) Elevated Perches (Crates, Beams, Ledges)
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        auto& node = m_nodes[i];
+        float maxDropToNeighbor = 0.0f;
+        int lowerTargetIdx = -1;
+
+        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+            int16_t targetId = node.connections[c];
+            if (targetId < 0) continue;
+            auto it = idToIndex.find(static_cast<uint32_t>(targetId));
+            if (it == idToIndex.end()) continue;
+
+            float drop = node.origin.z - m_nodes[it->second].origin.z;
+            if (drop > maxDropToNeighbor) {
+                maxDropToNeighbor = drop;
+                lowerTargetIdx = static_cast<int>(it->second);
+            }
+        }
+
+        if (maxDropToNeighbor >= 28.0f && lowerTargetIdx >= 0) {
+            bool isZombie = (mod == GameMod::ZombiePlague);
+            uint32_t campFlag = isZombie ? (WPT_FLAG_CAMP | WPT_FLAG_HMCAMPMESH) : WPT_FLAG_CAMP;
+            if (!(node.flags & campFlag)) {
+                node.flags |= campFlag;
+                if (isZombie) stats.zombieCampsAssigned++;
+                stats.totalModified++;
+            }
+            node.radius = 0.0f; // Prevent defending bot from falling off ledge
+
+            // Aim towards the lower approach point
+            if (node.campYaw == 0.0f && node.campPitch == 0.0f) {
+                Vector3 aimVec = m_nodes[lowerTargetIdx].origin - node.origin;
+                float yaw = std::atan2(aimVec.y, aimVec.x) * (180.0f / 3.14159265f);
+                if (yaw < 0.0f) yaw += 360.0f;
+                float hDist = std::hypot(aimVec.x, aimVec.y);
+                float pitch = std::clamp(std::atan2(aimVec.z, hDist) * (180.0f / 3.14159265f), -35.0f, 15.0f);
+                node.campYaw = yaw;
+                node.campPitch = pitch;
+                stats.campAnglesCalculated++;
+            }
+        }
+    }
+
+    // B) Dead-End Clusters (Rooms, Vents, Choke terminations)
+    for (size_t i = 0; i < m_nodes.size(); ++i) {
+        auto& node = m_nodes[i];
+        if (activeConns[i] == 1) {
+            // Leaf node of a dead end
+            int exitTargetIdx = -1;
+            for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+                if (node.connections[c] >= 0) {
+                    auto it = idToIndex.find(static_cast<uint32_t>(node.connections[c]));
+                    if (it != idToIndex.end()) exitTargetIdx = static_cast<int>(it->second);
+                    break;
+                }
+            }
+
+            if (exitTargetIdx >= 0) {
+                bool isZombie = (mod == GameMod::ZombiePlague);
+                if (isZombie && !(node.flags & (WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZMHMCAMP))) {
+                    node.flags |= (WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZMHMCAMP);
+                    stats.zombieCampsAssigned++;
+                    stats.totalModified++;
+                }
+                node.radius = 0.0f;
+
+                // Smart defensive aim: point directly down the corridor/vent toward the exit choke
+                if (node.campYaw == 0.0f && node.campPitch == 0.0f) {
+                    Vector3 outVec = m_nodes[exitTargetIdx].origin - node.origin;
+                    float yaw = std::atan2(outVec.y, outVec.x) * (180.0f / 3.14159265f);
+                    if (yaw < 0.0f) yaw += 360.0f;
+                    node.campYaw = yaw;
+                    node.campPitch = 0.0f;
+                    stats.campAnglesCalculated++;
+                }
+
+                // In Zombie mode or vent: traverse the dead-end branch up to depth 3
+                if (isZombie || (node.flags & WPT_FLAG_CROUCH)) {
+                    int prevIdx = static_cast<int>(i);
+                    int currIdx = exitTargetIdx;
+                    int depth = 1;
+
+                    while (currIdx >= 0 && depth < 3 && activeConns[currIdx] == 2) {
+                        auto& chainNode = m_nodes[currIdx];
+                        if (isZombie && !(chainNode.flags & (WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZMHMCAMP))) {
+                            chainNode.flags |= (WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZMHMCAMP);
+                            stats.zombieCampsAssigned++;
+                            stats.totalModified++;
+                        }
+                        chainNode.radius = 0.0f;
+
+                        // Next node in chain
+                        int nextIdx = -1;
+                        for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+                            int16_t tId = chainNode.connections[c];
+                            if (tId >= 0) {
+                                auto it = idToIndex.find(static_cast<uint32_t>(tId));
+                                if (it != idToIndex.end() && static_cast<int>(it->second) != prevIdx) {
+                                    nextIdx = static_cast<int>(it->second);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (nextIdx >= 0 && chainNode.campYaw == 0.0f && chainNode.campPitch == 0.0f) {
+                            Vector3 outVec = m_nodes[nextIdx].origin - chainNode.origin;
+                            float yaw = std::atan2(outVec.y, outVec.x) * (180.0f / 3.14159265f);
+                            if (yaw < 0.0f) yaw += 360.0f;
+                            chainNode.campYaw = yaw;
+                            chainNode.campPitch = 0.0f;
+                            stats.campAnglesCalculated++;
+                        }
+
+                        prevIdx = currIdx;
+                        currIdx = nextIdx;
+                        depth++;
+                    }
+                }
+            }
+        }
+    }
+
+    // C) Alcoves & 3-Wall Enclosed Corners
+    if (hasBsp) {
+        for (size_t i = 0; i < m_nodes.size(); ++i) {
+            auto& node = m_nodes[i];
+            bool alreadyCamp = (node.flags & (WPT_FLAG_CAMP | WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZMHMCAMP)) != 0;
+            if (alreadyCamp) continue;
+
+            Vector3 eyePos = node.origin + Vector3(0.0f, 0.0f, 18.0f);
+            int wallHits = 0;
+            Vector3 openDir(0.0f, 0.0f, 0.0f);
+
+            for (int a = 0; a < 8; ++a) {
+                float angRad = a * (2.0f * 3.14159265f / 8.0f);
+                Vector3 rayDir(std::cos(angRad), std::sin(angRad), 0.0f);
+                BSPTraceResult tr;
+                if (bsp->TraceWorld(eyePos, eyePos + rayDir * 80.0f, HULL_POINT, &tr) && tr.fraction < 1.0f) {
+                    wallHits++;
+                } else {
+                    openDir = openDir + rayDir;
+                }
+            }
+
+            if (wallHits >= 5) {
+                // Enclosed on 3 sides: defensive alcove / corner cubby
+                bool isZombie = (mod == GameMod::ZombiePlague);
+                if (isZombie) {
+                    node.flags |= (WPT_FLAG_ZMHMCAMP | WPT_FLAG_CAMP);
+                    stats.zombieCampsAssigned++;
+                } else {
+                    node.flags |= WPT_FLAG_CAMP;
+                }
+                node.radius = 0.0f;
+                stats.totalModified++;
+
+                if (openDir.LengthSq() > 0.01f && node.campYaw == 0.0f && node.campPitch == 0.0f) {
+                    float yaw = std::atan2(openDir.y, openDir.x) * (180.0f / 3.14159265f);
+                    if (yaw < 0.0f) yaw += 360.0f;
+                    node.campYaw = yaw;
+                    node.campPitch = 0.0f;
+                    stats.campAnglesCalculated++;
+                }
+            }
+        }
+    }
+
+    // D) Mesh ID Clustering for Zombie Plague Holdout Camps
+    if (mod == GameMod::ZombiePlague) {
+        if (progressCb) progressCb(0.80f, "Clustering human defensive camp meshes...");
+        std::vector<bool> visited(m_nodes.size(), false);
+        uint8_t clusterId = 1;
+
+        for (size_t i = 0; i < m_nodes.size(); ++i) {
+            if (visited[i]) continue;
+            if (!(m_nodes[i].flags & (WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZMHMCAMP))) continue;
+
+            // BFS to collect contiguous camp cluster
+            std::queue<size_t> q;
+            q.push(i);
+            visited[i] = true;
+
+            while (!q.empty()) {
+                size_t curr = q.front();
+                q.pop();
+
+                m_nodes[curr].mesh = clusterId;
+
+                for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
+                    int16_t tId = m_nodes[curr].connections[c];
+                    if (tId < 0) continue;
+                    auto it = idToIndex.find(static_cast<uint32_t>(tId));
+                    if (it == idToIndex.end()) continue;
+
+                    size_t nb = it->second;
+                    if (!visited[nb] && (m_nodes[nb].flags & (WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZMHMCAMP))) {
+                        visited[nb] = true;
+                        q.push(nb);
+                    }
+                }
+            }
+
+            if (clusterId < 255) clusterId++;
+        }
+    }
+
+    // E) Fallback Radial Sightline for Remaining Camp Nodes
+    if (hasBsp) {
+        if (progressCb) progressCb(0.92f, "Computing sightlines for remaining camp perches...");
+        for (auto& node : m_nodes) {
             bool isCamp = (node.flags & (WPT_FLAG_CAMP | WPT_FLAG_SNIPER | WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZMHMCAMP)) != 0;
             if (isCamp && (node.campYaw == 0.0f && node.campPitch == 0.0f)) {
                 float bestDist = 0.0f;
@@ -259,7 +595,6 @@ WaypointGraph::WaypointAnalysisStats WaypointGraph::AnalyzeGraph(const BSPFile* 
                 float eyeZ = node.origin.z + ((node.flags & WPT_FLAG_CROUCH) ? 18.0f : 24.0f);
                 Vector3 eyePos(node.origin.x, node.origin.y, eyeZ);
 
-                // Sample 16 horizontal directions (every 22.5 degrees)
                 for (int a = 0; a < 16; ++a) {
                     float angDeg = a * 22.5f;
                     float rad = angDeg * (3.14159265f / 180.0f);
@@ -280,67 +615,9 @@ WaypointGraph::WaypointAnalysisStats WaypointGraph::AnalyzeGraph(const BSPFile* 
                     node.campYaw = bestYaw;
                     node.campPitch = 0.0f;
                     stats.campAnglesCalculated++;
-                    nodeModified = true;
+                    stats.totalModified++;
                 }
             }
-        }
-
-        // 2. Link & Connection Analysis: Step jumps & wall blockage (YaPB clean_paths style)
-        for (int i = 0; i < WPT_MAX_CONNECTIONS; ++i) {
-            int16_t targetId = node.connections[i];
-            if (targetId < 0) continue;
-
-            WaypointNode* target = GetNodeByID(static_cast<uint32_t>(targetId));
-            if (!target) {
-                node.connections[i] = -1;
-                node.connectionFlags[i] = 0;
-                stats.blockedLinksPruned++;
-                nodeModified = true;
-                continue;
-            }
-
-            // Step elevation requiring jump
-            float dz = target->origin.z - node.origin.z;
-            if (dz > 18.0f && dz <= 45.0f) {
-                if (!(node.flags & WPT_FLAG_JUMP)) {
-                    node.flags |= WPT_FLAG_JUMP;
-                    stats.jumpAssigned++;
-                    nodeModified = true;
-                }
-                node.connectionFlags[i] |= WPT_CONN_JUMP;
-            }
-
-            // Path blockage check (YaPB clean_paths_on_finish)
-            if (hasBsp) {
-                Vector3 p1 = node.origin + Vector3(0.0f, 0.0f, 18.0f);
-                Vector3 p2 = target->origin + Vector3(0.0f, 0.0f, 18.0f);
-                BSPTraceResult trPath;
-                if (bsp->TraceWorld(p1, p2, HULL_POINT, &trPath)) {
-                    if (!trPath.startsolid && !trPath.allsolid && trPath.fraction < 0.92f) {
-                        node.connections[i] = -1;
-                        node.connectionFlags[i] = 0;
-                        stats.blockedLinksPruned++;
-                        nodeModified = true;
-                    }
-                }
-            }
-        }
-
-        // 3. Mod-Specific Analysis: Zombie Plague dead-end human camp mesh (CS-EBOT / SyPB style)
-        if (mod == GameMod::ZombiePlague) {
-            int activeConns = 0;
-            for (int i = 0; i < WPT_MAX_CONNECTIONS; ++i) {
-                if (node.connections[i] >= 0) activeConns++;
-            }
-            if (activeConns == 1 && !(node.flags & (WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZMHMCAMP))) {
-                node.flags |= WPT_FLAG_HMCAMPMESH;
-                stats.zombieCampsAssigned++;
-                nodeModified = true;
-            }
-        }
-
-        if (nodeModified) {
-            stats.totalModified++;
         }
     }
 
@@ -447,18 +724,18 @@ void WaypointGraph::CalculateWayzone(uint32_t nodeId, const BSPFile* bsp) {
     WaypointNode* node = GetNodeByID(nodeId);
     if (!node) return;
 
-    // CS-EBOT CalculateWayzone rule: ladder, goal, camp, rescue, crouch must have radius 0
-    if (node->flags & (WPT_FLAG_LADDER | WPT_FLAG_GOAL | WPT_FLAG_CAMP | WPT_FLAG_RESCUE | WPT_FLAG_CROUCH)) {
+    // CS-EBOT CalculateWayzone rule: ladder, goal, camp, rescue, crouch, zombie camps must have radius 0
+    if (node->flags & (WPT_FLAG_LADDER | WPT_FLAG_GOAL | WPT_FLAG_CAMP | WPT_FLAG_RESCUE | WPT_FLAG_CROUCH | WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZMHMCAMP | WPT_FLAG_SNIPER)) {
         node->radius = 0.0f;
         return;
     }
 
-    // If connected to ladder or jump point, radius must be 0
+    // If connected to ladder, jump point, or crouch opening, radius must be 0
     for (int c = 0; c < WPT_MAX_CONNECTIONS; ++c) {
         int16_t targetId = node->connections[c];
         if (targetId <= 0) continue;
         const WaypointNode* target = GetNodeByID(static_cast<uint32_t>(targetId));
-        if (target && (target->flags & (WPT_FLAG_LADDER | WPT_FLAG_JUMP))) {
+        if (target && (target->flags & (WPT_FLAG_LADDER | WPT_FLAG_JUMP | WPT_FLAG_CROUCH))) {
             node->radius = 0.0f;
             return;
         }

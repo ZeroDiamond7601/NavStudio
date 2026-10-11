@@ -223,6 +223,93 @@ NavArea* BuildArea(NavGenNode* node, int width, int height, NavMesh& outNav) {
     return area;
 }
 
+// Auto-generate tactical hiding spots for areas (dead-ends, crouch vents, elevated perches, 3-wall corners)
+void PopulateTacticalHidingSpots(const BSPFile& bsp, NavMesh& nav, const std::vector<NavArea*>& areas) {
+    if (!bsp.IsLoaded() || areas.empty()) return;
+
+    // Find next available spot ID across the entire nav mesh
+    uint32_t nextSpotId = 1;
+    for (const NavArea* a : nav.GetAreas()) {
+        if (!a) continue;
+        for (const auto& sp : a->GetHidingSpots()) {
+            if (sp.id >= nextSpotId) nextSpotId = sp.id + 1;
+        }
+    }
+
+    for (NavArea* area : areas) {
+        if (!area) continue;
+
+        // Skip if area already has hiding spots
+        if (!area->GetHidingSpots().empty()) continue;
+
+        const NavExtent& ext = area->GetExtent();
+        Vector3 center = area->GetCenter();
+        int totalConnections = 0;
+        bool isElevated = false;
+
+        for (int d = 0; d < NUM_NAV_DIRECTIONS; ++d) {
+            const auto& adj = area->GetAdjacentList(static_cast<NavDirType>(d));
+            totalConnections += static_cast<int>(adj.size());
+            for (const auto& c : adj) {
+                if (c.area && (center.z >= c.area->GetCenter().z + 28.0f)) {
+                    isElevated = true;
+                }
+            }
+        }
+
+        bool isCrouch = (area->GetAttributes() & NAV_ATTR_CROUCH) != 0;
+        bool isJump = (area->GetAttributes() & NAV_ATTR_JUMP) != 0;
+
+        // 1. Elevated perches (crates, ledges, sniper perches)
+        if (isElevated || isJump) {
+            area->GetHidingSpots().push_back(NavHidingSpot(nextSpotId++, center, HIDING_GOOD_SNIPER | HIDING_IN_COVER));
+            continue;
+        }
+
+        // 2. Dead-end areas (rooms, vent terminations, single-entry tunnels)
+        if (totalConnections <= 1) {
+            area->GetHidingSpots().push_back(NavHidingSpot(nextSpotId++, center, HIDING_IN_COVER));
+            continue;
+        }
+
+        // 3. Crouch ducts / crawlspaces (natural cover)
+        if (isCrouch) {
+            area->GetHidingSpots().push_back(NavHidingSpot(nextSpotId++, center, HIDING_IN_COVER));
+            continue;
+        }
+
+        // 4. Enclosed corners and alcoves (3-wall cubbies)
+        Vector3 corners[4] = {
+            Vector3(ext.lo.x + 8.0f, ext.lo.y + 8.0f, ext.lo.z), // NW
+            Vector3(ext.hi.x - 8.0f, ext.lo.y + 8.0f, area->GetNEZ()), // NE
+            Vector3(ext.lo.x + 8.0f, ext.hi.y - 8.0f, area->GetSWZ()), // SW
+            Vector3(ext.hi.x - 8.0f, ext.hi.y - 8.0f, ext.hi.z)  // SE
+        };
+
+        for (int c = 0; c < 4; ++c) {
+            Vector3 cornerEye = corners[c] + Vector3(0.0f, 0.0f, 18.0f);
+            int wallHits = 0;
+            const Vector3 dirs[4] = {
+                Vector3(0.0f, -24.0f, 0.0f), // North
+                Vector3(24.0f, 0.0f, 0.0f),  // East
+                Vector3(0.0f, 24.0f, 0.0f),  // South
+                Vector3(-24.0f, 0.0f, 0.0f)  // West
+            };
+            for (int d = 0; d < 4; ++d) {
+                BSPTraceResult tr;
+                if (bsp.TraceWorld(cornerEye, cornerEye + dirs[d], HULL_POINT, &tr) && tr.fraction < 1.0f) {
+                    wallHits++;
+                }
+            }
+            if (wallHits >= 2) {
+                // Corner enclosed by at least 2 perpendicular walls
+                area->GetHidingSpots().push_back(NavHidingSpot(nextSpotId++, corners[c], HIDING_IN_COVER));
+                break;
+            }
+        }
+    }
+}
+
 } // anonymous namespace
 
 NavGenerateResult NavGenerator::Generate(
@@ -758,9 +845,13 @@ NavGenerateResult NavGenerator::Generate(
         } while (mergedAny);
     }
 
-    if (progress) progress(0.95f, "Linking ladders and finalizing spatial grid...");
+    // 6. Tactical Hiding Spots Analysis (Dead-ends, elevated perches, crouch vents, alcoves)
+    if (progress) progress(0.94f, "Generating tactical hiding spots and defensive perches...");
+    PopulateTacticalHidingSpots(bsp, outNav, outNav.GetAreas());
 
-    // 6. Build Ladders
+    if (progress) progress(0.96f, "Linking ladders and finalizing spatial grid...");
+
+    // 7. Build Ladders
     if (options.generateLadders) {
         outNav.BuildLadders(&bsp);
     }
@@ -1127,6 +1218,9 @@ size_t NavGenerator::FloodFillFromSeed(
             nav.GetGrid().AddArea(area);
         }
     }
+
+    // Auto-generate tactical hiding spots for newly flooded areas (dead-ends, crouch vents, perches, corners)
+    PopulateTacticalHidingSpots(bsp, nav, newAreas);
 
     if (outCreatedAreaIds) {
         outCreatedAreaIds->clear();

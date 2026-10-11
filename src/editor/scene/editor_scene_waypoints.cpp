@@ -742,9 +742,21 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
         uint32_t flags = m_activeWaypointAddFlags;
         if (!canStand && canCrouch) {
             flags |= WPT_FLAG_CROUCH;
+            // Check for narrow duct / vent: if lateral width < 56u, enforce 1 bot at a time
+            BSPTraceResult trX1, trX2, trY1, trY2;
+            m_bsp->TraceWorld(candOrigin, candOrigin + Vector3(36.0f, 0.0f, 0.0f), HULL_POINT, &trX1);
+            m_bsp->TraceWorld(candOrigin, candOrigin - Vector3(36.0f, 0.0f, 0.0f), HULL_POINT, &trX2);
+            m_bsp->TraceWorld(candOrigin, candOrigin + Vector3(0.0f, 36.0f, 0.0f), HULL_POINT, &trY1);
+            m_bsp->TraceWorld(candOrigin, candOrigin - Vector3(0.0f, 36.0f, 0.0f), HULL_POINT, &trY2);
+            float widthX = trX1.endpos.x - trX2.endpos.x;
+            float widthY = trY1.endpos.y - trY2.endpos.y;
+            if (widthX < 56.0f || widthY < 56.0f) {
+                flags |= WPT_FLAG_ONLYONE;
+            }
         }
 
-        WaypointNode* node = m_waypoints.AddNode(candOrigin, flags, 32.0f);
+        float initRadius = (!canStand && canCrouch) ? 0.0f : 32.0f;
+        WaypointNode* node = m_waypoints.AddNode(candOrigin, flags, initRadius);
         if (node) {
             newWaypointIds.push_back(node->id);
 
@@ -766,6 +778,9 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
                     if (losTr.fraction >= 0.95f && !losTr.startsolid && !losTr.allsolid) {
                         uint16_t cflags = WPT_CONN_NONE;
                         if (std::abs(diff.z) > 18.0f) cflags |= WPT_CONN_JUMP;
+                        if ((node->flags & WPT_FLAG_CROUCH) || (other->flags & WPT_FLAG_CROUCH) || !canStand) {
+                            cflags |= WPT_CONN_CROUCH;
+                        }
                         m_waypoints.ConnectNodes(node->id, other->id, true, cflags);
                     }
                 }
@@ -805,11 +820,14 @@ size_t EditorScene::FloodFillWaypointsAt(const Ray& ray) {
         opt.recalculateWayzones = true;
         m_waypoints.OptimizeGraph(m_bsp.get(), opt);
 
+        // Run automated tactical and camp analysis (Zombie Plague defense camps, crouch, aim angles)
+        m_waypoints.AnalyzeGraph(m_bsp.get(), m_waypoints.GetActiveMod());
+
         m_showWaypoints = true;
         m_waypointRenderer.SetShowWaypoints(true);
         RebuildWaypointRenderer();
         m_isModified = true;
-        ShowToast("Waypoint Flood-Fill created " + std::to_string(newWaypointIds.size()) + " waypoints with wide wayzones!");
+        ShowToast("Waypoint Flood-Fill created " + std::to_string(newWaypointIds.size()) + " waypoints with tactical analysis!");
     }
 
     return newWaypointIds.size();
