@@ -249,6 +249,17 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
         scene.ShowToast("New NavStudio update available: v" + m_updateChecker.GetLatestRelease().version + " (Help -> Check for Updates)", 5.0f);
     }
 
+    // Toggle Developer Console with ~ (Grave Accent / Tilde) or Escape
+    if (m_devConsole.IsOpen()) {
+        if (ImGui::IsKeyPressed(ImGuiKey_GraveAccent, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            m_devConsole.SetOpen(false);
+        }
+    } else {
+        if (!io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_GraveAccent, false)) {
+            m_devConsole.SetOpen(true);
+        }
+    }
+
     // Handle global shortcuts when not typing into input fields
     if (!io.WantTextInput) {
         if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_O, false)) {
@@ -481,6 +492,7 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
         RenderWaypointTaskModal(scene);
     }
     m_updateChecker.RenderModal();
+    m_devConsole.Render(scene, camera, cmdMgr, *this);
     RenderToastHUD(scene);
 }
 
@@ -1281,6 +1293,11 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             ImGui::MenuItem("Blender Viewport Compass", nullptr, &scene.GetPreferences().showCompass);
             ImGui::MenuItem("Precision Nudge HUD", nullptr, &m_showGizmoNudgeHUD);
             ImGui::MenuItem("Viewport Context-Sensitive HUD", nullptr, &m_showViewportBottomHUD);
+            ImGui::Separator();
+            bool consoleOpen = m_devConsole.IsOpen();
+            if (ImGui::MenuItem("Developer Console", "~", &consoleOpen)) {
+                m_devConsole.SetOpen(consoleOpen);
+            }
 
             ImGui::EndMenu();
         }
@@ -1292,6 +1309,9 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
             }
             if (ImGui::MenuItem("Controls & Shortcuts Cheatsheet...", "Shift+F1")) {
                 m_showHelpModal = true;
+            }
+            if (ImGui::MenuItem("Developer Console...", "~")) {
+                m_devConsole.SetOpen(true);
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Check for Updates...")) {
@@ -3686,6 +3706,7 @@ void EditorUI::RenderHelpModal() {
             { "File, Session & History Management", "Ctrl + ,", "Open NavStudio Preferences dialog" },
             { "File, Session & History Management", "F1", "Open Quick Start Interactive Tutorial" },
             { "File, Session & History Management", "Shift + F1", "Open Controls & Shortcuts Cheatsheet" },
+            { "File, Session & History Management", "~ (Tilde)", "Toggle in-editor Developer Console" },
             { "File, Session & History Management", "Escape", "Deselect / Cancel active tool / Return to flight navigation" }
         };
 
@@ -6280,6 +6301,7 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
             { "Preferences", "Open Preferences", "Ctrl+,", [&]() { OpenPreferences(); } },
             { "Help", "Quick Start Interactive Tutorial", "F1", [&]() { OpenTutorialModal(); } },
             { "Help", "Controls & Shortcuts Cheatsheet", "Shift+F1", [&]() { OpenHelpModal(); } },
+            { "View", "Toggle Developer Console", "~", [&]() { m_devConsole.Toggle(); } },
             { "Help", "Check for Updates from GitHub", "", [&]() { m_updateChecker.CheckForUpdates(true, &scene.GetPreferences().lastUpdateCheckTimestamp, false); scene.GetPreferences().Save(); } },
             { "Help", "About NavStudio (Author & GitHub)", "", [&]() { m_showAboutModal = true; } }
         };

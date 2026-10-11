@@ -122,6 +122,7 @@ if(BUILD_EDITOR)
         src/editor/ui/editor_ui_waypoints.cpp
         src/editor/ui/file_dialog.cpp
         src/editor/ui/update_checker.cpp
+        src/editor/ui/dev_console.cpp
         src/editor/glad/src/glad.c
         ${IMGUI_SOURCES}
     )
@@ -149,6 +150,9 @@ if(BUILD_EDITOR)
 
     if(WIN32)
         target_link_libraries(nav_editor PRIVATE comdlg32 shell32 ole32 winhttp)
-        set_target_properties(nav_editor PROPERTIES OUTPUT_NAME "nav_editor")
+        set_target_properties(nav_editor PROPERTIES
+            OUTPUT_NAME "nav_editor"
+            WIN32_EXECUTABLE TRUE
+        )
     endif()
 endif()

@@ -15,6 +15,7 @@
 #include "editor/render/editor_shaders.h"
 #include "editor/res/app_icon_data.h"
 #include "editor/version.h"
+#include "editor/ui/dev_console.h"
 
 #include <cstdio>
 #include <iostream>
@@ -189,7 +190,7 @@ bool SaveScreenToBMP(const std::string& filename, int width, int height) {
 }
 
 static void WindowCloseCallback(GLFWwindow* window) {
-    if (g_activeScene && g_activeScene->HasNAV() &&
+    if (g_activeScene && (g_activeScene->HasNAV() || g_activeScene->HasWaypoints()) &&
         (g_cmdMgr->HasUnsavedChanges() || g_activeScene->IsModified())) {
         glfwSetWindowShouldClose(window, GLFW_FALSE);
         if (g_editorUI) {
@@ -1171,6 +1172,9 @@ static void UpdateAppTitle(GLFWwindow* window, const EditorScene& scene) {
 }
 
 int main(int argc, char* argv[]) {
+    DevConsole::Get().AddLog(DevConsole::LogLevel::System, "====================================================");
+    DevConsole::Get().AddLog(DevConsole::LogLevel::System, "  NavStudio v%s", NAVSTUDIO_VERSION_STRING);
+    DevConsole::Get().AddLog(DevConsole::LogLevel::System, "====================================================");
     std::printf("====================================================\n");
     std::printf("  NavStudio v%s\n", NAVSTUDIO_VERSION_STRING);
     std::printf("====================================================\n");
@@ -1272,8 +1276,12 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    std::printf("[OpenGL] Renderer: %s\n", glGetString(GL_RENDERER));
-    std::printf("[OpenGL] Version:  %s\n", glGetString(GL_VERSION));
+    const char* glRend = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+    const char* glVer  = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    DevConsole::Get().AddLog(DevConsole::LogLevel::System, "[OpenGL] Renderer: %s", glRend ? glRend : "Unknown");
+    DevConsole::Get().AddLog(DevConsole::LogLevel::System, "[OpenGL] Version:  %s", glVer ? glVer : "Unknown");
+    std::printf("[OpenGL] Renderer: %s\n", glRend ? glRend : "Unknown");
+    std::printf("[OpenGL] Version:  %s\n", glVer ? glVer : "Unknown");
 
     glfwSetMouseButtonCallback(window, MouseButtonCallback);
     glfwSetCursorPosCallback(window, CursorPosCallback);
@@ -1463,3 +1471,11 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
+
+#ifdef _WIN32
+#include <windows.h>
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    return main(__argc, __argv);
+}
+#endif
+

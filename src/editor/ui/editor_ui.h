@@ -5,6 +5,7 @@
 #include "editor/camera/camera.h"
 #include "editor/commands/command.h"
 #include "editor/ui/update_checker.h"
+#include "editor/ui/dev_console.h"
 #include <string>
 
 class EditorUI {
@@ -55,6 +56,9 @@ public:
     void ToggleTutorialModal() { m_showTutorialModal = !m_showTutorialModal; }
     void CheckForUpdates(bool isManual = true) { m_updateChecker.CheckForUpdates(isManual); }
     void OpenUpdateModal() { m_updateChecker.OpenModal(); }
+    void ToggleConsole() { m_devConsole.Toggle(); }
+    void OpenConsole() { m_devConsole.SetOpen(true); }
+    DevConsole& GetConsole() { return m_devConsole; }
     void SetMarqueeBox(bool active, float startX, float startY, float curX, float curY) {
         m_marqueeActive = active;
         m_marqueeStartX = startX;
@@ -253,6 +257,9 @@ private:
     // Update Checker
     UpdateChecker m_updateChecker;
     bool m_startupUpdateChecked{false};
+
+    // Developer Console (~)
+    DevConsole m_devConsole;
 };
 
 #endif // EDITOR_UI_H
