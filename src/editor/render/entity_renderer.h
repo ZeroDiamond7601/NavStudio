@@ -68,6 +68,19 @@ public:
 
     bool IsEntityVisible(const EditorEntity& ent) const;
 
+    // Per-category index range within the monolithic solid/wire VAOs, so
+    // individual categories can be culled at draw-time without a VAO rebuild.
+    struct CategoryDrawRange {
+        GLsizei solidFirst{0};   // byte offset into the EBO
+        GLsizei solidCount{0};
+        GLsizei wireFirst{0};
+        GLsizei wireCount{0};
+    };
+
+    // Returns true when the category should be rendered (respects m_showEntities
+    // and the per-category flag).
+    bool IsCategoryVisible(EntityCategory cat) const;
+
 private:
     void GenerateBuffers(const std::vector<BSPVertex>& vertices, const std::vector<uint32_t>& indices);
     void GenerateWireBuffers(const std::vector<BSPVertex>& vertices, const std::vector<uint32_t>& indices);
@@ -75,6 +88,9 @@ private:
     void GenerateSelectBuffers(const std::vector<BSPVertex>& vertices, const std::vector<uint32_t>& indices);
 
     std::vector<EditorEntity> m_entities;
+
+    // Draw ranges indexed by EntityCategory value
+    CategoryDrawRange m_categoryRanges[ENT_CAT_COUNT];
 
     GLuint m_solidVao;
     GLuint m_solidVbo;

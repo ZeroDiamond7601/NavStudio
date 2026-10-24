@@ -317,6 +317,18 @@ void EditorUI::Render(EditorScene& scene, Camera& camera, CommandManager& cmdMgr
             OpenLandmarksModal();
         } else if (io.KeyCtrl && !io.KeyShift && !io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Comma, false)) {
             OpenPreferences();
+        } else if (!io.KeyCtrl && !io.KeyShift && io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_B, false)) {
+            // Alt+B — Toggle Breadcrumb / Pen Tool
+            scene.TogglePenTool();
+        } else if (io.KeyCtrl && io.KeyShift && !io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_E, false) && scene.HasBSP()) {
+            // Ctrl+Shift+E — Export BSP map to OBJ
+            std::string path = FileDialog::SaveFile(FileDialog::kOBJFilter, "obj", "Export BSP Map as Wavefront OBJ");
+            if (!path.empty()) {
+                if (scene.ExportBSPToOBJ(path)) {
+                    m_showSaveSuccessModal = true;
+                    m_saveSuccessMessage = "BSP map geometry exported successfully:\n" + path;
+                }
+            }
         }
     }
 
@@ -517,6 +529,23 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                     }
                 }
             }
+            if (ImGui::MenuItem("Open Bot Waypoints...", "Ctrl+Alt+O")) {
+                std::string path = FileDialog::OpenFile(
+                    "Bot Waypoints (*.ewp;*.spt;*.pwf;*.wpt)\0*.ewp;*.spt;*.pwf;*.wpt\0"
+                    "CS-EBOT Waypoints (*.ewp)\0*.ewp\0"
+                    "SyPB Waypoints (*.spt;*.pwf)\0*.spt;*.pwf\0"
+                    "YaPB Waypoints (*.pwf)\0*.pwf\0"
+                    "POD-Bot Waypoints (*.wpt)\0*.wpt\0"
+                    "All Files (*.*)\0*.*\0",
+                    "Open Bot Waypoint Graph"
+                );
+                if (!path.empty()) {
+                    if (!CheckUnsavedChanges(scene, cmdMgr, PENDING_OPEN_WAYPOINTS, path)) {
+                        cmdMgr.Clear();
+                        scene.StartAsyncLoad(path);
+                    }
+                }
+            }
 
             if (ImGui::BeginMenu("Open Recent")) {
                 const auto& recents = scene.GetRecentFiles();
@@ -591,6 +620,25 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 
             ImGui::Separator();
             if (ImGui::BeginMenu("Export")) {
+                if (ImGui::MenuItem("Export BSP Map to Wavefront OBJ (.obj + .mtl)...", "Ctrl+Shift+E", false, scene.HasBSP())) {
+                    std::string path = FileDialog::SaveFile(FileDialog::kOBJFilter, "obj", "Export BSP Map as Wavefront OBJ");
+                    if (!path.empty()) {
+                        if (scene.ExportBSPToOBJ(path, true, true)) {
+                            m_showSaveSuccessModal = true;
+                            m_saveSuccessMessage = "BSP map geometry and textured materials exported successfully:\n" + path;
+                        }
+                    }
+                }
+                if (ImGui::MenuItem("Export BSP Map (Geometry Only, No Textures)...", nullptr, false, scene.HasBSP())) {
+                    std::string path = FileDialog::SaveFile(FileDialog::kOBJFilter, "obj", "Export BSP Map (Geometry Only)");
+                    if (!path.empty()) {
+                        if (scene.ExportBSPToOBJ(path, false, true)) {
+                            m_showSaveSuccessModal = true;
+                            m_saveSuccessMessage = "BSP map geometry exported successfully:\n" + path;
+                        }
+                    }
+                }
+                ImGui::Separator();
                 if (ImGui::MenuItem("Export NAV to Wavefront OBJ (.obj)...", nullptr, false, scene.HasNAV())) {
                     std::string defaultName = "mesh";
                     if (!scene.GetNAVPath().empty()) {
@@ -888,7 +936,7 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
 
             if (ImGui::BeginMenu("E-Bot Interactive Tools")) {
                 bool penActive = scene.IsPenToolActive();
-                if (ImGui::MenuItem("Continuous Pen / Breadcrumb Tool", nullptr, &penActive)) {
+                if (ImGui::MenuItem("Continuous Pen / Breadcrumb Tool", "Alt+B", &penActive)) {
                     scene.TogglePenTool();
                 }
                 bool addWptActive = scene.IsAddWaypointMode();
@@ -1196,6 +1244,20 @@ void EditorUI::RenderMenuBar(EditorScene& scene, Camera& camera, CommandManager&
                     entR.SetShowTargetLines(showLinks);
                 }
                 ImGui::EndMenu();
+            }
+
+            ImGui::Separator();
+            float vBright = scene.GetViewportBrightness();
+            ImGui::SetNextItemWidth(140);
+            if (ImGui::SliderFloat("Brightness", &vBright, 0.2f, 3.0f, "%.2fx")) {
+                scene.SetViewportBrightness(vBright);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Adjust viewport ambient brightness and surface gamma (0.2x - 3.0x)");
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reset##VBright")) {
+                scene.SetViewportBrightness(1.0f);
             }
 
             bool showSkybox = scene.GetShowSkybox();
@@ -1935,9 +1997,19 @@ void EditorUI::RenderToolPalette(EditorScene& scene, Camera& camera, CommandMana
         if (ImGui::Checkbox("Show Entities", &showEntities)) {
             scene.GetEntityRenderer().SetShowEntities(showEntities);
         }
-        bool showTargetLines = scene.GetEntityRenderer().GetShowTargetLines();
-        if (ImGui::Checkbox("Show Target Lines", &showTargetLines)) {
-            scene.GetEntityRenderer().SetShowTargetLines(showTargetLines);
+        if (showEntities) {
+            bool showTriggers = scene.GetEntityRenderer().GetShowTriggers();
+            if (ImGui::Checkbox("Show Triggers", &showTriggers)) {
+                scene.GetEntityRenderer().SetShowTriggers(showTriggers);
+            }
+            bool showBrushes = scene.GetEntityRenderer().GetShowBrushes();
+            if (ImGui::Checkbox("Show Brush Entities (func_*)", &showBrushes)) {
+                scene.GetEntityRenderer().SetShowBrushes(showBrushes);
+            }
+            bool showTargetLines = scene.GetEntityRenderer().GetShowTargetLines();
+            if (ImGui::Checkbox("Show Target Lines", &showTargetLines)) {
+                scene.GetEntityRenderer().SetShowTargetLines(showTargetLines);
+            }
         }
     }
     ImGui::End();
@@ -3678,7 +3750,7 @@ void EditorUI::RenderHelpModal() {
             // Bot Waypoint System & Path Editing
             { "Bot Waypoint System & Path Editing", "F6", "Toggle Bot Waypoint System mode (CS-EBOT, SyPB, YaPB, POD-Bot)" },
             { "Bot Waypoint System & Path Editing", "N (Waypoint Mode)", "Add Waypoint Tool: Click floor geometry to drop node" },
-            { "Bot Waypoint System & Path Editing", "Pen Tool (Alt+P)", "Continuous Breadcrumb Tool: Walk and drop linked nodes" },
+            { "Bot Waypoint System & Path Editing", "Alt+B", "Continuous Breadcrumb / Pen Tool: Walk and drop linked waypoint nodes" },
             { "Bot Waypoint System & Path Editing", "C (Multi-Selected)", "Batch connect all selected waypoints in sequence" },
             { "Bot Waypoint System & Path Editing", "C (Single Selected)", "Connect Tool: Click target waypoint to establish link" },
             { "Bot Waypoint System & Path Editing", "Alt + Left-Click", "Pick waypoint path link directly in 3D viewport" },
@@ -4332,9 +4404,15 @@ void EditorUI::RenderPreferencesModal(EditorScene& scene, Camera& camera, Comman
                 }
                 ImGui::Checkbox("Show Quick Start Tutorial on Startup", &prefs.showTutorialOnStartup);
                 ImGui::Checkbox("Show Bounding Box Around Selection", &prefs.showSelectedAABB);
-                ImGui::Checkbox("Render Entity Icons & Spawn Volumes", &prefs.showEntityModels);
-
                 ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "Lighting & Gamma:");
+                float vb = prefs.viewportBrightness;
+                if (ImGui::SliderFloat("Viewport Brightness", &vb, 0.2f, 3.0f, "%.2fx")) {
+                    scene.SetViewportBrightness(vb);
+                }
+                ImGui::TextDisabled("Controls directional sunlight, hemisphere fill, and ambient gamma.");
                 ImGui::Separator();
                 ImGui::Spacing();
                 ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f), "BSP Shading & Outlines:");
@@ -4487,7 +4565,7 @@ void EditorUI::RenderOpenPathModal(EditorScene& scene) {
     ImGui::SetNextWindowSize(ImVec2(520, 210), ImGuiCond_Appearing);
 
     if (ImGui::BeginPopupModal("Open File by Path", &m_showOpenPathModal, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Enter the absolute or relative path to a .bsp or .nav file:");
+        ImGui::Text("Enter the absolute or relative path to a .bsp, .nav, or waypoint file (.ewp, .pwf, .spt, .wpt):");
         ImGui::Spacing();
 
         ImGui::SetNextItemWidth(380);
@@ -5102,8 +5180,8 @@ void EditorUI::RenderViewportBottomHUD(EditorScene& scene, Camera& /*camera*/, C
             DrawKeyBadge("X / Y / Z", "Lock Axis", ImVec4(0.8f, 0.45f, 0.1f, 1.0f));
             DrawKeyBadge("Escape", "Cancel", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
         } else if (scene.IsPenToolActive()) {
-            DrawKeyBadge("L-Click", "Place & Link Node", ImVec4(0.2f, 0.65f, 0.3f, 1.0f));
-            DrawKeyBadge("Escape", "Exit Pen Tool", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+            DrawKeyBadge("L-Click", "Place & Link Waypoint", ImVec4(0.2f, 0.65f, 0.3f, 1.0f));
+            DrawKeyBadge("Escape / Alt+B", "Exit Breadcrumb Tool", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
         } else if (scene.IsDrawAreaMode()) {
             DrawKeyBadge("L-Click", "Set Corner 1 / 2", ImVec4(0.2f, 0.65f, 0.3f, 1.0f));
             DrawKeyBadge("Escape", "Cancel Draw", ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
@@ -5164,6 +5242,7 @@ void EditorUI::RenderViewportBottomHUD(EditorScene& scene, Camera& /*camera*/, C
             DrawKeyBadge("R-Click+WASD", "Fly Camera");
             DrawKeyBadge("Alt+Click", "Pick Link", ImVec4(0.8f, 0.45f, 0.1f, 1.0f));
             DrawKeyBadge("N", "Draw Area / Waypoint");
+            DrawKeyBadge("Alt+B", "Breadcrumb", ImVec4(0.2f, 0.65f, 0.3f, 1.0f));
             DrawKeyBadge("K", "Knife Tool");
             DrawKeyBadge("Shift+B", "Box Select");
             DrawKeyBadge("Ctrl+P", "Palette");
@@ -5601,6 +5680,12 @@ void EditorUI::ExecutePendingAction(EditorScene& scene, CommandManager& cmdMgr) 
             }
             break;
         case PENDING_OPEN_NAV:
+            if (!p.empty()) {
+                cmdMgr.Clear();
+                scene.StartAsyncLoad(p);
+            }
+            break;
+        case PENDING_OPEN_WAYPOINTS:
             if (!p.empty()) {
                 cmdMgr.Clear();
                 scene.StartAsyncLoad(p);
@@ -6272,6 +6357,16 @@ void EditorUI::RenderCommandPalette(EditorScene& scene, Camera& camera, CommandM
             { "Tool", "Connection Selection Mode", "Alt+C", [&]() { scene.ToggleConnectionSelectionMode(); } },
             { "Generate", "Auto-Generate NavMesh", "Ctrl+G", [&]() { if (scene.HasBSP()) m_showGenerateModal = true; } },
             { "Generate", "Batch Mass-Produce (NavMeshes & Bot Waypoints)...", "", [&]() { m_showBatchGenerateModal = true; } },
+            { "Tool", "Continuous Breadcrumb / Pen Tool", "Alt+B", [&]() { scene.TogglePenTool(); } },
+            { "File", "Export BSP Map to Wavefront OBJ", "Ctrl+Shift+E", [&]() {
+                if (scene.HasBSP()) {
+                    std::string path = FileDialog::SaveFile(FileDialog::kOBJFilter, "obj", "Export BSP Map as Wavefront OBJ");
+                    if (!path.empty() && scene.ExportBSPToOBJ(path)) {
+                        m_showSaveSuccessModal = true;
+                        m_saveSuccessMessage = "BSP map geometry exported successfully:\n" + path;
+                    }
+                }
+            } },
             { "Waypoints", "Batch Generate Bot Waypoints...", "", [&]() { m_batchTargetType = 1; m_showBatchGenerateModal = true; } },
             { "Generate", "Optimize Mesh (Coplanar Merge)", "", [&]() { if (scene.HasNAV()) { m_optimizeStats = scene.OptimizeMesh(cmdMgr, false); m_showOptimizeModal = true; } } },
             { "Generate", "Auto-Flag Obstacles (Crouch/Jump)", "", [&]() { if (scene.HasNAV()) { m_analyzerStats = scene.AutoAnalyzeFlags(cmdMgr, false); m_showAnalyzerModal = true; } } },

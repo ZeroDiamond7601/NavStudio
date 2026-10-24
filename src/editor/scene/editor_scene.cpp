@@ -663,6 +663,247 @@ bool EditorScene::ExportNAVToOBJ(const std::string& filepath) const {
     return true;
 }
 
+static bool WriteBMPImage(const std::string& path, int width, int height, const uint8_t* rgba) {
+    std::ofstream f(path, std::ios::binary);
+    if (!f.is_open()) return false;
+    uint32_t rowSize = ((width * 3 + 3) / 4) * 4;
+    uint32_t imageSize = rowSize * height;
+    uint32_t fileSize = 54 + imageSize;
+    uint8_t bmpHeader[54] = {
+        'B', 'M',
+        static_cast<uint8_t>(fileSize & 0xFF),
+        static_cast<uint8_t>((fileSize >> 8) & 0xFF),
+        static_cast<uint8_t>((fileSize >> 16) & 0xFF),
+        static_cast<uint8_t>((fileSize >> 24) & 0xFF),
+        0, 0, 0, 0,
+        54, 0, 0, 0,
+        40, 0, 0, 0,
+        static_cast<uint8_t>(width & 0xFF),
+        static_cast<uint8_t>((width >> 8) & 0xFF),
+        static_cast<uint8_t>((width >> 16) & 0xFF),
+        static_cast<uint8_t>((width >> 24) & 0xFF),
+        static_cast<uint8_t>(height & 0xFF),
+        static_cast<uint8_t>((height >> 8) & 0xFF),
+        static_cast<uint8_t>((height >> 16) & 0xFF),
+        static_cast<uint8_t>((height >> 24) & 0xFF),
+        1, 0,
+        24, 0,
+        0, 0, 0, 0,
+        static_cast<uint8_t>(imageSize & 0xFF),
+        static_cast<uint8_t>((imageSize >> 8) & 0xFF),
+        static_cast<uint8_t>((imageSize >> 16) & 0xFF),
+        static_cast<uint8_t>((imageSize >> 24) & 0xFF),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    };
+    f.write(reinterpret_cast<const char*>(bmpHeader), 54);
+    std::vector<uint8_t> row(rowSize, 0);
+    for (int y = height - 1; y >= 0; --y) {
+        for (int x = 0; x < width; ++x) {
+            int srcIdx = (y * width + x) * 4;
+            row[x * 3 + 0] = rgba[srcIdx + 2]; // B
+            row[x * 3 + 1] = rgba[srcIdx + 1]; // G
+            row[x * 3 + 2] = rgba[srcIdx + 0]; // R
+        }
+        f.write(reinterpret_cast<const char*>(row.data()), rowSize);
+    }
+    return true;
+}
+
+static std::string SanitizeOBJMaterialName(const std::string& name) {
+    std::string clean = name;
+    for (char& c : clean) {
+        if (c == '{' || c == '!' || c == '~' || c == '+' || c == ' ' || c == '-' || c == '/' || c == '\\') {
+            c = '_';
+        }
+    }
+    if (clean.empty()) clean = "unnamed_material";
+    return clean;
+}
+
+bool EditorScene::ExportBSPToOBJ(const std::string& filepath, bool exportTextures, bool visibleOnly) const {
+    if (!m_bsp || !m_bsp->IsLoaded()) return false;
+
+    std::ofstream out(filepath);
+    if (!out.is_open()) return false;
+
+    std::filesystem::path objPath(filepath);
+    std::filesystem::path baseDir = objPath.parent_path();
+    std::string stemName = objPath.stem().string();
+    std::string mtlFileName = stemName + ".mtl";
+    std::filesystem::path mtlPath = baseDir / mtlFileName;
+    std::filesystem::path texturesDir = baseDir / "textures";
+
+    out << "# Wavefront OBJ exported by NavStudio\n";
+    out << "# Map: " << m_bspPath << "\n";
+    out << "# Faces: " << m_bsp->GetFaceCount() << "\n";
+
+    if (exportTextures) {
+        out << "mtllib " << mtlFileName << "\n\n";
+    } else {
+        out << "\n";
+    }
+
+    std::vector<Vector3> allVerts;
+    std::vector<Vector2> allUVs;
+
+    struct OBJFace {
+        std::string group;
+        std::string material;
+        std::vector<int> vertIndices;
+        std::vector<int> uvIndices;
+    };
+    std::vector<OBJFace> faces;
+    std::unordered_map<std::string, std::string> textureMap;
+
+    int modelCount = m_bsp->GetModelCount();
+
+    for (int mi = 0; mi < modelCount; ++mi) {
+        if (visibleOnly && mi > 0 && (!m_entityRenderer.GetShowEntities() || !m_entityRenderer.GetShowBrushes())) {
+            continue;
+        }
+
+        const dmodel_t* dm = m_bsp->GetModel(mi);
+        if (!dm) continue;
+
+        std::string groupName = (mi == 0) ? "worldspawn" : ("brushmodel_" + std::to_string(mi));
+
+        for (int fi = dm->firstface; fi < dm->firstface + dm->numfaces; ++fi) {
+            const char* texName = m_bsp->GetFaceTextureName(fi);
+            if (!texName) continue;
+
+            std::string tn(texName);
+            for (char& c : tn) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+            if (tn == "sky" || tn.rfind("sky", 0) == 0 ||
+                tn == "clip" || tn == "origin" || tn == "aaatrigger" ||
+                tn == "null" || tn == "nodraw" || tn == "hint" || tn == "skip" ||
+                (visibleOnly && tn.find("trigger") != std::string::npos))
+            {
+                continue;
+            }
+
+            Vector3 poly[64];
+            int vcount = m_bsp->GetFacePolygon(fi, poly, 64);
+            if (vcount < 3) continue;
+
+            std::string origTex(texName);
+            std::string cleanMat = SanitizeOBJMaterialName(origTex);
+            textureMap[cleanMat] = origTex;
+
+            const dtexinfo_t* ti = m_bsp->GetTexInfo(fi);
+            float texW = 64.0f, texH = 64.0f;
+            LoadedTextureInfo tInfo;
+            if (m_textureManager.GetTextureInfo(origTex, tInfo) && tInfo.width > 0 && tInfo.height > 0) {
+                texW = static_cast<float>(tInfo.width);
+                texH = static_cast<float>(tInfo.height);
+            }
+
+            OBJFace f;
+            f.group = groupName;
+            f.material = cleanMat;
+
+            for (int vi = 0; vi < vcount; ++vi) {
+                allVerts.push_back(poly[vi]);
+                f.vertIndices.push_back(static_cast<int>(allVerts.size()));
+
+                if (exportTextures && ti) {
+                    float s = poly[vi].x * ti->vecs[0][0] + poly[vi].y * ti->vecs[0][1] + poly[vi].z * ti->vecs[0][2] + ti->vecs[0][3];
+                    float t = poly[vi].x * ti->vecs[1][0] + poly[vi].y * ti->vecs[1][1] + poly[vi].z * ti->vecs[1][2] + ti->vecs[1][3];
+                    float u = s / texW;
+                    float v = 1.0f - (t / texH);
+                    allUVs.push_back(Vector2(u, v));
+                    f.uvIndices.push_back(static_cast<int>(allUVs.size()));
+                }
+            }
+            faces.push_back(std::move(f));
+        }
+    }
+
+    if (allVerts.empty()) return false;
+
+    // Write vertices
+    for (const auto& v : allVerts) {
+        out << "v " << v.x << " " << v.y << " " << v.z << "\n";
+    }
+    out << "\n";
+
+    // Write texture coordinates
+    if (exportTextures) {
+        for (const auto& uv : allUVs) {
+            out << "vt " << uv.x << " " << uv.y << "\n";
+        }
+        out << "\n";
+    }
+
+    // Write faces
+    std::string currentGroup;
+    std::string currentMat;
+    for (const auto& f : faces) {
+        if (f.group != currentGroup) {
+            currentGroup = f.group;
+            out << "g " << currentGroup << "\n";
+        }
+        if (exportTextures && f.material != currentMat) {
+            currentMat = f.material;
+            out << "usemtl " << currentMat << "\n";
+        }
+        for (size_t i = 1; i < f.vertIndices.size() - 1; ++i) {
+            if (exportTextures && !f.uvIndices.empty()) {
+                out << "f " << f.vertIndices[0] << "/" << f.uvIndices[0]
+                    << " "  << f.vertIndices[i] << "/" << f.uvIndices[i]
+                    << " "  << f.vertIndices[i + 1] << "/" << f.uvIndices[i + 1] << "\n";
+            } else {
+                out << "f " << f.vertIndices[0] << " " << f.vertIndices[i] << " " << f.vertIndices[i + 1] << "\n";
+            }
+        }
+    }
+
+    // Write .mtl and extract textures
+    if (exportTextures && !textureMap.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(texturesDir, ec);
+
+        std::ofstream mtlOut(mtlPath);
+        if (mtlOut.is_open()) {
+            mtlOut << "# Wavefront Material Library exported by NavStudio\n\n";
+
+            for (const auto& pair : textureMap) {
+                const std::string& cleanMat = pair.first;
+                const std::string& origTex = pair.second;
+
+                mtlOut << "newmtl " << cleanMat << "\n";
+                mtlOut << "Ka 0.200 0.200 0.200\n";
+                mtlOut << "Kd 1.000 1.000 1.000\n";
+                mtlOut << "Ks 0.000 0.000 0.000\n";
+                mtlOut << "d 1.0\n";
+                mtlOut << "illum 1\n";
+
+                std::string imageFilename = cleanMat + ".bmp";
+                std::filesystem::path imgPath = texturesDir / imageFilename;
+
+                GLuint texId = m_textureManager.GetTextureID(origTex);
+                if (texId != 0 && texId != m_textureManager.GetCheckerboardTextureID()) {
+                    glBindTexture(GL_TEXTURE_2D, texId);
+                    GLint tw = 0, th = 0;
+                    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tw);
+                    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th);
+                    if (tw > 0 && th > 0) {
+                        std::vector<uint8_t> pixels(tw * th * 4);
+                        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+                        if (WriteBMPImage(imgPath.string(), tw, th, pixels.data())) {
+                            mtlOut << "map_Kd textures/" << imageFilename << "\n";
+                        }
+                    }
+                    glBindTexture(GL_TEXTURE_2D, 0);
+                }
+                mtlOut << "\n";
+            }
+        }
+    }
+
+    return true;
+}
+
 void EditorScene::UpdateAutosave(float deltaTime) {
     UpdateNavGeneration();
     UpdateWaypointGeneration();
@@ -1395,8 +1636,15 @@ void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, con
     Render(meshShader, lineShader, mvp, camPos);
 }
 
+void EditorScene::SetViewportBrightness(float b) {
+    m_prefs.viewportBrightness = std::clamp(b, 0.2f, 3.0f);
+    m_bspRenderer.SetBrightness(m_prefs.viewportBrightness);
+}
+
 void EditorScene::Render(const Shader& meshShader, const Shader& lineShader, const Matrix4& mvp, const Vector3& camPos) {
     if (m_showBSP && m_bspRenderer.IsLoaded()) {
+        m_bspRenderer.SetBrightness(m_prefs.viewportBrightness);
+        m_bspRenderer.SetShowBrushEntities(m_entityRenderer.GetShowEntities() && m_entityRenderer.GetShowBrushes());
         m_bspRenderer.Render(meshShader, lineShader, mvp, m_bspMode, camPos);
     }
 

@@ -3,6 +3,9 @@
 #include <map>
 #include <unordered_map>
 #include <algorithm>
+#include <tuple>
+#include <string>
+#include <cctype>
 
 BSPRenderer::BSPRenderer()
     : m_vao(0)
@@ -13,6 +16,7 @@ BSPRenderer::BSPRenderer()
     , m_wireVbo(0)
     , m_wireEbo(0)
     , m_wireIndexCount(0)
+    , m_worldWireIndexCount(0)
     , m_skyWireVao(0)
     , m_skyWireVbo(0)
     , m_skyWireEbo(0)
@@ -21,6 +25,7 @@ BSPRenderer::BSPRenderer()
     , m_showWireframeOnSolid(true)
     , m_showSkybox(true)
     , m_showSkyWireframe(false)
+    , m_showBrushEntities(true)
     , m_faceCount(0)
 {
 }
@@ -39,6 +44,7 @@ void BSPRenderer::Clear() {
     if (m_wireVbo != 0) { glDeleteBuffers(1, &m_wireVbo); m_wireVbo = 0; }
     if (m_wireEbo != 0) { glDeleteBuffers(1, &m_wireEbo); m_wireEbo = 0; }
     m_wireIndexCount = 0;
+    m_worldWireIndexCount = 0;
 
     if (m_skyWireVao != 0) { glDeleteVertexArrays(1, &m_skyWireVao); m_skyWireVao = 0; }
     if (m_skyWireVbo != 0) { glDeleteBuffers(1, &m_skyWireVbo); m_skyWireVbo = 0; }
@@ -48,6 +54,7 @@ void BSPRenderer::Clear() {
     m_textureBatches.clear();
     m_loaded = false;
     m_faceCount = 0;
+    m_showBrushEntities = true;
 }
 
 bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr) {
@@ -66,17 +73,26 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr)
     int numFaces = bsp.GetFaceCount();
     m_faceCount = static_cast<size_t>(numFaces);
 
+    const dmodel_t* m0 = bsp.GetModel(0);
+    int worldFaceCount = (m0 && m0->numfaces > 0) ? (m0->firstface + m0->numfaces) : numFaces;
+
     Vector3 poly[128];
 
-    // Temporary storage grouping triangle indices by (OpenGL texture ID, isSky)
-    std::map<std::pair<GLuint, bool>, std::vector<uint32_t>> batchIndices;
-    std::map<std::pair<GLuint, bool>, bool> batchTransparency;
+    // Key: tuple<GLuint texId, bool isSky, bool isBrushEntity>
+    std::map<std::tuple<GLuint, bool, bool>, std::vector<uint32_t>> batchIndices;
+    std::map<std::tuple<GLuint, bool, bool>, bool> batchTransparency;
 
     GLuint fallbackTexId = texMgr ? texMgr->GetCheckerboardTextureID() : 0;
 
     for (int f = 0; f < numFaces; ++f) {
+        if (f == worldFaceCount) {
+            m_worldWireIndexCount = static_cast<GLsizei>(wireIndices.size());
+        }
+
         const dface_t* face = bsp.GetFace(f);
         if (!face) continue;
+
+        bool isBrushEntity = (f >= worldFaceCount);
 
         int vertCount = bsp.GetFacePolygon(f, poly, 128);
         if (vertCount < 3) continue;
@@ -112,6 +128,16 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr)
 
             const char* texName = bsp.GetTextureName(ti->miptex);
             if (texName && texName[0] != '\0') {
+                std::string tn(texName);
+                for (char& c : tn) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+                // Skip utility/compile textures (triggers, clip, null, origin, nodraw) so they never
+                // render as solid opaque walls blocking viewport view.
+                if (tn == "aaatrigger" || tn == "clip" || tn == "null" || tn == "origin" ||
+                    tn == "nodraw" || tn == "hint" || tn == "skip" || tn.find("trigger") != std::string::npos) {
+                    continue;
+                }
+
 #if defined(_WIN32)
                 if (_strnicmp(texName, "sky", 3) == 0) isSky = true;
 #else
@@ -161,7 +187,7 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr)
             solidVertices.push_back(vert);
         }
 
-        auto batchKey = std::make_pair(texId, isSky);
+        auto batchKey = std::make_tuple(texId, isSky, isBrushEntity);
         auto& batchList = batchIndices[batchKey];
         for (int i = 1; i < vertCount - 1; ++i) {
             batchList.push_back(baseSolidVertex);
@@ -222,25 +248,59 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr)
         }
     }
 
-    // Assemble index buffer: non-sky opaque first, then transparent, then sky
-    std::vector<std::pair<std::pair<GLuint, bool>, bool>> orderedBatches;
+    if (worldFaceCount >= numFaces || m_worldWireIndexCount == 0) {
+        m_worldWireIndexCount = static_cast<GLsizei>(wireIndices.size());
+    }
+
+    // Assemble index buffer:
+    // 1. Opaque world batches
+    // 2. Transparent world batches
+    // 3. Opaque brush entity batches
+    // 4. Transparent brush entity batches
+    // 5. Sky batches
+    std::vector<std::pair<std::tuple<GLuint, bool, bool>, bool>> orderedBatches;
     orderedBatches.reserve(batchIndices.size());
 
-    // 1. Opaque non-sky batches
+    // 1. Opaque world batches
     for (const auto& kv : batchIndices) {
-        if (!kv.first.second && !batchTransparency[kv.first]) {
+        bool isSky = std::get<1>(kv.first);
+        bool isBrush = std::get<2>(kv.first);
+        bool isTrans = batchTransparency[kv.first];
+        if (!isSky && !isBrush && !isTrans) {
             orderedBatches.push_back({kv.first, false});
         }
     }
-    // 2. Transparent batches
+    // 2. Transparent world batches
     for (const auto& kv : batchIndices) {
-        if (!kv.first.second && batchTransparency[kv.first]) {
+        bool isSky = std::get<1>(kv.first);
+        bool isBrush = std::get<2>(kv.first);
+        bool isTrans = batchTransparency[kv.first];
+        if (!isSky && !isBrush && isTrans) {
             orderedBatches.push_back({kv.first, true});
         }
     }
-    // 3. Sky batches
+    // 3. Opaque brush entity batches
     for (const auto& kv : batchIndices) {
-        if (kv.first.second) {
+        bool isSky = std::get<1>(kv.first);
+        bool isBrush = std::get<2>(kv.first);
+        bool isTrans = batchTransparency[kv.first];
+        if (!isSky && isBrush && !isTrans) {
+            orderedBatches.push_back({kv.first, false});
+        }
+    }
+    // 4. Transparent brush entity batches
+    for (const auto& kv : batchIndices) {
+        bool isSky = std::get<1>(kv.first);
+        bool isBrush = std::get<2>(kv.first);
+        bool isTrans = batchTransparency[kv.first];
+        if (!isSky && isBrush && isTrans) {
+            orderedBatches.push_back({kv.first, true});
+        }
+    }
+    // 5. Sky batches
+    for (const auto& kv : batchIndices) {
+        bool isSky = std::get<1>(kv.first);
+        if (isSky) {
             orderedBatches.push_back({kv.first, batchTransparency[kv.first]});
         }
     }
@@ -249,14 +309,16 @@ bool BSPRenderer::BuildFromBSP(const BSPFile& bsp, const TextureManager* texMgr)
     m_textureBatches.reserve(orderedBatches.size());
 
     for (const auto& item : orderedBatches) {
-        GLuint texId = item.first.first;
-        bool isSky = item.first.second;
+        GLuint texId = std::get<0>(item.first);
+        bool isSky = std::get<1>(item.first);
+        bool isBrush = std::get<2>(item.first);
         bool isTrans = item.second;
         const auto& indices = batchIndices[item.first];
 
         BSPTextureBatch batch;
         batch.textureId = texId;
         batch.isSky = isSky;
+        batch.isBrushEntity = isBrush;
         batch.startIndex = static_cast<GLsizei>(solidIndices.size());
         batch.indexCount = static_cast<GLsizei>(indices.size());
         batch.isTransparent = isTrans;
@@ -372,6 +434,7 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
         meshShader.SetInt("u_DiffuseTexture", 0);
         meshShader.SetFloat("u_Alpha", 1.0f);
         meshShader.SetInt("u_EnableLighting", 1);
+        meshShader.SetFloat("u_Brightness", m_brightness);
 
         if (m_showWireframeOnSolid) {
             glEnable(GL_POLYGON_OFFSET_FILL);
@@ -384,6 +447,9 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
         for (const auto& batch : m_textureBatches) {
             if (m_showSkybox && batch.isSky) {
                 // Skip sky surfaces so background 3D skybox is visible
+                continue;
+            }
+            if (batch.isBrushEntity && !m_showBrushEntities) {
                 continue;
             }
             glBindTexture(GL_TEXTURE_2D, batch.textureId);
@@ -405,7 +471,10 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
 
             glLineWidth(1.2f);
             glBindVertexArray(m_wireVao);
-            glDrawElements(GL_LINES, m_wireIndexCount, GL_UNSIGNED_INT, 0);
+            GLsizei wireCount = m_showBrushEntities ? m_wireIndexCount : m_worldWireIndexCount;
+            if (wireCount > 0) {
+                glDrawElements(GL_LINES, wireCount, GL_UNSIGNED_INT, 0);
+            }
             glBindVertexArray(0);
             lineShader.Unbind();
             glLineWidth(1.0f);
@@ -440,6 +509,7 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
         meshShader.SetInt("u_UseTexture", 0);
         meshShader.SetFloat("u_Alpha", 1.0f);
         meshShader.SetInt("u_EnableLighting", 1);
+        meshShader.SetFloat("u_Brightness", m_brightness);
 
         if (m_showWireframeOnSolid) {
             glEnable(GL_POLYGON_OFFSET_FILL);
@@ -449,6 +519,9 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
         glBindVertexArray(m_vao);
         for (const auto& batch : m_textureBatches) {
             if (m_showSkybox && batch.isSky) {
+                continue;
+            }
+            if (batch.isBrushEntity && !m_showBrushEntities) {
                 continue;
             }
             glDrawElements(GL_TRIANGLES, batch.indexCount, GL_UNSIGNED_INT, (const void*)(static_cast<uintptr_t>(batch.startIndex) * sizeof(uint32_t)));
@@ -468,7 +541,10 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
 
             glLineWidth(1.2f);
             glBindVertexArray(m_wireVao);
-            glDrawElements(GL_LINES, m_wireIndexCount, GL_UNSIGNED_INT, 0);
+            GLsizei wireCount = m_showBrushEntities ? m_wireIndexCount : m_worldWireIndexCount;
+            if (wireCount > 0) {
+                glDrawElements(GL_LINES, wireCount, GL_UNSIGNED_INT, 0);
+            }
             glBindVertexArray(0);
             lineShader.Unbind();
             glLineWidth(1.0f);
@@ -500,7 +576,10 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
 
         glLineWidth(1.2f);
         glBindVertexArray(m_wireVao);
-        glDrawElements(GL_LINES, m_wireIndexCount, GL_UNSIGNED_INT, 0);
+        GLsizei wireCount = m_showBrushEntities ? m_wireIndexCount : m_worldWireIndexCount;
+        if (wireCount > 0) {
+            glDrawElements(GL_LINES, wireCount, GL_UNSIGNED_INT, 0);
+        }
         glBindVertexArray(0);
         lineShader.Unbind();
         glLineWidth(1.0f);
@@ -517,9 +596,18 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
         meshShader.SetInt("u_UseTexture", 0);
         meshShader.SetFloat("u_Alpha", 0.18f);
         meshShader.SetInt("u_EnableLighting", 1);
+        meshShader.SetFloat("u_Brightness", m_brightness);
 
         glBindVertexArray(m_vao);
-        glDrawElements(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, 0);
+        for (const auto& batch : m_textureBatches) {
+            if (m_showSkybox && batch.isSky) {
+                continue;
+            }
+            if (batch.isBrushEntity && !m_showBrushEntities) {
+                continue;
+            }
+            glDrawElements(GL_TRIANGLES, batch.indexCount, GL_UNSIGNED_INT, (const void*)(static_cast<uintptr_t>(batch.startIndex) * sizeof(uint32_t)));
+        }
         glBindVertexArray(0);
         meshShader.Unbind();
 
@@ -531,7 +619,10 @@ void BSPRenderer::Render(const Shader& meshShader, const Shader& lineShader, con
 
         glLineWidth(1.0f);
         glBindVertexArray(m_wireVao);
-        glDrawElements(GL_LINES, m_wireIndexCount, GL_UNSIGNED_INT, 0);
+        GLsizei wireCount = m_showBrushEntities ? m_wireIndexCount : m_worldWireIndexCount;
+        if (wireCount > 0) {
+            glDrawElements(GL_LINES, wireCount, GL_UNSIGNED_INT, 0);
+        }
         glBindVertexArray(0);
         lineShader.Unbind();
 

@@ -63,7 +63,7 @@ struct EditorPreferences {
     bool defaultWptCalcWayzones{true};
     int defaultBotType{0}; // 0: EBot, 1: SyPB, 2: YaPB, 3: PODBot
     int defaultGameMod{0}; // 0: Standard, 1: ZombiePlague, 2: Deathmatch
-    bool defaultShowWptDirection{false};
+    bool defaultShowWptDirection{true};
     bool defaultShowWptRadii{true};
     bool defaultShowWptConnections{true};
     float wptLineWidth{3.5f};
@@ -86,6 +86,7 @@ struct EditorPreferences {
     bool cameraSmoothFlight{true};
     float cameraSmoothFactor{12.0f};
     float cameraSpeedScrollStep{50.0f};
+    float viewportBrightness{1.0f}; // 0.2f to 3.0f (1.0f = default)
     int viewportBkgColor{0}; // 0: Modern Slate, 1: Deep Navy, 2: Warm Grey, 3: Hammer Classic
     int navigationPreset{0}; // 0: FPS Flycam (Default), 1: Blender Turntable, 2: Valve Hammer
 
@@ -191,6 +192,8 @@ struct EditorPreferences {
         cameraSmoothFlight = true;
         cameraSmoothFactor = 12.0f;
         cameraSpeedScrollStep = 50.0f;
+        defaultShowWptDirection = true;
+        viewportBrightness = 1.0f;
         viewportBkgColor = 0;
         navigationPreset = 0;
 
@@ -296,6 +299,7 @@ struct EditorPreferences {
                 else if (key == "cameraSmoothFlight") cameraSmoothFlight = (val == "1" || val == "true");
                 else if (key == "cameraSmoothFactor") cameraSmoothFactor = std::stof(val);
                 else if (key == "cameraSpeedScrollStep") cameraSpeedScrollStep = std::stof(val);
+                else if (key == "viewportBrightness") viewportBrightness = std::stof(val);
                 else if (key == "viewportBkgColor") viewportBkgColor = std::stoi(val);
                 else if (key == "navigationPreset") navigationPreset = std::stoi(val);
                 else if (key == "showConnectionValidity") showConnectionValidity = (val == "1" || val == "true");
@@ -397,6 +401,7 @@ struct EditorPreferences {
         file << "cameraSmoothFlight=" << (cameraSmoothFlight ? "1" : "0") << "\n";
         file << "cameraSmoothFactor=" << cameraSmoothFactor << "\n";
         file << "cameraSpeedScrollStep=" << cameraSpeedScrollStep << "\n";
+        file << "viewportBrightness=" << viewportBrightness << "\n";
         file << "viewportBkgColor=" << viewportBkgColor << "\n";
         file << "navigationPreset=" << navigationPreset << "\n";
         file << "showConnectionValidity=" << (showConnectionValidity ? "1" : "0") << "\n";

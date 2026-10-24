@@ -88,6 +88,7 @@ public:
     bool LoadNAV(const std::string& navPath);
     bool SaveNAV(const std::string& navPath = "");
     bool ExportNAVToOBJ(const std::string& filepath) const;
+    bool ExportBSPToOBJ(const std::string& filepath, bool exportTextures = true, bool visibleOnly = true) const;
     bool AutosaveNAV();
     void UpdateAutosave(float deltaTime);
     const std::string& GetLastAutosavePath() const { return m_lastAutosavePath; }
@@ -230,6 +231,9 @@ public:
 
     bool GetShowSkyWireframe() const { return m_bspRenderer.GetShowSkyWireframe(); }
     void SetShowSkyWireframe(bool show) { m_bspRenderer.SetShowSkyWireframe(show); }
+
+    float GetViewportBrightness() const { return m_prefs.viewportBrightness; }
+    void SetViewportBrightness(float b);
 
     SkyboxRenderer& GetSkyboxRenderer() { return m_skyboxRenderer; }
     const SkyboxRenderer& GetSkyboxRenderer() const { return m_skyboxRenderer; }
@@ -419,6 +423,52 @@ public:
         int entityIndex{-1};
     };
     std::vector<MapLandmark> GetMapLandmarks() const;
+
+    // Health Diagnostic & Linter
+    enum class DiagnosticSeverity {
+        Info = 0,
+        Warning = 1,
+        Error = 2
+    };
+
+    enum class DiagnosticTarget {
+        NavArea = 0,
+        Waypoint = 1,
+        General = 2
+    };
+
+    struct DiagnosticIssue {
+        DiagnosticSeverity severity{DiagnosticSeverity::Warning};
+        DiagnosticTarget target{DiagnosticTarget::NavArea};
+        uint32_t id{0};
+        Vector3 position{0.0f, 0.0f, 0.0f};
+        std::string title;
+        std::string details;
+        bool canAutoFix{false};
+    };
+
+    std::vector<DiagnosticIssue> RunDiagnostics() const;
+    bool AutoFixDiagnosticIssue(const DiagnosticIssue& issue, class CommandManager& cmdMgr);
+
+    // Tape Measure / Ruler Tool
+    struct RulerMeasurement {
+        bool active{false};
+        bool hasStart{false};
+        bool hasEnd{false};
+        Vector3 startPoint{0.0f, 0.0f, 0.0f};
+        Vector3 endPoint{0.0f, 0.0f, 0.0f};
+        float distance{0.0f};
+        float deltaXY{0.0f};
+        float deltaZ{0.0f};
+    };
+
+    bool IsRulerActive() const { return m_ruler.active; }
+    void SetRulerActive(bool active);
+    void ToggleRuler() { SetRulerActive(!m_ruler.active); }
+    const RulerMeasurement& GetRulerMeasurement() const { return m_ruler; }
+    void ClearRuler();
+    void OnRulerClick(const Vector3& worldHit);
+    void UpdateRulerHover(const Vector3& worldHit);
 
     // Autosave Crash & Recovery
     bool CheckAutosaveRecovery(std::string& outBakPath, std::string& outNavPath, int64_t* outBakAgeSec = nullptr) const;
@@ -1014,7 +1064,8 @@ private:
     std::mutex m_waypointTaskMutex;
     WaypointGraph::WaypointOptimizeStats m_lastOptimizeStats;
     WaypointGraph::WaypointParkourStats m_lastParkourStats;
-    WaypointGraph::WaypointAnalysisStats m_lastAnalysisStats;
+    // Ruler Tool State
+    RulerMeasurement m_ruler;
 
     void PostGenerateOptimize();
 };

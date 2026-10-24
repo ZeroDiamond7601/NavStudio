@@ -42,10 +42,12 @@ uniform sampler2D u_DiffuseTexture;
 uniform float u_Alpha;
 uniform int u_EnableLighting;
 uniform vec3 u_CameraPos;
+uniform float u_Brightness;
 
 out vec4 FragColor;
 
 void main() {
+    float bright = (u_Brightness > 0.01) ? u_Brightness : 1.0;
     vec4 col = vColor * u_BaseColor;
     if (u_UseTexture == 1) {
         vec4 texCol = texture(u_DiffuseTexture, vTexCoord);
@@ -80,19 +82,19 @@ void main() {
         float spec = pow(max(dot(norm, halfDir), 0.0), 32.0);
         vec3 specular = vec3(0.18) * spec;
 
-        vec3 totalLighting = ambient + keyLight + fillLight + specular;
+        vec3 totalLighting = (ambient + keyLight + fillLight + specular) * bright;
         vec3 finalRgb = col.rgb * totalLighting;
 
         // Distance depth cueing
         float fogStart = 2000.0;
         float fogEnd = 12000.0;
         float fogFactor = clamp((vDepth - fogStart) / (fogEnd - fogStart), 0.0, 0.55);
-        vec3 fogColor = vec3(0.12, 0.12, 0.14);
+        vec3 fogColor = vec3(0.12, 0.12, 0.14) * bright;
         finalRgb = mix(finalRgb, fogColor, fogFactor);
 
         FragColor = vec4(finalRgb, col.a * u_Alpha);
     } else {
-        FragColor = vec4(col.rgb, col.a * u_Alpha);
+        FragColor = vec4(col.rgb * bright, col.a * u_Alpha);
     }
 }
 )";

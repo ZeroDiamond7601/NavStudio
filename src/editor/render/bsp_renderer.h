@@ -28,6 +28,7 @@ struct BSPTextureBatch {
     GLsizei indexCount{0};
     bool isTransparent{false};
     bool isSky{false};
+    bool isBrushEntity{false};
 };
 
 class BSPRenderer {
@@ -54,6 +55,12 @@ public:
     bool GetShowSkyWireframe() const { return m_showSkyWireframe; }
     void SetShowSkyWireframe(bool show) { m_showSkyWireframe = show; }
 
+    bool GetShowBrushEntities() const { return m_showBrushEntities; }
+    void SetShowBrushEntities(bool show) { m_showBrushEntities = show; }
+
+    float GetBrightness() const { return m_brightness; }
+    void SetBrightness(float b) { m_brightness = std::clamp(b, 0.1f, 3.0f); }
+
 private:
     void GenerateBuffers(const std::vector<BSPVertex>& vertices, const std::vector<uint32_t>& indices);
     void GenerateWireframeBuffers(const std::vector<BSPVertex>& vertices, const std::vector<uint32_t>& lineIndices);
@@ -68,6 +75,7 @@ private:
     GLuint m_wireVbo;
     GLuint m_wireEbo;
     GLsizei m_wireIndexCount;
+    GLsizei m_worldWireIndexCount;
 
     GLuint m_skyWireVao;
     GLuint m_skyWireVbo;
@@ -80,6 +88,8 @@ private:
     bool m_showWireframeOnSolid;
     bool m_showSkybox;
     bool m_showSkyWireframe;
+    bool m_showBrushEntities;
+    float m_brightness{1.0f};
     size_t m_faceCount;
 };
 

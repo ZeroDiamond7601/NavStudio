@@ -347,9 +347,9 @@ EditorEntity* EntityRenderer::GetEntity(int index) {
     return &m_entities[index];
 }
 
-bool EntityRenderer::IsEntityVisible(const EditorEntity& ent) const {
+bool EntityRenderer::IsCategoryVisible(EntityCategory cat) const {
     if (!m_showEntities) return false;
-    switch (ent.category) {
+    switch (cat) {
         case ENT_CAT_SPAWN_CT:
         case ENT_CAT_SPAWN_T:
         case ENT_CAT_SPAWN_VIP:
@@ -360,6 +360,7 @@ bool EntityRenderer::IsEntityVisible(const EditorEntity& ent) const {
         case ENT_CAT_OBJECTIVE_BUYZONE:
             return m_showObjectives;
         case ENT_CAT_LIGHT:
+        case ENT_CAT_SOUND:
             return m_showLights;
         case ENT_CAT_ITEM:
             return m_showItems;
@@ -371,6 +372,11 @@ bool EntityRenderer::IsEntityVisible(const EditorEntity& ent) const {
             return true;
     }
 }
+
+bool EntityRenderer::IsEntityVisible(const EditorEntity& ent) const {
+    return IsCategoryVisible(ent.category);
+}
+
 
 bool EntityRenderer::BuildFromBSP(const BSPFile& bsp) {
     Clear();
@@ -512,68 +518,87 @@ bool EntityRenderer::BuildFromBSP(const BSPFile& bsp) {
         m_entities.push_back(ent);
     }
 
-    // 2. Generate 3D meshes for entities
+    // 2. Generate 3D meshes for entities — iterate category by category so we
+    //    can record exact draw ranges and cull categories at render time.
     std::vector<BSPVertex> solidVerts;
     std::vector<uint32_t> solidIndices;
 
     std::vector<BSPVertex> wireVerts;
     std::vector<uint32_t> wireIndices;
 
-    for (const auto& ent : m_entities) {
-        Vector4 wireCol(1.0f, 1.0f, 1.0f, 0.85f);
-        wireCol.x = std::min(1.0f, ent.color.x * 1.3f);
-        wireCol.y = std::min(1.0f, ent.color.y * 1.3f);
-        wireCol.z = std::min(1.0f, ent.color.z * 1.3f);
+    // Reset category ranges
+    for (int c = 0; c < ENT_CAT_COUNT; ++c) {
+        m_categoryRanges[c] = CategoryDrawRange{};
+    }
 
-        if (ent.category == ENT_CAT_SPAWN_CT || ent.category == ENT_CAT_SPAWN_T || ent.category == ENT_CAT_SPAWN_VIP || ent.category == ENT_CAT_OBJECTIVE_HOSTAGE) {
-            // Humanoid player hull (Torso box + Head box + Forward viewing arrow)
-            Vector3 torsoMin = ent.origin + Vector3(-16.0f, -16.0f, -36.0f);
-            Vector3 torsoMax = ent.origin + Vector3(16.0f, 16.0f, 18.0f);
-            AddBoxVertices(solidVerts, solidIndices, wireVerts, wireIndices, torsoMin, torsoMax, ent.color, wireCol);
+    // Group entities by category and emit geometry, recording index ranges.
+    for (int cat = 0; cat < ENT_CAT_COUNT; ++cat) {
+        GLsizei solidStart = static_cast<GLsizei>(solidIndices.size());
+        GLsizei wireStart  = static_cast<GLsizei>(wireIndices.size());
 
-            // Head box
-            Vector3 headMin = ent.origin + Vector3(-7.0f, -7.0f, 20.0f);
-            Vector3 headMax = ent.origin + Vector3(7.0f, 7.0f, 34.0f);
-            Vector4 headColor = ent.color;
-            headColor.x = std::min(1.0f, headColor.x * 1.15f);
-            headColor.y = std::min(1.0f, headColor.y * 1.15f);
-            headColor.z = std::min(1.0f, headColor.z * 1.15f);
-            AddBoxVertices(solidVerts, solidIndices, wireVerts, wireIndices, headMin, headMax, headColor, wireCol);
+        for (const auto& ent : m_entities) {
+            if (static_cast<int>(ent.category) != cat) continue;
 
-            // Forward viewing arrow
-            Vector3 arrowOrigin = ent.origin + Vector3(0.0f, 0.0f, 6.0f);
-            AddDirectionPointer(solidVerts, solidIndices, wireVerts, wireIndices, arrowOrigin, ent.yaw, 30.0f, ent.color);
-        } else if (ent.category == ENT_CAT_LIGHT || ent.category == ENT_CAT_SOUND) {
-            // Octahedron / Diamond archetype
-            AddOctahedron(solidVerts, solidIndices, wireVerts, wireIndices, ent.origin, 12.0f, 12.0f, 14.0f, ent.color, wireCol);
+            Vector4 wireCol(1.0f, 1.0f, 1.0f, 0.85f);
+            wireCol.x = std::min(1.0f, ent.color.x * 1.3f);
+            wireCol.y = std::min(1.0f, ent.color.y * 1.3f);
+            wireCol.z = std::min(1.0f, ent.color.z * 1.3f);
 
-            // Spotlight directional ray
-            if (ent.classname == "light_spot") {
-                AddDirectionPointer(solidVerts, solidIndices, wireVerts, wireIndices, ent.origin, ent.yaw, 36.0f, ent.color);
-            }
-        } else if (ent.category == ENT_CAT_OBJECTIVE_BOMB) {
-            if (ent.isBrush) {
-                AddBoxVertices(solidVerts, solidIndices, wireVerts, wireIndices, ent.worldMins, ent.worldMaxs, ent.color, wireCol);
+            if (ent.category == ENT_CAT_SPAWN_CT || ent.category == ENT_CAT_SPAWN_T || ent.category == ENT_CAT_SPAWN_VIP || ent.category == ENT_CAT_OBJECTIVE_HOSTAGE) {
+                // Humanoid player hull (Torso box + Head box + Forward viewing arrow)
+                Vector3 torsoMin = ent.origin + Vector3(-16.0f, -16.0f, -36.0f);
+                Vector3 torsoMax = ent.origin + Vector3(16.0f, 16.0f, 18.0f);
+                AddBoxVertices(solidVerts, solidIndices, wireVerts, wireIndices, torsoMin, torsoMax, ent.color, wireCol);
+
+                // Head box
+                Vector3 headMin = ent.origin + Vector3(-7.0f, -7.0f, 20.0f);
+                Vector3 headMax = ent.origin + Vector3(7.0f, 7.0f, 34.0f);
+                Vector4 headColor = ent.color;
+                headColor.x = std::min(1.0f, headColor.x * 1.15f);
+                headColor.y = std::min(1.0f, headColor.y * 1.15f);
+                headColor.z = std::min(1.0f, headColor.z * 1.15f);
+                AddBoxVertices(solidVerts, solidIndices, wireVerts, wireIndices, headMin, headMax, headColor, wireCol);
+
+                // Forward viewing arrow
+                Vector3 arrowOrigin = ent.origin + Vector3(0.0f, 0.0f, 6.0f);
+                AddDirectionPointer(solidVerts, solidIndices, wireVerts, wireIndices, arrowOrigin, ent.yaw, 30.0f, ent.color);
+            } else if (ent.category == ENT_CAT_LIGHT || ent.category == ENT_CAT_SOUND) {
+                // Octahedron / Diamond archetype
+                AddOctahedron(solidVerts, solidIndices, wireVerts, wireIndices, ent.origin, 12.0f, 12.0f, 14.0f, ent.color, wireCol);
+
+                // Spotlight directional ray
+                if (ent.classname == "light_spot") {
+                    AddDirectionPointer(solidVerts, solidIndices, wireVerts, wireIndices, ent.origin, ent.yaw, 36.0f, ent.color);
+                }
+            } else if (ent.category == ENT_CAT_OBJECTIVE_BOMB) {
+                if (ent.isBrush) {
+                    AddBoxVertices(solidVerts, solidIndices, wireVerts, wireIndices, ent.worldMins, ent.worldMaxs, ent.color, wireCol);
+                } else {
+                    AddOctahedron(solidVerts, solidIndices, wireVerts, wireIndices, ent.origin, 16.0f, 16.0f, 18.0f, ent.color, wireCol);
+                }
+            } else if (ent.category == ENT_CAT_ITEM) {
+                // Armoury ammo crate / item marker
+                Vector3 boxMin = ent.origin + Vector3(-14.0f, -14.0f, 0.0f);
+                Vector3 boxMax = ent.origin + Vector3(14.0f, 14.0f, 14.0f);
+                AddBoxVertices(solidVerts, solidIndices, wireVerts, wireIndices, boxMin, boxMax, ent.color, wireCol);
+
+                // Diamond on top
+                Vector3 topDiamond = ent.origin + Vector3(0.0f, 0.0f, 24.0f);
+                AddOctahedron(solidVerts, solidIndices, wireVerts, wireIndices, topDiamond, 7.0f, 7.0f, 9.0f, ent.color, wireCol);
             } else {
-                AddOctahedron(solidVerts, solidIndices, wireVerts, wireIndices, ent.origin, 16.0f, 16.0f, 18.0f, ent.color, wireCol);
-            }
-        } else if (ent.category == ENT_CAT_ITEM) {
-            // Armoury ammo crate / item marker
-            Vector3 boxMin = ent.origin + Vector3(-14.0f, -14.0f, 0.0f);
-            Vector3 boxMax = ent.origin + Vector3(14.0f, 14.0f, 14.0f);
-            AddBoxVertices(solidVerts, solidIndices, wireVerts, wireIndices, boxMin, boxMax, ent.color, wireCol);
+                // Standard entity bounding box (triggers, brushes, other)
+                AddBoxVertices(solidVerts, solidIndices, wireVerts, wireIndices, ent.worldMins, ent.worldMaxs, ent.color, wireCol);
 
-            // Diamond on top
-            Vector3 topDiamond = ent.origin + Vector3(0.0f, 0.0f, 24.0f);
-            AddOctahedron(solidVerts, solidIndices, wireVerts, wireIndices, topDiamond, 7.0f, 7.0f, 9.0f, ent.color, wireCol);
-        } else {
-            // Standard entity bounding box
-            AddBoxVertices(solidVerts, solidIndices, wireVerts, wireIndices, ent.worldMins, ent.worldMaxs, ent.color, wireCol);
-
-            if (ent.yaw != 0.0f && !ent.isBrush) {
-                AddDirectionPointer(solidVerts, solidIndices, wireVerts, wireIndices, ent.origin, ent.yaw, 22.0f, ent.color);
+                if (ent.yaw != 0.0f && !ent.isBrush) {
+                    AddDirectionPointer(solidVerts, solidIndices, wireVerts, wireIndices, ent.origin, ent.yaw, 22.0f, ent.color);
+                }
             }
         }
+
+        m_categoryRanges[cat].solidFirst = solidStart;
+        m_categoryRanges[cat].solidCount = static_cast<GLsizei>(solidIndices.size()) - solidStart;
+        m_categoryRanges[cat].wireFirst  = wireStart;
+        m_categoryRanges[cat].wireCount  = static_cast<GLsizei>(wireIndices.size()) - wireStart;
     }
 
     if (!solidIndices.empty()) {
@@ -772,7 +797,7 @@ void EntityRenderer::Render(
 
     Matrix4 modelMat = Matrix4::MakeIdentity();
 
-    // 1. Draw solid entities
+    // 1. Draw solid entities — per category so hidden categories are culled at draw-time
     if (m_solidVao != 0 && m_solidIndexCount > 0) {
         meshShader.Bind();
         meshShader.SetMat4("u_MVP", mvp);
@@ -789,11 +814,18 @@ void EntityRenderer::Render(
         glDepthMask(GL_TRUE);
 
         glBindVertexArray(m_solidVao);
-        glDrawElements(GL_TRIANGLES, m_solidIndexCount, GL_UNSIGNED_INT, nullptr);
+        for (int cat = 0; cat < ENT_CAT_COUNT; ++cat) {
+            if (!IsCategoryVisible(static_cast<EntityCategory>(cat))) continue;
+            const auto& r = m_categoryRanges[cat];
+            if (r.solidCount > 0) {
+                const void* offset = reinterpret_cast<const void*>(r.solidFirst * sizeof(uint32_t));
+                glDrawElements(GL_TRIANGLES, r.solidCount, GL_UNSIGNED_INT, offset);
+            }
+        }
         glBindVertexArray(0);
     }
 
-    // 2. Draw wireframe outlines for entities
+    // 2. Draw wireframe outlines for entities — per category
     if (m_wireVao != 0 && m_wireIndexCount > 0) {
         lineShader.Bind();
         lineShader.SetMat4("u_MVP", mvp);
@@ -801,12 +833,20 @@ void EntityRenderer::Render(
 
         glLineWidth(1.5f);
         glBindVertexArray(m_wireVao);
-        glDrawElements(GL_LINES, m_wireIndexCount, GL_UNSIGNED_INT, nullptr);
+        for (int cat = 0; cat < ENT_CAT_COUNT; ++cat) {
+            if (!IsCategoryVisible(static_cast<EntityCategory>(cat))) continue;
+            const auto& r = m_categoryRanges[cat];
+            if (r.wireCount > 0) {
+                const void* offset = reinterpret_cast<const void*>(r.wireFirst * sizeof(uint32_t));
+                glDrawElements(GL_LINES, r.wireCount, GL_UNSIGNED_INT, offset);
+            }
+        }
         glBindVertexArray(0);
     }
 
+
     // 3. Draw Target Connections (Trigger -> Target lines)
-    if (m_showTargetLines && m_targetLineVao != 0 && m_targetLineIndexCount > 0) {
+    if (m_showTargetLines && m_showTriggers && m_targetLineVao != 0 && m_targetLineIndexCount > 0) {
         lineShader.Bind();
         lineShader.SetMat4("u_MVP", mvp);
         lineShader.SetVec4("u_Color", 1.0f, 1.0f, 1.0f, 1.0f);
