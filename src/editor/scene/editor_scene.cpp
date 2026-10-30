@@ -791,7 +791,7 @@ bool EditorScene::ExportBSPToOBJ(const std::string& filepath, bool exportTexture
             std::string cleanMat = SanitizeOBJMaterialName(origTex);
             textureMap[cleanMat] = origTex;
 
-            const dtexinfo_t* ti = m_bsp->GetTexInfo(fi);
+            const texinfo_t* ti = m_bsp->GetTexInfo(fi);
             float texW = 64.0f, texH = 64.0f;
             LoadedTextureInfo tInfo;
             if (m_textureManager.GetTextureInfo(origTex, tInfo) && tInfo.width > 0 && tInfo.height > 0) {
