@@ -602,7 +602,6 @@ bool EditorScene::StartAsyncAutoAnalyzeWaypoints() {
 
         {
             std::lock_guard<std::mutex> lock(m_waypointTaskMutex);
-            m_lastAnalysisStats = stats;
             m_waypointTaskProgress.durationSeconds = 0.0;
             m_waypointTaskProgress.resultSummary = "Waypoint Analysis: " + std::to_string(stats.totalModified) + " nodes updated (" +
                 std::to_string(stats.crouchAssigned) + " crouch, " +
