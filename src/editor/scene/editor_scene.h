@@ -503,7 +503,7 @@ public:
     void SetHidingSpotFlags(uint32_t areaId, uint32_t spotId, uint8_t flags);
 
     // Mesh Diagnostics ("Mesh Doctor")
-    enum class DiagnosticSeverity {
+    enum class MeshDiagnosticSeverity {
         DiagError = 0,
         DiagWarning,
         DiagInfo
@@ -518,8 +518,8 @@ public:
         ZeroDimension
     };
 
-    struct DiagnosticIssue {
-        DiagnosticSeverity severity{DiagnosticSeverity::DiagWarning};
+    struct MeshDiagnosticIssue {
+        MeshDiagnosticSeverity severity{MeshDiagnosticSeverity::DiagWarning};
         DiagnosticType type{DiagnosticType::ImpassableStep};
         uint32_t areaId{0};
         Vector3 location{0.0f, 0.0f, 0.0f};
@@ -529,7 +529,7 @@ public:
     };
 
     void RunDiagnostics();
-    const std::vector<DiagnosticIssue>& GetDiagnostics() const { return m_diagnostics; }
+    const std::vector<MeshDiagnosticIssue>& GetDiagnostics() const { return m_diagnostics; }
     void ClearDiagnostics() { m_diagnostics.clear(); }
     bool FixDiagnosticIssue(size_t index, class CommandManager& cmdMgr);
     uint32_t GetDiagnosticHighlightArea() const { return m_diagnosticHighlightAreaId; }
@@ -989,7 +989,7 @@ private:
     bool m_clearanceCrouch{false};
 
     // Diagnostics & Ladders state
-    std::vector<DiagnosticIssue> m_diagnostics;
+    std::vector<MeshDiagnosticIssue> m_diagnostics;
     uint32_t m_diagnosticHighlightAreaId{0};
     uint32_t m_selectedLadderId{0};
 

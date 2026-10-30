@@ -6719,7 +6719,7 @@ void EditorUI::RenderDiagnosticsModal(EditorScene& scene, Camera& camera, Comman
         const auto& issues = scene.GetDiagnostics();
         size_t errCount = 0, warnCount = 0;
         for (const auto& is : issues) {
-            if (is.severity == EditorScene::DiagnosticSeverity::DiagError) ++errCount;
+            if (is.severity == EditorScene::MeshDiagnosticSeverity::DiagError) ++errCount;
             else ++warnCount;
         }
 
@@ -6758,7 +6758,7 @@ void EditorUI::RenderDiagnosticsModal(EditorScene& scene, Camera& camera, Comman
                     ImGui::TableNextRow();
 
                     ImGui::TableSetColumnIndex(0);
-                    if (is.severity == EditorScene::DiagnosticSeverity::DiagError) {
+                    if (is.severity == EditorScene::MeshDiagnosticSeverity::DiagError) {
                         ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "[Error]");
                     } else {
                         ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "[Warn]");

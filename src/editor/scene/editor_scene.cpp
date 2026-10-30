@@ -744,7 +744,8 @@ bool EditorScene::ExportBSPToOBJ(const std::string& filepath, bool exportTexture
     }
 
     std::vector<Vector3> allVerts;
-    std::vector<Vector2> allUVs;
+    struct OBJUV { float x, y; };
+    std::vector<OBJUV> allUVs;
 
     struct OBJFace {
         std::string group;
@@ -811,7 +812,7 @@ bool EditorScene::ExportBSPToOBJ(const std::string& filepath, bool exportTexture
                     float t = poly[vi].x * ti->vecs[1][0] + poly[vi].y * ti->vecs[1][1] + poly[vi].z * ti->vecs[1][2] + ti->vecs[1][3];
                     float u = s / texW;
                     float v = 1.0f - (t / texH);
-                    allUVs.push_back(Vector2(u, v));
+                    allUVs.push_back({u, v});
                     f.uvIndices.push_back(static_cast<int>(allUVs.size()));
                 }
             }
@@ -4749,17 +4750,17 @@ void EditorScene::RunDiagnostics() {
                 float dz = toZ - fromZ;
 
                 if (dz > 18.0f && !area->HasAttributes(NAV_ATTR_JUMP)) {
-                    DiagnosticIssue issue;
+                    MeshDiagnosticIssue issue;
                     issue.areaId = fromId;
                     issue.location = area->GetCenter();
                     if (dz > 45.0f) {
-                        issue.severity = DiagnosticSeverity::DiagError;
+                        issue.severity = MeshDiagnosticSeverity::DiagError;
                         issue.type = DiagnosticType::ImpassableStep;
                         issue.title = "Impassable Jump (" + std::to_string(static_cast<int>(dz)) + "u)";
                         issue.description = "Step to Area #" + std::to_string(neighbor->GetID()) + " exceeds max player jump (45u). Requires ladder.";
                         issue.fixActionName = "Add Ladder";
                     } else {
-                        issue.severity = DiagnosticSeverity::DiagWarning;
+                        issue.severity = MeshDiagnosticSeverity::DiagWarning;
                         issue.type = DiagnosticType::ImpassableStep;
                         issue.title = "Step Requires Jump (" + std::to_string(static_cast<int>(dz)) + "u)";
                         issue.description = "Step to Area #" + std::to_string(neighbor->GetID()) + " is > 18u and missing JUMP flag.";
@@ -4785,8 +4786,8 @@ void EditorScene::RunDiagnostics() {
         }
 
         if (totalAdj == 0 && !hasIncoming) {
-            DiagnosticIssue issue;
-            issue.severity = DiagnosticSeverity::DiagWarning;
+            MeshDiagnosticIssue issue;
+            issue.severity = MeshDiagnosticSeverity::DiagWarning;
             issue.type = DiagnosticType::OrphanArea;
             issue.areaId = fromId;
             issue.location = area->GetCenter();
@@ -4796,8 +4797,8 @@ void EditorScene::RunDiagnostics() {
             m_diagnostics.push_back(issue);
         } else if (totalAdj == 0 && hasIncoming) {
             // 3. Trap area (incoming > 0, outgoing == 0)
-            DiagnosticIssue issue;
-            issue.severity = DiagnosticSeverity::DiagWarning;
+            MeshDiagnosticIssue issue;
+            issue.severity = MeshDiagnosticSeverity::DiagWarning;
             issue.type = DiagnosticType::TrapArea;
             issue.areaId = fromId;
             issue.location = area->GetCenter();
@@ -4816,8 +4817,8 @@ void EditorScene::RunDiagnostics() {
             if (m_bsp->TraceWorld(start, end, HULL_POINT, &tr) && !tr.startsolid && !tr.allsolid && tr.fraction < 1.0f) {
                 float dist = 5.0f + tr.fraction * 67.0f;
                 if (dist > 0.0f && dist < 72.0f) {
-                    DiagnosticIssue issue;
-                    issue.severity = DiagnosticSeverity::DiagWarning;
+                    MeshDiagnosticIssue issue;
+                    issue.severity = MeshDiagnosticSeverity::DiagWarning;
                     issue.type = DiagnosticType::CrouchClearance;
                     issue.areaId = fromId;
                     issue.location = center;
@@ -4840,8 +4841,8 @@ void EditorScene::RunDiagnostics() {
                 if (!ent.GetOrigin(origin)) continue;
                 NavArea* nearArea = m_nav->GetGrid().GetNearestArea(origin, 150.0f);
                 if (!nearArea) {
-                    DiagnosticIssue issue;
-                    issue.severity = DiagnosticSeverity::DiagError;
+                    MeshDiagnosticIssue issue;
+                    issue.severity = MeshDiagnosticSeverity::DiagError;
                     issue.type = DiagnosticType::SpawnDisconnected;
                     issue.areaId = 0;
                     issue.location = origin;
@@ -4860,7 +4861,7 @@ void EditorScene::RunDiagnostics() {
 
 bool EditorScene::FixDiagnosticIssue(size_t index, CommandManager& cmdMgr) {
     if (index >= m_diagnostics.size()) return false;
-    const DiagnosticIssue& issue = m_diagnostics[index];
+    const MeshDiagnosticIssue& issue = m_diagnostics[index];
 
     if (issue.type == DiagnosticType::ImpassableStep && issue.areaId != 0) {
         NavArea* a = m_nav->GetAreaByID(issue.areaId);
