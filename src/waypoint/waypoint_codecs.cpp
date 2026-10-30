@@ -143,8 +143,10 @@ struct EBotLegacyPathOLD_200 {
 };
 static_assert(sizeof(EBotLegacyPathOLD_200) == 204, "EBotLegacyPathOLD_200 must be 204 bytes");
 
-// POD-Bot mm disk node structs (defined here so LoadSyPB can reference them)
-struct PODBotDiskNodeV6 {
+// POD-Bot mm disk node structs. PODBot's historical PATH record includes a
+// 32-bit next pointer in the serialized record size; retain that slot as
+// reserved data, but do not interpret it as waypoint data.
+struct PODBotDiskNodeV7 {
     int32_t pathNumber;
     int32_t flags;
     Vector3 origin;
@@ -155,11 +157,14 @@ struct PODBotDiskNodeV6 {
     float campEndY;
     int16_t index[8];
     uint16_t connectionFlags[8];
+    float connectionVelocity[8][3];
     int32_t distances[8];
+    uint32_t _reservedPointer;
 };
-static_assert(sizeof(PODBotDiskNodeV6) == 104, "PODBotDiskNodeV6 must be 104 bytes");
+static_assert(sizeof(PODBotDiskNodeV7) == 204, "PODBot v7 PATH disk record must be 204 bytes");
 
-struct PODBotDiskNodeV5 {
+struct PODBotDiskNodeV6 {
+    int32_t pathNumber;
     int32_t flags;
     Vector3 origin;
     float radius;
@@ -168,11 +173,46 @@ struct PODBotDiskNodeV5 {
     float campEndX;
     float campEndY;
     int16_t index[8];
-    uint16_t connectionFlags[8];
     int32_t distances[8];
+    uint32_t _reservedPointer;
 };
-static_assert(sizeof(PODBotDiskNodeV5) == 100, "PODBotDiskNodeV5 must be 100 bytes");
+static_assert(sizeof(PODBotDiskNodeV6) == 92, "PODBot v6 PATH disk record must be 92 bytes");
+
+struct PODBotDiskNodeV5 {
+    int32_t pathNumber;
+    int32_t flags;
+    Vector3 origin;
+    float radius;
+    float campStartX;
+    float campStartY;
+    float campEndX;
+    float campEndY;
+    int16_t index[4];
+    int32_t distances[4];
+    uint32_t _reservedPointer;
+};
+static_assert(sizeof(PODBotDiskNodeV5) == 68, "PODBot v5 PATH disk record must be 68 bytes");
 #pragma pack(pop)
+
+// POD-Bot-derived legacy formats store camp facing as a point in world space;
+// NavStudio stores it as yaw/pitch. These formats only store the horizontal
+// endpoint, so imported legacy pitch is zero.
+static void ImportLegacyCampDirection(WaypointNode& node, float targetX, float targetY) {
+    const float dx = targetX - node.origin.x;
+    const float dy = targetY - node.origin.y;
+    if (std::abs(dx) + std::abs(dy) > 0.001f) {
+        node.campYaw = std::atan2(dy, dx) * (180.0f / 3.14159265358979323846f);
+        if (node.campYaw < 0.0f) node.campYaw += 360.0f;
+    }
+    node.campPitch = 0.0f;
+}
+
+static void ExportLegacyCampDirection(const WaypointNode& node, float& targetX, float& targetY) {
+    constexpr float kLegacyCampDistance = 640.0f;
+    const float yaw = node.campYaw * (3.14159265358979323846f / 180.0f);
+    targetX = node.origin.x + std::cos(yaw) * kLegacyCampDistance;
+    targetY = node.origin.y + std::sin(yaw) * kLegacyCampDistance;
+}
 
 bool WaypointGraph::LoadEBot(const std::string& filepath) {
     FILE* f = std::fopen(filepath.c_str(), "rb");
@@ -226,7 +266,16 @@ bool WaypointGraph::LoadEBot(const std::string& filepath) {
             }
         }
 
-        bool is56 = (actualUncomp >= expectedUncomp56);
+        // LZSS streams written by older NavStudio builds may end up a few
+        // bytes short of the raw payload size. Pick the record layout closest
+        // to the decoded size instead of treating every short 56-byte stream
+        // as the packed 54-byte legacy format. The latter shifts every node
+        // after the first and makes imported waypoints appear at random places.
+        const size_t diff56 = actualUncomp > expectedUncomp56
+            ? actualUncomp - expectedUncomp56 : expectedUncomp56 - actualUncomp;
+        const size_t diff54 = actualUncomp > expectedUncomp54
+            ? actualUncomp - expectedUncomp54 : expectedUncomp54 - actualUncomp;
+        bool is56 = (diff56 <= diff54);
         const EBotDiskPath* diskPaths56 = reinterpret_cast<const EBotDiskPath*>(uncompData.data());
         const EBotDiskPath54* diskPaths54 = reinterpret_cast<const EBotDiskPath54*>(uncompData.data());
 
@@ -336,8 +385,7 @@ bool WaypointGraph::LoadEBot(const std::string& filepath) {
                 loadedNodes[i].origin = Vector3(diskPaths[i].originX, diskPaths[i].originY, diskPaths[i].originZ);
                 loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
                 loadedNodes[i].radius = diskPaths[i].radius;
-                loadedNodes[i].campYaw = diskPaths[i].campStartX;
-                loadedNodes[i].campPitch = diskPaths[i].campStartY;
+                ImportLegacyCampDirection(loadedNodes[i], diskPaths[i].campStartX, diskPaths[i].campStartY);
                 for (int c = 0; c < 8; ++c) {
                     int16_t rawIdx = diskPaths[i].index[c];
                     loadedNodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
@@ -354,8 +402,7 @@ bool WaypointGraph::LoadEBot(const std::string& filepath) {
                 loadedNodes[i].origin = Vector3(diskPaths[i].originX, diskPaths[i].originY, diskPaths[i].originZ);
                 loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
                 loadedNodes[i].radius = diskPaths[i].radius;
-                loadedNodes[i].campYaw = diskPaths[i].campStartX;
-                loadedNodes[i].campPitch = diskPaths[i].campStartY;
+                ImportLegacyCampDirection(loadedNodes[i], diskPaths[i].campStartX, diskPaths[i].campStartY);
                 for (int c = 0; c < 8; ++c) {
                     int16_t rawIdx = diskPaths[i].index[c];
                     loadedNodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
@@ -485,8 +532,7 @@ bool WaypointGraph::LoadSyPB(const std::string& filepath) {
             loadedNodes[i].origin = Vector3(diskPaths[i].originX, diskPaths[i].originY, diskPaths[i].originZ);
             loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
             loadedNodes[i].radius = diskPaths[i].radius;
-            loadedNodes[i].campYaw = diskPaths[i].campStartX;
-            loadedNodes[i].campPitch = diskPaths[i].campStartY;
+            ImportLegacyCampDirection(loadedNodes[i], diskPaths[i].campStartX, diskPaths[i].campStartY);
             for (int c = 0; c < 8; ++c) {
                 int16_t rawIdx = diskPaths[i].index[c];
                 loadedNodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
@@ -506,15 +552,14 @@ bool WaypointGraph::LoadSyPB(const std::string& filepath) {
             loadedNodes[i].origin = Vector3(diskPaths[i].originX, diskPaths[i].originY, diskPaths[i].originZ);
             loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
             loadedNodes[i].radius = diskPaths[i].radius;
-            loadedNodes[i].campYaw = diskPaths[i].campStartX;
-            loadedNodes[i].campPitch = diskPaths[i].campStartY;
+            ImportLegacyCampDirection(loadedNodes[i], diskPaths[i].campStartX, diskPaths[i].campStartY);
             for (int c = 0; c < 8; ++c) {
                 int16_t rawIdx = diskPaths[i].index[c];
                 loadedNodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
                 loadedNodes[i].connectionFlags[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? diskPaths[i].connectionFlags[c] : 0;
             }
         }
-    } else if (perNodeSz >= 104 || dataSz >= static_cast<long>(numPoints * sizeof(PODBotDiskNodeV6))) {
+    } else if (perNodeSz == sizeof(PODBotDiskNodeV6)) {
         std::vector<PODBotDiskNodeV6> diskPaths(numPoints);
         if (std::fread(diskPaths.data(), sizeof(PODBotDiskNodeV6), numPoints, f) != static_cast<size_t>(numPoints)) {
             std::fclose(f);
@@ -527,15 +572,14 @@ bool WaypointGraph::LoadSyPB(const std::string& filepath) {
             loadedNodes[i].origin = diskPaths[i].origin;
             loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
             loadedNodes[i].radius = diskPaths[i].radius;
-            loadedNodes[i].campYaw = diskPaths[i].campStartX;
-            loadedNodes[i].campPitch = diskPaths[i].campStartY;
+            ImportLegacyCampDirection(loadedNodes[i], diskPaths[i].campStartX, diskPaths[i].campStartY);
             for (int c = 0; c < 8; ++c) {
                 int16_t rawIdx = diskPaths[i].index[c];
                 loadedNodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
-                loadedNodes[i].connectionFlags[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? diskPaths[i].connectionFlags[c] : 0;
+                loadedNodes[i].connectionFlags[c] = 0;
             }
         }
-    } else if (perNodeSz >= 100 && dataSz >= static_cast<long>(numPoints * sizeof(PODBotDiskNodeV5))) {
+    } else if (perNodeSz == sizeof(PODBotDiskNodeV5)) {
         std::vector<PODBotDiskNodeV5> diskPaths(numPoints);
         if (std::fread(diskPaths.data(), sizeof(PODBotDiskNodeV5), numPoints, f) != static_cast<size_t>(numPoints)) {
             std::fclose(f);
@@ -548,12 +592,11 @@ bool WaypointGraph::LoadSyPB(const std::string& filepath) {
             loadedNodes[i].origin = diskPaths[i].origin;
             loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
             loadedNodes[i].radius = diskPaths[i].radius;
-            loadedNodes[i].campYaw = diskPaths[i].campStartX;
-            loadedNodes[i].campPitch = diskPaths[i].campStartY;
-            for (int c = 0; c < 8; ++c) {
+            ImportLegacyCampDirection(loadedNodes[i], diskPaths[i].campStartX, diskPaths[i].campStartY);
+            for (int c = 0; c < 4; ++c) {
                 int16_t rawIdx = diskPaths[i].index[c];
                 loadedNodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
-                loadedNodes[i].connectionFlags[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? diskPaths[i].connectionFlags[c] : 0;
+                loadedNodes[i].connectionFlags[c] = 0;
             }
         }
     } else {
@@ -576,8 +619,9 @@ bool WaypointGraph::SaveSyPB(const std::string& filepath, GameMod mod) {
 
     WaypointFileHeader hdr;
     std::memset(&hdr, 0, sizeof(hdr));
-    std::memcpy(hdr.magic, "SyPB!\0\0\0", 8);
-    hdr.fileVersion = 125;
+    // SyPB's .pwf uses the PODWAY! v7 header and SyPB Path layout.
+    std::memcpy(hdr.magic, "PODWAY!\0", 8);
+    hdr.fileVersion = 7;
     hdr.pointNumber = static_cast<int32_t>(m_nodes.size());
     std::strncpy(hdr.mapName, m_mapName.c_str(), 31);
     std::strncpy(hdr.author, m_author.c_str(), 31);
@@ -588,8 +632,8 @@ bool WaypointGraph::SaveSyPB(const std::string& filepath, GameMod mod) {
         idToIndex[m_nodes[i].id] = static_cast<int16_t>(i);
     }
 
-    std::vector<EBotLegacyPathOLD> diskPaths(m_nodes.size());
-    std::memset(diskPaths.data(), 0, diskPaths.size() * sizeof(EBotLegacyPathOLD));
+    std::vector<EBotLegacyPathOLD_200> diskPaths(m_nodes.size());
+    std::memset(diskPaths.data(), 0, diskPaths.size() * sizeof(EBotLegacyPathOLD_200));
 
     for (size_t i = 0; i < m_nodes.size(); ++i) {
         diskPaths[i].pathNumber = static_cast<int32_t>(i);
@@ -602,8 +646,9 @@ bool WaypointGraph::SaveSyPB(const std::string& filepath, GameMod mod) {
         diskPaths[i].originY = m_nodes[i].origin.y;
         diskPaths[i].originZ = m_nodes[i].origin.z;
         diskPaths[i].radius = m_nodes[i].radius;
-        diskPaths[i].campStartX = m_nodes[i].campYaw;
-        diskPaths[i].campStartY = m_nodes[i].campPitch;
+        ExportLegacyCampDirection(m_nodes[i], diskPaths[i].campStartX, diskPaths[i].campStartY);
+        diskPaths[i].campEndX = diskPaths[i].campStartX;
+        diskPaths[i].campEndY = diskPaths[i].campStartY;
 
         for (int c = 0; c < 8; ++c) {
             int16_t target = m_nodes[i].connections[c];
@@ -627,7 +672,7 @@ bool WaypointGraph::SaveSyPB(const std::string& filepath, GameMod mod) {
     if (!f) return false;
 
     std::fwrite(&hdr, 1, sizeof(hdr), f);
-    std::fwrite(diskPaths.data(), sizeof(EBotLegacyPathOLD), diskPaths.size(), f);
+    std::fwrite(diskPaths.data(), sizeof(EBotLegacyPathOLD_200), diskPaths.size(), f);
     std::fclose(f);
 
     m_loadedPath = filepath;
@@ -730,7 +775,8 @@ bool WaypointGraph::SaveYaPB(const std::string& filepath, GameMod mod) {
 
     WaypointFileHeader hdr;
     std::memset(&hdr, 0, sizeof(hdr));
-    std::memcpy(hdr.magic, "YaPB!\0\0\0", 8);
+    // YaPB's legacy PWF is the POD-Bot v7 record format.
+    std::memcpy(hdr.magic, "PODWAY!\0", 8);
     hdr.fileVersion = 7;
     hdr.pointNumber = static_cast<int32_t>(m_nodes.size());
     std::strncpy(hdr.mapName, m_mapName.c_str(), 31);
@@ -742,8 +788,10 @@ bool WaypointGraph::SaveYaPB(const std::string& filepath, GameMod mod) {
         idToIndex[m_nodes[i].id] = static_cast<int16_t>(i);
     }
 
-    std::vector<YaPBDiskPath> diskPaths(m_nodes.size());
+    std::vector<PODBotDiskNodeV7> diskPaths(m_nodes.size());
+    std::memset(diskPaths.data(), 0, diskPaths.size() * sizeof(PODBotDiskNodeV7));
     for (size_t i = 0; i < m_nodes.size(); ++i) {
+        diskPaths[i].pathNumber = static_cast<int32_t>(i);
         uint32_t f = m_nodes[i].flags;
         // In YaPB standard, translate zombie camp to standard camp
         if (f & WPT_FLAG_ZMHMCAMP) f |= WPT_FLAG_CAMP;
@@ -752,8 +800,9 @@ bool WaypointGraph::SaveYaPB(const std::string& filepath, GameMod mod) {
         diskPaths[i].flags = static_cast<int32_t>(f);
         diskPaths[i].origin = m_nodes[i].origin;
         diskPaths[i].radius = m_nodes[i].radius;
-        diskPaths[i].campPitch = m_nodes[i].campPitch;
-        diskPaths[i].campYaw = m_nodes[i].campYaw;
+        ExportLegacyCampDirection(m_nodes[i], diskPaths[i].campStartX, diskPaths[i].campStartY);
+        diskPaths[i].campEndX = diskPaths[i].campStartX;
+        diskPaths[i].campEndY = diskPaths[i].campStartY;
 
         for (int c = 0; c < 8; ++c) {
             int16_t target = m_nodes[i].connections[c];
@@ -766,23 +815,18 @@ bool WaypointGraph::SaveYaPB(const std::string& filepath, GameMod mod) {
             }
             diskPaths[i].index[c] = diskIdx;
             diskPaths[i].connectionFlags[c] = (diskIdx >= 0) ? m_nodes[i].connectionFlags[c] : 0;
+            if (diskIdx >= 0) {
+                Vector3 diff = m_nodes[diskIdx].origin - m_nodes[i].origin;
+                diskPaths[i].distances[c] = static_cast<int32_t>(diff.Length());
+            }
         }
-    }
-
-    std::vector<uint8_t> compressedBytes;
-    WaypointCompressor comp;
-    const uint8_t* rawBytes = reinterpret_cast<const uint8_t*>(diskPaths.data());
-    size_t rawSize = diskPaths.size() * sizeof(YaPBDiskPath);
-
-    if (!comp.Encode(rawBytes, rawSize, compressedBytes)) {
-        return false;
     }
 
     FILE* f = std::fopen(filepath.c_str(), "wb");
     if (!f) return false;
 
     std::fwrite(&hdr, 1, sizeof(hdr), f);
-    std::fwrite(compressedBytes.data(), 1, compressedBytes.size(), f);
+    std::fwrite(diskPaths.data(), sizeof(PODBotDiskNodeV7), diskPaths.size(), f);
     std::fclose(f);
 
     m_loadedPath = filepath;
@@ -822,10 +866,11 @@ bool WaypointGraph::LoadPODBot(const std::string& filepath) {
     size_t perNodeSz = (numPoints > 0) ? (dataSz / numPoints) : 0;
     std::vector<WaypointNode> loadedNodes(numPoints);
 
-    if (hdr.fileVersion == 7 || perNodeSz >= sizeof(EBotLegacyPathOLD) || dataSz >= static_cast<long>(numPoints * sizeof(EBotLegacyPathOLD))) {
+    if (hdr.fileVersion == 7 || perNodeSz == sizeof(PODBotDiskNodeV7) ||
+        dataSz == static_cast<long>(numPoints * sizeof(PODBotDiskNodeV7))) {
         // Version 7 legacy records
-        std::vector<EBotLegacyPathOLD> diskPaths(numPoints);
-        if (std::fread(diskPaths.data(), sizeof(EBotLegacyPathOLD), numPoints, f) != static_cast<size_t>(numPoints)) {
+        std::vector<PODBotDiskNodeV7> diskPaths(numPoints);
+        if (std::fread(diskPaths.data(), sizeof(PODBotDiskNodeV7), numPoints, f) != static_cast<size_t>(numPoints)) {
             std::fclose(f);
             return false;
         }
@@ -833,18 +878,18 @@ bool WaypointGraph::LoadPODBot(const std::string& filepath) {
 
         for (int i = 0; i < numPoints; ++i) {
             loadedNodes[i].id = static_cast<uint32_t>(i + 1);
-            loadedNodes[i].origin = Vector3(diskPaths[i].originX, diskPaths[i].originY, diskPaths[i].originZ);
+            loadedNodes[i].origin = diskPaths[i].origin;
             loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
             loadedNodes[i].radius = diskPaths[i].radius;
-            loadedNodes[i].campYaw = diskPaths[i].campStartX;
-            loadedNodes[i].campPitch = diskPaths[i].campStartY;
+            ImportLegacyCampDirection(loadedNodes[i], diskPaths[i].campStartX, diskPaths[i].campStartY);
             for (int c = 0; c < 8; ++c) {
                 int16_t rawIdx = diskPaths[i].index[c];
                 loadedNodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
                 loadedNodes[i].connectionFlags[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? diskPaths[i].connectionFlags[c] : 0;
             }
         }
-    } else if (perNodeSz >= sizeof(EBotLegacyPathOLD_200) && dataSz >= static_cast<long>(numPoints * sizeof(EBotLegacyPathOLD_200))) {
+    } else if (hdr.fileVersion < 7 && perNodeSz == sizeof(EBotLegacyPathOLD_200) &&
+               dataSz == static_cast<long>(numPoints * sizeof(EBotLegacyPathOLD_200))) {
         // Smaller legacy format
         std::vector<EBotLegacyPathOLD_200> diskPaths(numPoints);
         if (std::fread(diskPaths.data(), sizeof(EBotLegacyPathOLD_200), numPoints, f) != static_cast<size_t>(numPoints)) {
@@ -858,16 +903,16 @@ bool WaypointGraph::LoadPODBot(const std::string& filepath) {
             loadedNodes[i].origin = Vector3(diskPaths[i].originX, diskPaths[i].originY, diskPaths[i].originZ);
             loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
             loadedNodes[i].radius = diskPaths[i].radius;
-            loadedNodes[i].campYaw = diskPaths[i].campStartX;
-            loadedNodes[i].campPitch = diskPaths[i].campStartY;
+            ImportLegacyCampDirection(loadedNodes[i], diskPaths[i].campStartX, diskPaths[i].campStartY);
             for (int c = 0; c < 8; ++c) {
                 int16_t rawIdx = diskPaths[i].index[c];
                 loadedNodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
                 loadedNodes[i].connectionFlags[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? diskPaths[i].connectionFlags[c] : 0;
             }
         }
-    } else if (hdr.fileVersion == 6 || perNodeSz >= sizeof(PODBotDiskNodeV6) || dataSz >= static_cast<long>(numPoints * sizeof(PODBotDiskNodeV6))) {
-        // Version 6: 104 bytes per node
+    } else if (hdr.fileVersion == 6 || perNodeSz == sizeof(PODBotDiskNodeV6) ||
+               dataSz == static_cast<long>(numPoints * sizeof(PODBotDiskNodeV6))) {
+        // Version 6: PATH6 has 8 indices, distances, and no connection flags.
         std::vector<PODBotDiskNodeV6> diskPaths(numPoints);
         if (std::fread(diskPaths.data(), sizeof(PODBotDiskNodeV6), numPoints, f) != static_cast<size_t>(numPoints)) {
             std::fclose(f);
@@ -880,16 +925,15 @@ bool WaypointGraph::LoadPODBot(const std::string& filepath) {
             loadedNodes[i].origin = diskPaths[i].origin;
             loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
             loadedNodes[i].radius = diskPaths[i].radius;
-            loadedNodes[i].campYaw = diskPaths[i].campStartX;
-            loadedNodes[i].campPitch = diskPaths[i].campStartY;
+            ImportLegacyCampDirection(loadedNodes[i], diskPaths[i].campStartX, diskPaths[i].campStartY);
             for (int c = 0; c < 8; ++c) {
                 int16_t rawIdx = diskPaths[i].index[c];
                 loadedNodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
-                loadedNodes[i].connectionFlags[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? diskPaths[i].connectionFlags[c] : 0;
+                loadedNodes[i].connectionFlags[c] = 0;
             }
         }
     } else {
-        // Version 5: 100 bytes per node
+        // Version 5 has four connection slots.
         std::vector<PODBotDiskNodeV5> diskPaths(numPoints);
         if (std::fread(diskPaths.data(), sizeof(PODBotDiskNodeV5), numPoints, f) != static_cast<size_t>(numPoints)) {
             std::fclose(f);
@@ -902,12 +946,11 @@ bool WaypointGraph::LoadPODBot(const std::string& filepath) {
             loadedNodes[i].origin = diskPaths[i].origin;
             loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
             loadedNodes[i].radius = diskPaths[i].radius;
-            loadedNodes[i].campYaw = diskPaths[i].campStartX;
-            loadedNodes[i].campPitch = diskPaths[i].campStartY;
-            for (int c = 0; c < 8; ++c) {
+            ImportLegacyCampDirection(loadedNodes[i], diskPaths[i].campStartX, diskPaths[i].campStartY);
+            for (int c = 0; c < 4; ++c) {
                 int16_t rawIdx = diskPaths[i].index[c];
                 loadedNodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
-                loadedNodes[i].connectionFlags[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? diskPaths[i].connectionFlags[c] : 0;
+                loadedNodes[i].connectionFlags[c] = 0;
             }
         }
     }
@@ -951,8 +994,9 @@ bool WaypointGraph::SavePODBot(const std::string& filepath, GameMod mod) {
         diskPaths[i].flags = static_cast<int32_t>(f);
         diskPaths[i].origin = m_nodes[i].origin;
         diskPaths[i].radius = m_nodes[i].radius;
-        diskPaths[i].campStartX = m_nodes[i].campYaw;
-        diskPaths[i].campStartY = m_nodes[i].campPitch;
+        ExportLegacyCampDirection(m_nodes[i], diskPaths[i].campStartX, diskPaths[i].campStartY);
+        diskPaths[i].campEndX = diskPaths[i].campStartX;
+        diskPaths[i].campEndY = diskPaths[i].campStartY;
 
         for (int c = 0; c < 8; ++c) {
             int16_t target = m_nodes[i].connections[c];
@@ -964,7 +1008,6 @@ bool WaypointGraph::SavePODBot(const std::string& filepath, GameMod mod) {
                 }
             }
             diskPaths[i].index[c] = diskTarget;
-            diskPaths[i].connectionFlags[c] = (diskTarget >= 0) ? m_nodes[i].connectionFlags[c] : 0;
             if (diskTarget >= 0) {
                 Vector3 diff = m_nodes[diskTarget].origin - m_nodes[i].origin;
                 diskPaths[i].distances[c] = static_cast<int32_t>(diff.Length());
