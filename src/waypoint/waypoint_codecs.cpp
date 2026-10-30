@@ -105,11 +105,11 @@ struct EBotDiskPath54 {
 };
 static_assert(sizeof(EBotDiskPath54) == 54, "EBotDiskPath54 must be 54 bytes");
 
-// 204-byte legacy node (EBot legacy and POD-Bot / SyPB v7 standard)
+// Legacy node (EBot legacy and POD-Bot / SyPB v7 standard)
 struct EBotLegacyPathOLD {
     int32_t pathNumber;
     int32_t flags;
-    Vector3 origin;
+    float originX, originY, originZ;
     float radius;
     float campStartX;
     float campStartY;
@@ -117,15 +117,34 @@ struct EBotLegacyPathOLD {
     float campEndY;
     int16_t index[8];
     uint16_t connectionFlags[8];
-    Vector3 connectionVelocity[8];
+    float connectionVelocity[8][3];
     int32_t distances[8];
     uint32_t standVis;
     uint32_t crouchVis;
 };
-static_assert(sizeof(EBotLegacyPathOLD) == 204, "EBotLegacyPathOLD must be 204 bytes");
+static_assert(sizeof(EBotLegacyPathOLD) == 208, "EBotLegacyPathOLD must be 208 bytes");
 
-// 200-byte packed legacy node fallback
+// Smaller packed legacy node fallback
 struct EBotLegacyPathOLD_200 {
+    int32_t pathNumber;
+    int32_t flags;
+    float originX, originY, originZ;
+    float radius;
+    float campStartX;
+    float campStartY;
+    float campEndX;
+    float campEndY;
+    int16_t index[8];
+    uint16_t connectionFlags[8];
+    float connectionVelocity[8][3];
+    int32_t distances[8];
+    uint16_t standVis;
+    uint16_t crouchVis;
+};
+static_assert(sizeof(EBotLegacyPathOLD_200) == 204, "EBotLegacyPathOLD_200 must be 204 bytes");
+
+// POD-Bot mm disk node structs (defined here so LoadSyPB can reference them)
+struct PODBotDiskNodeV6 {
     int32_t pathNumber;
     int32_t flags;
     Vector3 origin;
@@ -136,12 +155,23 @@ struct EBotLegacyPathOLD_200 {
     float campEndY;
     int16_t index[8];
     uint16_t connectionFlags[8];
-    Vector3 connectionVelocity[8];
     int32_t distances[8];
-    uint16_t standVis;
-    uint16_t crouchVis;
 };
-static_assert(sizeof(EBotLegacyPathOLD_200) == 200, "EBotLegacyPathOLD_200 must be 200 bytes");
+static_assert(sizeof(PODBotDiskNodeV6) == 104, "PODBotDiskNodeV6 must be 104 bytes");
+
+struct PODBotDiskNodeV5 {
+    int32_t flags;
+    Vector3 origin;
+    float radius;
+    float campStartX;
+    float campStartY;
+    float campEndX;
+    float campEndY;
+    int16_t index[8];
+    uint16_t connectionFlags[8];
+    int32_t distances[8];
+};
+static_assert(sizeof(PODBotDiskNodeV5) == 100, "PODBotDiskNodeV5 must be 100 bytes");
 #pragma pack(pop)
 
 bool WaypointGraph::LoadEBot(const std::string& filepath) {
@@ -303,7 +333,7 @@ bool WaypointGraph::LoadEBot(const std::string& filepath) {
 
             for (int i = 0; i < numPoints; ++i) {
                 loadedNodes[i].id = static_cast<uint32_t>(i + 1);
-                loadedNodes[i].origin = diskPaths[i].origin;
+                loadedNodes[i].origin = Vector3(diskPaths[i].originX, diskPaths[i].originY, diskPaths[i].originZ);
                 loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
                 loadedNodes[i].radius = diskPaths[i].radius;
                 loadedNodes[i].campYaw = diskPaths[i].campStartX;
@@ -321,7 +351,7 @@ bool WaypointGraph::LoadEBot(const std::string& filepath) {
 
             for (int i = 0; i < numPoints; ++i) {
                 loadedNodes[i].id = static_cast<uint32_t>(i + 1);
-                loadedNodes[i].origin = diskPaths[i].origin;
+                loadedNodes[i].origin = Vector3(diskPaths[i].originX, diskPaths[i].originY, diskPaths[i].originZ);
                 loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
                 loadedNodes[i].radius = diskPaths[i].radius;
                 loadedNodes[i].campYaw = diskPaths[i].campStartX;
@@ -343,14 +373,6 @@ bool WaypointGraph::LoadEBot(const std::string& filepath) {
         m_activeBot = BotType::EBot;
         m_loadedPath = filepath;
         m_nodes = std::move(loadedNodes);
-        m_nextId = static_cast<uint32_t>(numPoints + 1);
-        return true;
-    }
-}
-                m_nodes[i].connections[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? static_cast<int16_t>(rawIdx + 1) : -1;
-                m_nodes[i].connectionFlags[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? diskPaths[i].connectionFlags[c] : 0;
-            }
-        }
         m_nextId = static_cast<uint32_t>(numPoints + 1);
         return true;
     }
@@ -450,7 +472,7 @@ bool WaypointGraph::LoadSyPB(const std::string& filepath) {
     size_t perNodeSz = (numPoints > 0) ? (dataSz / numPoints) : 0;
     std::vector<WaypointNode> loadedNodes(numPoints);
 
-    if (perNodeSz >= 204 || dataSz >= static_cast<long>(numPoints * sizeof(EBotLegacyPathOLD))) {
+    if (perNodeSz >= sizeof(EBotLegacyPathOLD) || dataSz >= static_cast<long>(numPoints * sizeof(EBotLegacyPathOLD))) {
         std::vector<EBotLegacyPathOLD> diskPaths(numPoints);
         if (std::fread(diskPaths.data(), sizeof(EBotLegacyPathOLD), numPoints, f) != static_cast<size_t>(numPoints)) {
             std::fclose(f);
@@ -460,7 +482,7 @@ bool WaypointGraph::LoadSyPB(const std::string& filepath) {
 
         for (int i = 0; i < numPoints; ++i) {
             loadedNodes[i].id = static_cast<uint32_t>(i + 1);
-            loadedNodes[i].origin = diskPaths[i].origin;
+            loadedNodes[i].origin = Vector3(diskPaths[i].originX, diskPaths[i].originY, diskPaths[i].originZ);
             loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
             loadedNodes[i].radius = diskPaths[i].radius;
             loadedNodes[i].campYaw = diskPaths[i].campStartX;
@@ -471,7 +493,7 @@ bool WaypointGraph::LoadSyPB(const std::string& filepath) {
                 loadedNodes[i].connectionFlags[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? diskPaths[i].connectionFlags[c] : 0;
             }
         }
-    } else if (perNodeSz >= 200 && dataSz >= static_cast<long>(numPoints * sizeof(EBotLegacyPathOLD_200))) {
+    } else if (perNodeSz >= sizeof(EBotLegacyPathOLD_200) && dataSz >= static_cast<long>(numPoints * sizeof(EBotLegacyPathOLD_200))) {
         std::vector<EBotLegacyPathOLD_200> diskPaths(numPoints);
         if (std::fread(diskPaths.data(), sizeof(EBotLegacyPathOLD_200), numPoints, f) != static_cast<size_t>(numPoints)) {
             std::fclose(f);
@@ -481,7 +503,7 @@ bool WaypointGraph::LoadSyPB(const std::string& filepath) {
 
         for (int i = 0; i < numPoints; ++i) {
             loadedNodes[i].id = static_cast<uint32_t>(i + 1);
-            loadedNodes[i].origin = diskPaths[i].origin;
+            loadedNodes[i].origin = Vector3(diskPaths[i].originX, diskPaths[i].originY, diskPaths[i].originZ);
             loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
             loadedNodes[i].radius = diskPaths[i].radius;
             loadedNodes[i].campYaw = diskPaths[i].campStartX;
@@ -576,7 +598,9 @@ bool WaypointGraph::SaveSyPB(const std::string& filepath, GameMod mod) {
             f &= ~(WPT_FLAG_ZMHMCAMP | WPT_FLAG_HMCAMPMESH | WPT_FLAG_ZOMBIEONLY | WPT_FLAG_HUMANONLY | WPT_FLAG_ZOMBIEPUSH | WPT_FLAG_HELICOPTER);
         }
         diskPaths[i].flags = static_cast<int32_t>(f);
-        diskPaths[i].origin = m_nodes[i].origin;
+        diskPaths[i].originX = m_nodes[i].origin.x;
+        diskPaths[i].originY = m_nodes[i].origin.y;
+        diskPaths[i].originZ = m_nodes[i].origin.z;
         diskPaths[i].radius = m_nodes[i].radius;
         diskPaths[i].campStartX = m_nodes[i].campYaw;
         diskPaths[i].campStartY = m_nodes[i].campPitch;
@@ -769,37 +793,6 @@ bool WaypointGraph::SaveYaPB(const std::string& filepath, GameMod mod) {
 
 // --- POD-Bot mm (.wpt) Codec ---
 
-#pragma pack(push, 1)
-struct PODBotDiskNodeV6 {
-    int32_t pathNumber;
-    int32_t flags;
-    Vector3 origin;
-    float radius;
-    float campStartX;
-    float campStartY;
-    float campEndX;
-    float campEndY;
-    int16_t index[8];
-    uint16_t connectionFlags[8];
-    int32_t distances[8];
-};
-static_assert(sizeof(PODBotDiskNodeV6) == 104, "PODBotDiskNodeV6 must be 104 bytes");
-
-struct PODBotDiskNodeV5 {
-    int32_t flags;
-    Vector3 origin;
-    float radius;
-    float campStartX;
-    float campStartY;
-    float campEndX;
-    float campEndY;
-    int16_t index[8];
-    uint16_t connectionFlags[8];
-    int32_t distances[8];
-};
-static_assert(sizeof(PODBotDiskNodeV5) == 100, "PODBotDiskNodeV5 must be 100 bytes");
-#pragma pack(pop)
-
 bool WaypointGraph::LoadPODBot(const std::string& filepath) {
     FILE* f = std::fopen(filepath.c_str(), "rb");
     if (!f) return false;
@@ -829,8 +822,8 @@ bool WaypointGraph::LoadPODBot(const std::string& filepath) {
     size_t perNodeSz = (numPoints > 0) ? (dataSz / numPoints) : 0;
     std::vector<WaypointNode> loadedNodes(numPoints);
 
-    if (hdr.fileVersion == 7 || perNodeSz >= 204 || dataSz >= static_cast<long>(numPoints * sizeof(EBotLegacyPathOLD))) {
-        // Version 7: 204 bytes per node
+    if (hdr.fileVersion == 7 || perNodeSz >= sizeof(EBotLegacyPathOLD) || dataSz >= static_cast<long>(numPoints * sizeof(EBotLegacyPathOLD))) {
+        // Version 7 legacy records
         std::vector<EBotLegacyPathOLD> diskPaths(numPoints);
         if (std::fread(diskPaths.data(), sizeof(EBotLegacyPathOLD), numPoints, f) != static_cast<size_t>(numPoints)) {
             std::fclose(f);
@@ -840,7 +833,7 @@ bool WaypointGraph::LoadPODBot(const std::string& filepath) {
 
         for (int i = 0; i < numPoints; ++i) {
             loadedNodes[i].id = static_cast<uint32_t>(i + 1);
-            loadedNodes[i].origin = diskPaths[i].origin;
+            loadedNodes[i].origin = Vector3(diskPaths[i].originX, diskPaths[i].originY, diskPaths[i].originZ);
             loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
             loadedNodes[i].radius = diskPaths[i].radius;
             loadedNodes[i].campYaw = diskPaths[i].campStartX;
@@ -851,8 +844,8 @@ bool WaypointGraph::LoadPODBot(const std::string& filepath) {
                 loadedNodes[i].connectionFlags[c] = (rawIdx >= 0 && rawIdx < numPoints && rawIdx != i) ? diskPaths[i].connectionFlags[c] : 0;
             }
         }
-    } else if (perNodeSz >= 200 && dataSz >= static_cast<long>(numPoints * sizeof(EBotLegacyPathOLD_200))) {
-        // Legacy 200-byte format
+    } else if (perNodeSz >= sizeof(EBotLegacyPathOLD_200) && dataSz >= static_cast<long>(numPoints * sizeof(EBotLegacyPathOLD_200))) {
+        // Smaller legacy format
         std::vector<EBotLegacyPathOLD_200> diskPaths(numPoints);
         if (std::fread(diskPaths.data(), sizeof(EBotLegacyPathOLD_200), numPoints, f) != static_cast<size_t>(numPoints)) {
             std::fclose(f);
@@ -862,7 +855,7 @@ bool WaypointGraph::LoadPODBot(const std::string& filepath) {
 
         for (int i = 0; i < numPoints; ++i) {
             loadedNodes[i].id = static_cast<uint32_t>(i + 1);
-            loadedNodes[i].origin = diskPaths[i].origin;
+            loadedNodes[i].origin = Vector3(diskPaths[i].originX, diskPaths[i].originY, diskPaths[i].originZ);
             loadedNodes[i].flags = static_cast<uint32_t>(diskPaths[i].flags);
             loadedNodes[i].radius = diskPaths[i].radius;
             loadedNodes[i].campYaw = diskPaths[i].campStartX;
